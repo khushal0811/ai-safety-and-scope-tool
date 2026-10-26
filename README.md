@@ -1,6 +1,5 @@
 # Safety and Scope Tool (SST) 🛡️🤖
-> **Empirical Evaluation and Safety Auditing of Large Language Model Recommendations in Penetration Testing Workflows**  
-> *COMP 4210: Ethical Hacking — Project Group 9*
+> **Empirical Evaluation and Safety Auditing of Large Language Model Recommendations in Penetration Testing Workflows**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)](https://fastapi.tiangolo.com/)
@@ -63,16 +62,12 @@ ai-safety-and-scope-tool/
 ├── scenarios/                # JSON scenario bank (Recon, Web, Network, etc.)
 ├── data/                     # Offline CVE snapshot, whitelists, signatures
 ├── experiments/              # Model benchmark logs & lab evaluation data
-├── docs/                     # Architecture diagrams, proposal, and report
+├── docs/                     # Architecture diagrams, specifications, and docs
 └── README.md
 ```
 
 ---
 
-## 👥 Authors (Group 9)
-- **Ish Panchal**
-- **Kriday Patel**
-- **Khushal Arora**
-- **Shikhar Raj**
+## 📄 License
 
-*Thompson Rivers University — COMP 4210 Ethical Hacking (Fall 2026)*
+This project is licensed under the [MIT License](LICENSE).
