@@ -16,10 +16,20 @@ const STATUS_LABEL: Record<TargetFinding['status'], { cls: string; label: string
   prohibited: { cls: 'tag--bad', label: 'prohibited' },
 };
 
-export function AuditResultView({ result, loading }: { result: AuditResult | null; loading: boolean }) {
+export function AuditResultView({
+  result,
+  loading,
+  onAuditAnother,
+  onResetAll,
+}: {
+  result: AuditResult | null;
+  loading: boolean;
+  onAuditAnother?: () => void;
+  onResetAll?: () => void;
+}) {
   if (loading) return <LoadingState />;
   if (!result) return <EmptyState />;
-  return <ResultBody result={result} />;
+  return <ResultBody result={result} onAuditAnother={onAuditAnother} onResetAll={onResetAll} />;
 }
 
 function EmptyState() {
@@ -45,7 +55,15 @@ function LoadingState() {
   );
 }
 
-function ResultBody({ result }: { result: AuditResult }) {
+function ResultBody({
+  result,
+  onAuditAnother,
+  onResetAll,
+}: {
+  result: AuditResult;
+  onAuditAnother?: () => void;
+  onResetAll?: () => void;
+}) {
   const Icon = VERDICT_ICON[result.verdict];
   const modelLabel = MODELS.find((m) => m.id === result.selected_model)?.label ?? result.selected_model;
   const uniqueTargets = useMemo(() => {
@@ -157,6 +175,21 @@ function ResultBody({ result }: { result: AuditResult }) {
               Demo mode: client-side preview of the deterministic engine. The authoritative FastAPI engine and Llama 3 rewriter
               arrive in Phases 2–3.
             </p>
+          ) : null}
+
+          {onAuditAnother || onResetAll ? (
+            <div className="card__actions" style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              {onResetAll ? (
+                <button className="btn btn--lg" onClick={onResetAll}>
+                  ← Start New Audit (Change Scope)
+                </button>
+              ) : null}
+              {onAuditAnother ? (
+                <button className="btn btn--primary btn--lg" style={{ flex: 1 }} onClick={onAuditAnother}>
+                  Audit Another Prompt in this Scope ⚡
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </section>

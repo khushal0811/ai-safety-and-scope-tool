@@ -106,6 +106,121 @@ button { font: inherit; color: inherit; }
   .workspace__col--sticky { position: static; }
 }
 
+/* ---------- Progressive Stepper Canvas (Gamma AI Style) ---------- */
+
+.canvas-container {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding-bottom: 80px;
+}
+
+.stepper-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 16px 0 32px;
+  flex-wrap: wrap;
+}
+
+.step-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.step-node:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.step-node--active {
+  border-color: var(--text);
+  color: var(--text);
+  background: var(--surface-sunken);
+  box-shadow: 0 0 0 1px var(--text);
+}
+.step-node--done {
+  border-color: var(--ok-bd);
+  color: var(--ok-fg);
+  background: var(--ok-bg);
+}
+.step-node__badge {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+}
+.step-node--active .step-node__badge {
+  background: var(--text);
+  color: var(--accent-contrast);
+  border-color: var(--text);
+}
+.step-node--done .step-node__badge {
+  background: var(--ok-fg);
+  color: #ffffff;
+  border-color: var(--ok-fg);
+}
+.step-connector {
+  color: var(--text-subtle);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.scope-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 22px;
+  box-shadow: var(--shadow);
+  animation: fadeIn 0.2s var(--ease);
+}
+.scope-banner__info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+}
+.card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.btn--lg {
+  height: 42px;
+  padding: 0 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.card--hero {
+  animation: rise 0.28s var(--ease);
+  box-shadow: var(--shadow-lg);
+}
+
 /* ---------- Nav ---------- */
 
 .nav {

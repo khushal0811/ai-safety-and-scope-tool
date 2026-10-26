@@ -14,27 +14,28 @@ interface Props {
   customText: string;
   onCustomTextChange: (t: string) => void;
   activeScope: RoeScope | null;
+  onContinue?: () => void;
 }
 
 const MAX_CHARS = MAX_ROE_BYTES; // conservative: 1 char >= 1 byte
 
 export function RoeSelector(p: Props) {
   return (
-    <section className="card" aria-labelledby="step1-title">
+    <section className="card card--hero" aria-labelledby="step1-title">
       <div className="card__header">
-        <span className="step-index">01</span>
+        <span className="step-index">STEP 01</span>
         <div>
-          <h2 className="card__title" id="step1-title">Define the scope</h2>
-          <p className="card__desc">Pick a preset or upload your Rules of Engagement.</p>
+          <h2 className="card__title" id="step1-title">Define Rules of Engagement (RoE)</h2>
+          <p className="card__desc">Choose an engagement preset or upload your client's scope document to define boundaries.</p>
         </div>
       </div>
       <div className="card__body">
         <div className="segmented" role="group" aria-label="Scope source">
           <button id="roe-mode-preset" className="segmented__btn" aria-pressed={p.mode === 'preset'} onClick={() => p.onModeChange('preset')}>
-            Presets
+            Pre-Built Scope Presets (Privacy Preserving)
           </button>
           <button id="roe-mode-custom" className="segmented__btn" aria-pressed={p.mode === 'custom'} onClick={() => p.onModeChange('custom')}>
-            Upload RoE
+            Upload Custom RoE (.md / .txt)
           </button>
         </div>
 
@@ -45,6 +46,28 @@ export function RoeSelector(p: Props) {
         )}
 
         {p.activeScope ? <ScopeSummary scope={p.activeScope} /> : null}
+
+        {p.onContinue ? (
+          <div className="card__actions">
+            <div className="muted" style={{ fontSize: 13 }}>
+              {p.activeScope ? (
+                <span>
+                  Locked on: <strong>{p.activeScope.name}</strong> ({p.activeScope.allowed_cidrs.join(', ')})
+                </span>
+              ) : (
+                'Select a preset or upload scope to continue'
+              )}
+            </div>
+            <button
+              id="confirm-scope-btn"
+              className="btn btn--primary btn--lg"
+              disabled={!p.activeScope}
+              onClick={p.onContinue}
+            >
+              Confirm Scope &amp; Continue to Prompt →
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );
