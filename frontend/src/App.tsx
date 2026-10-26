@@ -13,6 +13,7 @@ import { PromptComposer } from './components/PromptComposer';
 import { AuditResultView } from './components/AuditResultView';
 import { PastAuditsView } from './components/PastAuditsView';
 import { SettingsView } from './components/SettingsView';
+import { AuthLandingPage } from './components/AuthLandingPage';
 import { AuthModal } from './components/AuthModal';
 import { ShieldIcon } from './components/Icons';
 
@@ -32,6 +33,7 @@ export default function App() {
 
   // Authentication state
   const [user, setUser] = useState<UserProfile | null>(getStoredUser);
+  const [guestMode, setGuestMode] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   // Past Audits history state
@@ -63,6 +65,8 @@ export default function App() {
   function handleLogout() {
     setUser(null);
     saveUser(null);
+    setGuestMode(false);
+    setPage('studio');
   }
 
   function handleClearHistory() {
@@ -148,6 +152,18 @@ export default function App() {
     setResult(audit.result);
     setStep(3);
     setPage('studio');
+  }
+
+  // LANDING PAGE: If user is not authenticated and has not entered guest mode
+  if (!user && !guestMode) {
+    return (
+      <AuthLandingPage
+        onAuthenticated={handleLogin}
+        onContinueAsGuest={() => setGuestMode(true)}
+        theme={theme}
+        onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+      />
+    );
   }
 
   return (
