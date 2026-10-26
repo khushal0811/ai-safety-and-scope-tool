@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AuditResult } from './types/audit';
+import type { PastAudit } from './types/history';
+import type { UserProfile } from './types/user';
 import { ROE_PRESETS } from './data/presets';
 import { buildExamples, MODELS, type PromptExample } from './data/models';
 import { runAudit } from './services/auditService';
-import { NavBar } from './components/NavBar';
+import { getStoredUser, saveUser } from './lib/authStore';
+import { getPastAudits, savePastAudit, clearPastAudits } from './lib/historyStore';
+import { NavBar, type AppPage } from './components/NavBar';
 import { RoeSelector, type RoeMode } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
 import { AuditResultView } from './components/AuditResultView';
-import { SettingsModal } from './components/SettingsModal';
+import { PastAuditsView } from './components/PastAuditsView';
+import { SettingsView } from './components/SettingsView';
+import { AuthModal } from './components/AuthModal';
 import { ShieldIcon } from './components/Icons';
 
 type Theme = 'light' | 'dark';
@@ -21,9 +27,17 @@ function initialTheme(): Theme {
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [page, setPage] = useState<AppPage>('studio');
   const [step, setStep] = useState<Step>(1);
 
+  // Authentication state
+  const [user, setUser] = useState<UserProfile | null>(getStoredUser);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
+  // Past Audits history state
+  const [audits, setAudits] = useState<PastAudit[]>(getPastAudits);
+
+  // Studio state
   const [roeMode, setRoeMode] = useState<RoeMode>('preset');
   const [presetId, setPresetId] = useState(ROE_PRESETS[0].roe_id);
   const [customRoe, setCustomRoe] = useState('');
@@ -40,6 +54,21 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('sst.theme', theme);
   }, [theme]);
+
+  function handleLogin(u: UserProfile) {
+    setUser(u);
+    saveUser(u);
+  }
+
+  function handleLogout() {
+    setUser(null);
+    saveUser(null);
+  }
+
+  function handleClearHistory() {
+    clearPastAudits();
+    setAudits([]);
+  }
 
   const activeScope = roeMode === 'preset' ? ROE_PRESETS.find((p) => p.roe_id === presetId) ?? null : null;
   const examples = useMemo(() => (activeScope ? buildExamples(activeScope) : buildExamples(ROE_PRESETS[0])), [activeScope]);
@@ -72,7 +101,25 @@ export default function App() {
     try {
       const res = await runAudit({ roe: activeScope, model_id: modelId, user_prompt: prompt, model_output: modelOutput });
       setResult(res);
-      setStep(3); // Transition smoothly into Audit Verdict step
+      setStep(3); // Transition into Step 3 (Audit Verdict & Safe Rewriter)
+
+      // Automatically record audit to Past Audits store
+      const modelObj = MODELS.find((m) => m.id === modelId);
+      const newAudit: PastAudit = {
+        id: 'aud_' + Math.random().toString(36).substring(2, 8),
+        timestamp: new Date().toISOString(),
+        roeId: activeScope.roe_id,
+        roeName: activeScope.name,
+        modelId,
+        modelName: modelObj ? modelObj.label : modelId,
+        prompt: prompt.trim() || 'Custom Prompt',
+        proposedCommand: modelOutput.trim(),
+        executionTimeMs: 34,
+        result: res,
+      };
+
+      const updated = savePastAudit(newAudit);
+      setAudits(updated);
     } finally {
       setLoading(false);
     }
@@ -88,125 +135,181 @@ export default function App() {
     setStep(2);
   }
 
+  function handleLoadAuditIntoStudio(audit: PastAudit) {
+    // Restore state from selected historical audit
+    const preset = ROE_PRESETS.find((p) => p.roe_id === audit.roeId);
+    if (preset) {
+      setRoeMode('preset');
+      setPresetId(preset.roe_id);
+    }
+    setModelId(audit.modelId);
+    setPrompt(audit.prompt);
+    setModelOutput(audit.proposedCommand);
+    setResult(audit.result);
+    setStep(3);
+    setPage('studio');
+  }
+
   return (
     <div className="app">
-      <NavBar theme={theme} onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} onOpenSettings={() => setSettingsOpen(true)} />
+      <NavBar
+        activePage={page}
+        onNavigate={setPage}
+        auditCount={audits.length}
+        currentUser={user}
+        theme={theme}
+        onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+        onOpenAuth={() => setAuthModalOpen(true)}
+      />
 
-      <main className="container canvas-container">
-        <section className="hero" style={{ textAlign: 'center', paddingBottom: 16 }}>
-          <span className="hero__eyebrow">● Dynamic AI Safety &amp; Scope Auditor</span>
-          <h1>Audit AI Pentest Advice Against Rules of Engagement</h1>
-          <p style={{ margin: '8px auto 0', maxWidth: 640 }}>
-            Define engagement boundaries, query offensive models, and get automated safety verdicts with self-sanitized, compliant commands.
-          </p>
-        </section>
+      {/* PAGE 1: AUDIT STUDIO */}
+      {page === 'studio' && (
+        <main className="container canvas-container">
+          <section className="hero" style={{ textAlign: 'center', paddingBottom: 16 }}>
+            <span className="hero__eyebrow">// 001 — DYNAMIC AUDIT STUDIO</span>
+            <h1>Audit AI Pentest Advice Against Rules of Engagement</h1>
+            <p style={{ margin: '8px auto 0', maxWidth: 640 }}>
+              Define engagement boundaries, query offensive models, and get automated safety verdicts with self-sanitized, compliant commands.
+            </p>
+          </section>
 
-        {/* Stepper Navigation (Gamma AI style) */}
-        <nav className="stepper-nav" aria-label="Audit Progress">
-          <button
-            className={`step-node ${step === 1 ? 'step-node--active' : step > 1 ? 'step-node--done' : ''}`}
-            onClick={() => setStep(1)}
-          >
-            <span className="step-node__badge">{step > 1 ? '✓' : '1'}</span>
-            <span>Rules of Engagement</span>
-          </button>
-          <span className="step-connector">→</span>
-          <button
-            className={`step-node ${step === 2 ? 'step-node--active' : step > 2 ? 'step-node--done' : ''}`}
-            disabled={!activeScope}
-            onClick={() => activeScope && setStep(2)}
-          >
-            <span className="step-node__badge">{step > 2 ? '✓' : '2'}</span>
-            <span>Model &amp; Pentest Prompt</span>
-          </button>
-          <span className="step-connector">→</span>
-          <button
-            className={`step-node ${step === 3 ? 'step-node--active' : ''}`}
-            disabled={!result && !loading}
-            onClick={() => result && setStep(3)}
-          >
-            <span className="step-node__badge">3</span>
-            <span>Audit &amp; Remediation</span>
-          </button>
-        </nav>
-
-        {/* Locked Scope Banner when on Step 2 or 3 */}
-        {step > 1 && activeScope ? (
-          <div className="scope-banner">
-            <div className="scope-banner__info">
-              <span className="tag tag--ok">
-                <ShieldIcon width={13} height={13} /> Locked Scope
-              </span>
-              <strong>{activeScope.name}</strong>
-              <span className="muted">
-                (Allowed: {activeScope.allowed_cidrs.join(', ') || activeScope.allowed_domains.join(', ')} · Target: {activeScope.target_hosts.join(', ')})
-              </span>
-            </div>
-            <button className="btn btn--sm btn--ghost" onClick={() => setStep(1)}>
-              ← Change Scope
+          {/* Stepper Navigation (Gamma AI style) */}
+          <nav className="stepper-nav" aria-label="Audit Progress">
+            <button
+              className={`step-node ${step === 1 ? 'step-node--active' : step > 1 ? 'step-node--done' : ''}`}
+              onClick={() => setStep(1)}
+            >
+              <span className="step-node__badge">{step > 1 ? '✓' : '1'}</span>
+              <span>Rules of Engagement</span>
             </button>
-          </div>
-        ) : null}
+            <span className="step-connector">→</span>
+            <button
+              className={`step-node ${step === 2 ? 'step-node--active' : step > 2 ? 'step-node--done' : ''}`}
+              disabled={!activeScope}
+              onClick={() => activeScope && setStep(2)}
+            >
+              <span className="step-node__badge">{step > 2 ? '✓' : '2'}</span>
+              <span>Model &amp; Pentest Prompt</span>
+            </button>
+            <span className="step-connector">→</span>
+            <button
+              className={`step-node ${step === 3 ? 'step-node--active' : ''}`}
+              disabled={!result && !loading}
+              onClick={() => result && setStep(3)}
+            >
+              <span className="step-node__badge">3</span>
+              <span>Audit &amp; Remediation</span>
+            </button>
+          </nav>
 
-        {/* Step 1: Define RoE Scope */}
-        {step === 1 && (
-          <RoeSelector
-            mode={roeMode}
-            onModeChange={setRoeMode}
-            presetId={presetId}
-            onPresetChange={setPresetId}
-            customText={customRoe}
-            onCustomTextChange={setCustomRoe}
-            activeScope={activeScope}
-            onContinue={() => setStep(2)}
-          />
-        )}
+          {/* Locked Scope Banner when on Step 2 or 3 */}
+          {step > 1 && activeScope ? (
+            <div className="scope-banner">
+              <div className="scope-banner__info">
+                <span className="tag tag--ok">
+                  <ShieldIcon width={13} height={13} /> Locked Scope
+                </span>
+                <strong>{activeScope.name}</strong>
+                <span className="muted">
+                  (Allowed: {activeScope.allowed_cidrs.join(', ') || activeScope.allowed_domains.join(', ')} · Target: {activeScope.target_hosts.join(', ')})
+                </span>
+              </div>
+              <button className="btn btn--sm btn--ghost" onClick={() => setStep(1)}>
+                ← Change Scope
+              </button>
+            </div>
+          ) : null}
 
-        {/* Step 2: Prompt Target Model */}
-        {step === 2 && (
-          <PromptComposer
-            modelId={modelId}
-            onModelChange={setModelId}
-            prompt={prompt}
-            onPromptChange={(v) => {
-              setPrompt(v);
-              setActiveExample(null);
-            }}
-            modelOutput={modelOutput}
-            onModelOutputChange={(v) => {
-              setModelOutput(v);
-              setActiveExample(null);
-            }}
-            examples={examples}
-            activeExample={activeExample}
-            onExample={loadExample}
-            canRun={!blockedReason}
-            blockedReason={blockedReason}
-            loading={loading}
-            onRun={handleRun}
-            onBack={() => setStep(1)}
-          />
-        )}
+          {/* Step 1: RoE Selector */}
+          {step === 1 && (
+            <RoeSelector
+              mode={roeMode}
+              onModeChange={setRoeMode}
+              presetId={presetId}
+              onPresetChange={setPresetId}
+              customText={customRoe}
+              onCustomTextChange={setCustomRoe}
+              activeScope={activeScope}
+              onContinue={() => setStep(2)}
+            />
+          )}
 
-        {/* Step 3: Audit Verdict & Safe Rewriter */}
-        {step === 3 && (
-          <AuditResultView
-            result={result}
-            loading={loading}
-            onAuditAnother={handleAuditAnother}
-            onResetAll={handleResetAll}
-          />
-        )}
-      </main>
+          {/* Step 2: Model & Prompt Composer */}
+          {step === 2 && (
+            <PromptComposer
+              modelId={modelId}
+              onModelChange={setModelId}
+              prompt={prompt}
+              onPromptChange={(v) => {
+                setPrompt(v);
+                setActiveExample(null);
+              }}
+              modelOutput={modelOutput}
+              onModelOutputChange={(v) => {
+                setModelOutput(v);
+                setActiveExample(null);
+              }}
+              examples={examples}
+              activeExample={activeExample}
+              onExample={loadExample}
+              canRun={!blockedReason}
+              blockedReason={blockedReason}
+              loading={loading}
+              onRun={handleRun}
+              onBack={() => setStep(1)}
+            />
+          )}
 
+          {/* Step 3: Audit Verdict & Safe Rewriter */}
+          {step === 3 && (
+            <AuditResultView
+              result={result}
+              loading={loading}
+              onAuditAnother={handleAuditAnother}
+              onResetAll={handleResetAll}
+            />
+          )}
+        </main>
+      )}
+
+      {/* PAGE 2: PAST AUDITS HISTORY */}
+      {page === 'history' && (
+        <PastAuditsView
+          audits={audits}
+          currentUser={user}
+          onClearHistory={handleClearHistory}
+          onLoadAuditIntoStudio={handleLoadAuditIntoStudio}
+          onOpenLogin={() => setAuthModalOpen(true)}
+        />
+      )}
+
+      {/* PAGE 3: DEDICATED SETTINGS PAGE */}
+      {page === 'settings' && (
+        <SettingsView
+          currentUser={user}
+          onOpenLogin={() => setAuthModalOpen(true)}
+          onLogout={handleLogout}
+          onClearHistory={handleClearHistory}
+        />
+      )}
+
+      {/* Global Footer */}
       <footer className="footer">
         <div className="container">
-          <span>SST · static analysis only, commands are never executed</span>
-          <span className="mono">v0.1.0 · dynamic flow</span>
+          <span>SST · static analysis only, commands are never executed on host</span>
+          <span className="mono">v0.2.0 · multi-page architecture</span>
         </div>
       </footer>
 
-      {settingsOpen ? <SettingsModal onClose={() => setSettingsOpen(false)} /> : null}
+      {/* Auth Modal */}
+      {authModalOpen && (
+        <AuthModal
+          currentUser={user}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+          onClose={() => setAuthModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
