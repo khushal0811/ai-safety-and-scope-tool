@@ -53,21 +53,21 @@
 }
 
 [data-theme='dark'] {
-  /* Dark Mode (Portfolio charcoal desk & periwinkle accent) */
-  --bg: #373739;
-  --bg-2: #3f3f42;
-  --bg-3: #48484c;
-  --desk: #282829;
-  --paper: #1f1e2e;
+  /* Dark Mode (Richer dark charcoal desk & periwinkle accent) */
+  --bg: #222225;
+  --bg-2: #2b2b2f;
+  --bg-3: #343439;
+  --desk: #18181a;
+  --paper: #191824;
 
-  --surface: #3f3f42;
-  --surface-muted: #373739;
-  --surface-sunken: #282829;
-  --surface-raised: #48484c;
+  --surface: #2b2b2f;
+  --surface-muted: #222225;
+  --surface-sunken: #1a1a1c;
+  --surface-raised: #36363b;
 
-  --border: rgba(180, 180, 185, 0.14);
-  --border-strong: rgba(180, 180, 185, 0.28);
-  --border-s: rgba(180, 180, 185, 0.28);
+  --border: rgba(180, 180, 185, 0.12);
+  --border-strong: rgba(180, 180, 185, 0.24);
+  --border-s: rgba(180, 180, 185, 0.22);
 
   --text: #f0f0f0;
   --text-p: #f0f0f0;
