@@ -15,16 +15,17 @@ interface Props {
   blockedReason: string | null;
   loading: boolean;
   onRun: () => void;
+  onBack?: () => void;
 }
 
 export function PromptComposer(p: Props) {
   return (
-    <section className="card" aria-labelledby="step2-title">
+    <section className="card card--hero" aria-labelledby="step2-title">
       <div className="card__header">
-        <span className="step-index">02</span>
+        <span className="step-index">STEP 02</span>
         <div>
-          <h2 className="card__title" id="step2-title">Ask the model</h2>
-          <p className="card__desc">Choose a model, write the pentest prompt, and audit the response.</p>
+          <h2 className="card__title" id="step2-title">Ask Frontier Model &amp; Audit Output</h2>
+          <p className="card__desc">Choose a model, compose your offensive prompt, and inspect recommendations against your RoE.</p>
         </div>
       </div>
       <div className="card__body">
@@ -82,18 +83,35 @@ export function PromptComposer(p: Props) {
           />
         </div>
 
-        <button id="run-audit" className="btn btn--primary btn--block" disabled={!p.canRun || p.loading} onClick={p.onRun}>
-          {p.loading ? (
-            <>
-              <span className="spinner" /> Auditing…
-            </>
-          ) : (
-            <>
-              <SparkIcon /> Run scope audit
-            </>
-          )}
-        </button>
-        {p.blockedReason ? <p className="muted" style={{ fontSize: 12, marginTop: 8, textAlign: 'center' }}>{p.blockedReason}</p> : null}
+        <div className="card__actions">
+          {p.onBack ? (
+            <button className="btn btn--lg" onClick={p.onBack} disabled={p.loading}>
+              ← Change Scope
+            </button>
+          ) : null}
+          <button
+            id="run-audit"
+            className="btn btn--primary btn--lg"
+            style={{ flex: 1 }}
+            disabled={!p.canRun || p.loading}
+            onClick={p.onRun}
+          >
+            {p.loading ? (
+              <>
+                <span className="spinner" /> Analyzing Scope &amp; Rewriting…
+              </>
+            ) : (
+              <>
+                <SparkIcon /> Audit Recommendation ⚡
+              </>
+            )}
+          </button>
+        </div>
+        {p.blockedReason ? (
+          <p className="muted" style={{ fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+            {p.blockedReason}
+          </p>
+        ) : null}
       </div>
     </section>
   );
