@@ -170,7 +170,7 @@ class OpenRouterClient:
         headers = {
             "Authorization": f"Bearer {effective_key}",
             "HTTP-Referer": "https://github.com/khushal0811/ai-safety-and-scope-tool",
-            "X-Title": "AI Safety & Scope Tool (SST)",
+            "X-Title": "VallumSST (AI Safety & Scope Tool)",
             "Content-Type": "application/json",
         }
 

@@ -38,8 +38,10 @@ export function NavBar({
           <span className="brand__mark">
             <ShieldIcon width={16} height={16} />
           </span>
-          <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SST</span>
-          <span className="brand__sub" style={{ display: 'none' }}>Safety &amp; Scope Tool</span>
+          <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+            Vallum<span style={{ color: 'var(--accent)' }}>SST</span>
+          </span>
+          <span className="brand__sub" style={{ display: 'none' }}>AI Safety &amp; Scope Tool</span>
         </div>
 
         {/* Primary Page Navigation Tabs */}

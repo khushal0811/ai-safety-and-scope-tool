@@ -45,7 +45,7 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
             <span className="brand__mark" style={{ width: 24, height: 24 }}>
               <ShieldIcon width={14} height={14} />
             </span>
-            <strong style={{ fontSize: 14 }}>{currentUser ? 'User Account' : 'Sign in to SST'}</strong>
+            <strong style={{ fontSize: 14 }}>{currentUser ? 'User Account' : 'Sign in to VallumSST'}</strong>
           </div>
           <button className="btn btn--ghost btn--icon" onClick={onClose} aria-label="Close modal">
             <XIcon />
@@ -148,7 +148,7 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
               </div>
 
               <div className="note" style={{ marginTop: 14 }}>
-                SST enforces client privacy. Pentest commands are never shared across accounts.
+                VallumSST enforces client privacy. Pentest commands are never shared across accounts.
               </div>
 
               <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
