@@ -4,11 +4,10 @@ import {
   getOpenRouterKey,
   getGroqKey,
   saveAllApiKeys,
-  clearAllKeys,
-  getStorageMode,
-  type KeyStorageMode,
+  revokeAndWipeUserKeys,
 } from '../lib/keyStore';
-import { GoogleIcon, ShieldIcon, CheckIcon } from './Icons';
+import { GoogleIcon, CheckIcon, TrashIcon } from './Icons';
+import { KeyProtectionNotice } from './KeyProtectionNotice';
 
 interface Props {
   currentUser: UserProfile | null;
@@ -21,8 +20,9 @@ interface Props {
 export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistory, onOpenInitialSetup }: Props) {
   const [openRouterKey, setOpenRouterKey] = useState(getOpenRouterKey() || '');
   const [groqKey, setGroqKey] = useState(getGroqKey() || '');
-  const [storageMode, setStorageMode] = useState<KeyStorageMode>(getStorageMode());
   const [savedNotice, setSavedNotice] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [revokedNotice, setRevokedNotice] = useState(false);
 
   // Verification rule toggles
   const [strictNormalization, setStrictNormalization] = useState(true);
@@ -31,17 +31,22 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
   const [filterDestructiveArgs, setFilterDestructiveArgs] = useState(true);
 
   function handleSaveKeys() {
-    saveAllApiKeys({ openRouterKey, groqKey }, storageMode);
+    saveAllApiKeys({ openRouterKey, groqKey });
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
   }
 
-  function handleClearKeys() {
-    clearAllKeys();
-    setOpenRouterKey('');
-    setGroqKey('');
-    setSavedNotice(true);
-    setTimeout(() => setSavedNotice(false), 2500);
+  async function handleRevokeKeys() {
+    setRevoking(true);
+    try {
+      await revokeAndWipeUserKeys(currentUser?.id);
+      setOpenRouterKey('');
+      setGroqKey('');
+      setRevokedNotice(true);
+      setTimeout(() => setRevokedNotice(false), 3000);
+    } finally {
+      setRevoking(false);
+    }
   }
 
   return (
@@ -140,109 +145,107 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
             </div>
 
             {/* Option 2: Personal OpenRouter Key (BYOK) */}
-            <div
-              style={{
-                border: openRouterKey ? '1px solid var(--accent)' : '1px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                padding: '16px 18px',
-                marginBottom: 16,
-                background: 'var(--surface-sunken)',
-              }}
-            >
-              <div className="row between" style={{ marginBottom: 8 }}>
-                <span className="row" style={{ gap: 8 }}>
-                  <strong style={{ fontSize: 13.5 }}>Option 2: Personal OpenRouter Key (BYOK)</strong>
-                  {getOpenRouterKey() ? (
-                    <span className="tag tag--ok">● Active (User Key)</span>
-                  ) : (
-                    <span className="tag">Optional · Frontier Models</span>
-                  )}
-                </span>
-                <span className="mono font-xs text-muted">sk-or-v1-...</span>
-              </div>
-              <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
-                Bring your own OpenRouter API key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1) in real-time. Keys stay in this browser session and are never logged or stored.
-              </p>
-              <input
-                type="password"
-                className="input mono"
-                placeholder="Paste OpenRouter API key (sk-or-v1-...)"
-                value={openRouterKey}
-                onChange={(e) => setOpenRouterKey(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
+            {currentUser ? (
+              <>
+                <div
+                  style={{
+                    border: openRouterKey ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    borderRadius: 'var(--radius)',
+                    padding: '16px 18px',
+                    marginBottom: 16,
+                    background: 'var(--surface-sunken)',
+                  }}
+                >
+                  <div className="row between" style={{ marginBottom: 8 }}>
+                    <span className="row" style={{ gap: 8 }}>
+                      <strong style={{ fontSize: 13.5 }}>Option 2: Personal OpenRouter Key (BYOK)</strong>
+                      {getOpenRouterKey() ? (
+                        <span className="tag tag--ok">● Active (User Key)</span>
+                      ) : (
+                        <span className="tag">Optional · Frontier Models</span>
+                      )}
+                    </span>
+                    <span className="mono font-xs text-muted">sk-or-v1-...</span>
+                  </div>
+                  <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
+                    Bring your own OpenRouter API key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1) in real-time. Keys are encrypted with AES-256-GCM before saving to your database vault.
+                  </p>
+                  <input
+                    type="password"
+                    className="input mono"
+                    placeholder="Paste OpenRouter API key (sk-or-v1-...)"
+                    value={openRouterKey}
+                    onChange={(e) => setOpenRouterKey(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
 
-            {/* Advanced: Optional Custom Groq Key Override */}
-            <details style={{ marginBottom: 18, fontSize: 13 }}>
-              <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', userSelect: 'none', padding: '4px 0' }}>
-                ▸ Advanced: Custom Groq Key Override (Optional)
-              </summary>
-              <div style={{ marginTop: 10, padding: 12, border: '1px dashed var(--border)', borderRadius: 'var(--radius)', background: 'var(--surface-sunken)' }}>
-                <label className="field__label" style={{ marginBottom: 6 }}>
-                  <span>Custom Groq API Key</span>
-                  <span className="mono font-xs text-muted">gsk_...</span>
-                </label>
-                <input
-                  type="password"
-                  className="input mono"
-                  placeholder="Paste custom Groq key if overriding backend system quota"
-                  value={groqKey}
-                  onChange={(e) => setGroqKey(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <p className="font-xs muted" style={{ marginTop: 4 }}>
-                  Only needed if you wish to use your own private Groq API tier instead of SST's shared server quota.
+                {/* Advanced: Optional Custom Groq Key Override */}
+                <details style={{ marginBottom: 18, fontSize: 13 }}>
+                  <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', userSelect: 'none', padding: '4px 0' }}>
+                    ▸ Advanced: Custom Groq Key Override (Optional)
+                  </summary>
+                  <div style={{ marginTop: 10, padding: 12, border: '1px dashed var(--border)', borderRadius: 'var(--radius)', background: 'var(--surface-sunken)' }}>
+                    <label className="field__label" style={{ marginBottom: 6 }}>
+                      <span>Custom Groq API Key</span>
+                      <span className="mono font-xs text-muted">gsk_...</span>
+                    </label>
+                    <input
+                      type="password"
+                      className="input mono"
+                      placeholder="Paste custom Groq key if overriding backend system quota"
+                      value={groqKey}
+                      onChange={(e) => setGroqKey(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <p className="font-xs muted" style={{ marginTop: 4 }}>
+                      Only needed if you wish to use your own private Groq API tier instead of SST's shared server quota.
+                    </p>
+                  </div>
+                </details>
+              </>
+            ) : (
+              /* Locked Option 2 for Guests */
+              <div
+                style={{
+                  border: '1px dashed var(--border)',
+                  borderRadius: 'var(--radius)',
+                  padding: '16px 18px',
+                  marginBottom: 16,
+                  background: 'var(--surface-sunken)',
+                }}
+              >
+                <div className="row between" style={{ marginBottom: 8 }}>
+                  <span className="row" style={{ gap: 8 }}>
+                    <strong style={{ fontSize: 13.5 }}>Option 2: Personal OpenRouter Key (BYOK)</strong>
+                    <span className="tag tag--warn">🔒 Account Required</span>
+                  </span>
+                  <span className="mono font-xs text-muted">No Database For Guests</span>
+                </div>
+                <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
+                  Guest users only have one option: using SST's backend system key. Because guest sessions do not have a private database to store and encrypt API keys, custom keys are disabled. Sign in with Google or Email to unlock custom keys.
                 </p>
+                <button className="btn btn--primary btn--sm" onClick={onOpenLogin}>
+                  <GoogleIcon width={14} height={14} /> Sign In to Enable Custom Keys
+                </button>
               </div>
-            </details>
+            )}
 
-            <div className="field">
-              <label className="field__label">
-                <span>Key Storage Isolation</span>
-                <span className="mono font-xs text-muted">Client-side isolation</span>
-              </label>
-              <div className="radio-row">
-                <label className="radio-card">
-                  <input
-                    type="radio"
-                    name="storageMode"
-                    checked={storageMode === 'session'}
-                    onChange={() => setStorageMode('session')}
-                  />
-                  <div>
-                    <strong>Session Storage</strong>
-                    <span className="muted font-xs">Persists across reloads, wiped on tab close</span>
-                  </div>
-                </label>
-                <label className="radio-card">
-                  <input
-                    type="radio"
-                    name="storageMode"
-                    checked={storageMode === 'memory'}
-                    onChange={() => setStorageMode('memory')}
-                  />
-                  <div>
-                    <strong>In-Memory Only</strong>
-                    <span className="muted font-xs">Highest paranoia: wiped on browser refresh</span>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <div className="note" style={{ marginTop: 16 }}>
-              <ShieldIcon width={16} height={16} style={{ flexShrink: 0, color: 'var(--accent)' }} />
-              <div>
-                <strong>Zero-Host-Storage Guarantee:</strong> Keys are stored in your browser's transient memory and are never persisted to database tables, server logs, or telemetry.
-              </div>
+            <div style={{ marginTop: 18 }}>
+              <KeyProtectionNotice />
             </div>
 
             <div className="card__actions">
               {savedNotice && (
-                <span className="row" style={{ color: 'var(--healthy)', fontSize: 13, fontWeight: 500 }}>
-                  <CheckIcon width={16} height={16} /> API keys saved to browser vault
+                <span className="row" style={{ color: 'var(--healthy)', fontSize: 13, fontWeight: 500, gap: 6 }}>
+                  <CheckIcon width={16} height={16} /> API keys encrypted &amp; saved to vault
+                </span>
+              )}
+              {revokedNotice && (
+                <span className="row" style={{ color: 'var(--unsafe)', fontSize: 13, fontWeight: 500, gap: 6 }}>
+                  <CheckIcon width={16} height={16} /> API keys permanently revoked &amp; wiped from database
                 </span>
               )}
               <div className="row" style={{ marginLeft: 'auto', gap: 8 }}>
@@ -251,16 +254,23 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                     Setup Wizard
                   </button>
                 )}
-                <button
-                  className="btn btn--danger btn--sm"
-                  onClick={handleClearKeys}
-                  disabled={!openRouterKey && !groqKey && !getOpenRouterKey() && !getGroqKey()}
-                >
-                  Clear Keys
-                </button>
-                <button className="btn btn--primary" onClick={handleSaveKeys}>
-                  Save Keys
-                </button>
+                {currentUser && (
+                  <>
+                    <button
+                      className="btn btn--danger btn--sm row"
+                      onClick={handleRevokeKeys}
+                      disabled={revoking || (!openRouterKey && !groqKey && !getOpenRouterKey() && !getGroqKey())}
+                      title="Revoke and completely wipe API keys from the database and session"
+                      style={{ gap: 6 }}
+                    >
+                      <TrashIcon width={14} height={14} />
+                      {revoking ? 'Revoking...' : 'Revoke / Delete Key'}
+                    </button>
+                    <button className="btn btn--primary" onClick={handleSaveKeys}>
+                      Save Keys
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
