@@ -6,6 +6,7 @@ Zero Host Execution: Operates strictly over HTTPS via Supabase REST/PostgREST.
 import logging
 import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
@@ -14,6 +15,17 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 _supabase_client = None
+
+
+def is_valid_uuid(val: Optional[str]) -> bool:
+    """Validate whether a string is a standard RFC UUID."""
+    if not val:
+        return False
+    try:
+        uuid.UUID(str(val))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 
 def get_supabase():
@@ -56,9 +68,9 @@ def save_audit_log(
 ) -> bool:
     """Save an evaluated audit result to the PostgreSQL audit_logs table.
     
-    Strict Privacy Rule: Only persists when user_id is provided. Guest audits are never stored.
+    Strict Privacy Rule: Only persists when user_id is a valid UUID. Guest audits are never stored.
     """
-    if not user_id:
+    if not is_valid_uuid(user_id):
         return False
 
     client = get_supabase()
@@ -93,7 +105,7 @@ def save_audit_log(
 
 def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """Retrieve audit history from PostgreSQL audit_logs table for authenticated user only."""
-    if not user_id:
+    if not is_valid_uuid(user_id):
         return []
 
     client = get_supabase()
@@ -110,7 +122,7 @@ def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[
 
 def fetch_audit_metrics(user_id: Optional[str] = None) -> Dict[str, Any]:
     """Calculate aggregated telemetry metrics for authenticated user only."""
-    if not user_id:
+    if not is_valid_uuid(user_id):
         return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
     client = get_supabase()
