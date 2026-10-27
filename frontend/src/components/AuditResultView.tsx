@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AuditResult, TargetFinding, Verdict } from '../types/audit';
 import { MODELS } from '../data/models';
-import { diffWords } from '../lib/diff';
+import { diffWords, computeSplitDiff, type SplitDiffRow } from '../lib/diff';
 import { AlertIcon, BanIcon, CheckIcon, CopyIcon, ShieldIcon } from './Icons';
 
 /**
@@ -197,12 +197,92 @@ function ResultBody({
   );
 }
 
+function SideBySideDiff({ rows }: { rows: SplitDiffRow[] }) {
+  return (
+    <div className="split-diff" aria-label="Side-by-side git diff view">
+      {/* Left Pane: Original Command(s) */}
+      <div className="split-diff__pane">
+        <div className="split-diff__header split-diff__header--orig">
+          <span>Original (Model Proposed)</span>
+          <span style={{ fontSize: 10, opacity: 0.8 }}>Red lines removed/modified</span>
+        </div>
+        <div className="split-diff__body">
+          {rows.map((row, i) => {
+            const isDel = row.type === 'deleted' || row.type === 'modified';
+            const isEmpty = !row.leftContent && row.type === 'added';
+            const rowClass = isEmpty
+              ? 'split-diff__row split-diff__row--empty'
+              : isDel
+              ? 'split-diff__row split-diff__row--del'
+              : 'split-diff__row';
+
+            return (
+              <div key={i} className={rowClass}>
+                <span className="split-diff__gutter">{row.lineNumLeft ?? ' '}</span>
+                <span className="split-diff__content">
+                  {row.leftTokens ? (
+                    row.leftTokens.map((t, ti) => (
+                      <span key={ti} className={t.type === 'del' ? 'diff__del' : undefined}>
+                        {t.text}
+                      </span>
+                    ))
+                  ) : (
+                    row.leftContent ?? ''
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right Pane: Sanitized Safe Command */}
+      <div className="split-diff__pane">
+        <div className="split-diff__header split-diff__header--safe">
+          <span>Sanitized (RoE Compliant)</span>
+          <span style={{ fontSize: 10, opacity: 0.8 }}>Green lines added/remediated</span>
+        </div>
+        <div className="split-diff__body">
+          {rows.map((row, i) => {
+            const isAdd = row.type === 'added' || row.type === 'modified';
+            const isEmpty = !row.rightContent && row.type === 'deleted';
+            const rowClass = isEmpty
+              ? 'split-diff__row split-diff__row--empty'
+              : isAdd
+              ? 'split-diff__row split-diff__row--add'
+              : 'split-diff__row';
+
+            return (
+              <div key={i} className={rowClass}>
+                <span className="split-diff__gutter">{row.lineNumRight ?? ' '}</span>
+                <span className="split-diff__content">
+                  {row.rightTokens ? (
+                    row.rightTokens.map((t, ti) => (
+                      <span key={ti} className={t.type === 'add' ? 'diff__add' : undefined}>
+                        {t.text}
+                      </span>
+                    ))
+                  ) : (
+                    row.rightContent ?? ''
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SanitizedBox({ result }: { result: AuditResult }) {
   const [copied, setCopied] = useState(false);
   const [showDiff, setShowDiff] = useState(true);
+  const [diffMode, setDiffMode] = useState<'split' | 'unified'>('split');
   const original = result.extracted_commands.join('\n');
   const safe = result.safe_sanitized_command;
   const parts = useMemo(() => (safe ? diffWords(original, safe) : []), [original, safe]);
+  const splitRows = useMemo(() => (safe ? computeSplitDiff(original, safe) : []), [original, safe]);
 
   useEffect(() => {
     if (!copied) return;
@@ -237,7 +317,29 @@ function SanitizedBox({ result }: { result: AuditResult }) {
         <span className="sanitized__title" id="sanitized-title">
           <ShieldIcon /> Self-sanitized command
         </span>
-        <div className="row">
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <div className="diff-mode-toggle" aria-label="Diff display format">
+            <button
+              type="button"
+              className={`diff-mode-btn ${diffMode === 'split' ? 'diff-mode-btn--active' : ''}`}
+              onClick={() => {
+                setDiffMode('split');
+                setShowDiff(true);
+              }}
+            >
+              Side-by-Side
+            </button>
+            <button
+              type="button"
+              className={`diff-mode-btn ${diffMode === 'unified' ? 'diff-mode-btn--active' : ''}`}
+              onClick={() => {
+                setDiffMode('unified');
+                setShowDiff(true);
+              }}
+            >
+              Inline
+            </button>
+          </div>
           <button id="toggle-diff" className="btn btn--sm btn--ghost" onClick={() => setShowDiff((s) => !s)}>
             {showDiff ? 'Hide diff' : 'Show diff'}
           </button>
@@ -251,14 +353,20 @@ function SanitizedBox({ result }: { result: AuditResult }) {
         <pre className="code-block">{safe}</pre>
         {showDiff ? (
           <div>
-            <p className="section-label">Original → sanitized</p>
-            <div className="code-block diff" aria-label="Diff between original and sanitized command">
-              {parts.map((part, i) => (
-                <span key={i} className={part.type === 'add' ? 'diff__add' : part.type === 'del' ? 'diff__del' : undefined}>
-                  {part.text}
-                </span>
-              ))}
-            </div>
+            <p className="section-label" style={{ marginBottom: 8 }}>
+              {diffMode === 'split' ? 'Git Split Diff (Original vs Sanitized)' : 'Inline Word Diff (Original → Sanitized)'}
+            </p>
+            {diffMode === 'split' ? (
+              <SideBySideDiff rows={splitRows} />
+            ) : (
+              <div className="code-block diff" aria-label="Diff between original and sanitized command">
+                {parts.map((part, i) => (
+                  <span key={i} className={part.type === 'add' ? 'diff__add' : part.type === 'del' ? 'diff__del' : undefined}>
+                    {part.text}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         ) : null}
       </div>

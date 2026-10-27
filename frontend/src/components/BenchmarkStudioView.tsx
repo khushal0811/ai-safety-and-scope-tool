@@ -32,6 +32,7 @@ import {
   TrashIcon,
   XIcon,
 } from './Icons';
+import { computeSplitDiff } from '../lib/diff';
 
 interface Props {
   activeRoe: RoeScope;
@@ -841,6 +842,65 @@ export function BenchmarkStudioView({
                                 <div className="benchmark-safe-cmd-block">
                                   $ {audit.safe_sanitized_command}
                                 </div>
+
+                                {/* Expandable Side-by-Side Git Diff Drawer */}
+                                {model.extracted_commands.length > 0 && !isCorrect && (
+                                  <details className="accordion" style={{ marginTop: 10 }}>
+                                    <summary style={{ fontSize: 11, padding: '6px 10px' }}>
+                                      Side-by-Side Git Diff (Original vs Remediated)
+                                    </summary>
+                                    <div className="accordion__body" style={{ padding: '8px 10px 10px' }}>
+                                      <div className="split-diff" style={{ fontSize: 11 }}>
+                                        <div className="split-diff__pane">
+                                          <div className="split-diff__header split-diff__header--orig" style={{ fontSize: 10, padding: '4px 8px' }}>
+                                            Original
+                                          </div>
+                                          <div className="split-diff__body" style={{ padding: '4px 0' }}>
+                                            {computeSplitDiff(model.extracted_commands.join('\n'), audit.safe_sanitized_command).map((r, ri) => (
+                                              <div key={ri} className={r.type === 'deleted' || r.type === 'modified' ? 'split-diff__row split-diff__row--del' : 'split-diff__row'}>
+                                                <span className="split-diff__gutter" style={{ width: 22 }}>{r.lineNumLeft ?? ' '}</span>
+                                                <span className="split-diff__content">
+                                                  {r.leftTokens ? (
+                                                    r.leftTokens.map((t, ti) => (
+                                                      <span key={ti} className={t.type === 'del' ? 'diff__del' : undefined}>
+                                                        {t.text}
+                                                      </span>
+                                                    ))
+                                                  ) : (
+                                                    r.leftContent ?? ''
+                                                  )}
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                        <div className="split-diff__pane">
+                                          <div className="split-diff__header split-diff__header--safe" style={{ fontSize: 10, padding: '4px 8px' }}>
+                                            Sanitized
+                                          </div>
+                                          <div className="split-diff__body" style={{ padding: '4px 0' }}>
+                                            {computeSplitDiff(model.extracted_commands.join('\n'), audit.safe_sanitized_command).map((r, ri) => (
+                                              <div key={ri} className={r.type === 'added' || r.type === 'modified' ? 'split-diff__row split-diff__row--add' : 'split-diff__row'}>
+                                                <span className="split-diff__gutter" style={{ width: 22 }}>{r.lineNumRight ?? ' '}</span>
+                                                <span className="split-diff__content">
+                                                  {r.rightTokens ? (
+                                                    r.rightTokens.map((t, ti) => (
+                                                      <span key={ti} className={t.type === 'add' ? 'diff__add' : undefined}>
+                                                        {t.text}
+                                                      </span>
+                                                    ))
+                                                  ) : (
+                                                    r.rightContent ?? ''
+                                                  )}
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </details>
+                                )}
                               </div>
                             )}
                           </div>
