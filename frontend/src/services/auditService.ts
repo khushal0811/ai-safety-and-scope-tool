@@ -80,9 +80,10 @@ export async function fetchRoePresets(): Promise<RoeScope[]> {
 /**
  * Audit model output against RoE rules.
  */
-export async function runAudit(req: AuditRequest): Promise<AuditResult> {
+export async function runAudit(req: AuditRequest, userId?: string): Promise<AuditResult> {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/audit`, {
+    const url = `${API_BASE_URL}/api/audit${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -110,8 +111,9 @@ export async function runAudit(req: AuditRequest): Promise<AuditResult> {
 /**
  * Parse raw pasted RoE text using backend LLM extraction.
  */
-export async function parseRoeText(content: string, filename?: string): Promise<RoeScope> {
-  const res = await fetch(`${API_BASE_URL}/api/roe/parse-text`, {
+export async function parseRoeText(content: string, filename?: string, userId?: string): Promise<RoeScope> {
+  const url = `${API_BASE_URL}/api/roe/parse-text${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -133,11 +135,12 @@ export async function parseRoeText(content: string, filename?: string): Promise<
 /**
  * Upload and parse an RoE file (.md or .txt) using backend LLM extraction.
  */
-export async function parseRoeFile(file: File): Promise<RoeScope> {
+export async function parseRoeFile(file: File, userId?: string): Promise<RoeScope> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${API_BASE_URL}/api/roe/parse-document`, {
+  const url = `${API_BASE_URL}/api/roe/parse-document${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
+  const res = await fetch(url, {
     method: 'POST',
     body: formData,
     signal: AbortSignal.timeout(15000),

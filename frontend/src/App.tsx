@@ -5,8 +5,8 @@ import type { UserProfile } from './types/user';
 import { ROE_PRESETS } from './data/presets';
 import { buildExamples, MODELS, type PromptExample } from './data/models';
 import { runAudit } from './services/auditService';
-import { getStoredUser, saveUser } from './lib/authStore';
-import { getPastAudits, savePastAudit, clearPastAudits } from './lib/historyStore';
+import { getStoredUser, saveUser, initSupabaseAuthListener } from './lib/authStore';
+import { getPastAudits, savePastAudit, clearPastAudits, syncPastAuditsFromCloud } from './lib/historyStore';
 import { NavBar, type AppPage } from './components/NavBar';
 import { RoeSelector, type RoeMode } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
@@ -58,6 +58,21 @@ export default function App() {
     localStorage.setItem('sst.theme', theme);
   }, [theme]);
 
+  // Listen for Supabase session changes
+  useEffect(() => {
+    const unsub = initSupabaseAuthListener((newUser) => {
+      if (newUser) {
+        setUser(newUser);
+      }
+    });
+    return unsub;
+  }, []);
+
+  // Synchronize past audits with Supabase PostgreSQL cloud database
+  useEffect(() => {
+    syncPastAuditsFromCloud(user?.id).then(setAudits);
+  }, [user, page]);
+
   function handleLogin(u: UserProfile) {
     setUser(u);
     saveUser(u);
@@ -106,7 +121,7 @@ export default function App() {
     if (!activeScope || !modelOutput.trim()) return;
     setLoading(true);
     try {
-      const res = await runAudit({ roe: activeScope, model_id: modelId, user_prompt: prompt, model_output: modelOutput });
+      const res = await runAudit({ roe: activeScope, model_id: modelId, user_prompt: prompt, model_output: modelOutput }, user?.id);
       setResult(res);
       setStep(3); // Transition into Step 3 (Audit Verdict & Safe Rewriter)
 
@@ -300,6 +315,10 @@ export default function App() {
           onClearHistory={handleClearHistory}
           onLoadAuditIntoStudio={handleLoadAuditIntoStudio}
           onOpenLogin={() => setAuthModalOpen(true)}
+          onSyncCloud={async () => {
+            const synced = await syncPastAuditsFromCloud(user?.id);
+            setAudits(synced);
+          }}
         />
       )}
 
