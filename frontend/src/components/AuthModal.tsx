@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { UserProfile } from '../types/user';
 import { createEmailUser } from '../lib/authStore';
 import { signInWithGoogle, signInWithGithub } from '../lib/supabaseClient';
-import { GoogleIcon, GithubIcon, XIcon, ShieldIcon } from './Icons';
+import { GoogleIcon, GithubIcon, XIcon, VallumIcon } from './Icons';
 
 interface Props {
   currentUser: UserProfile | null;
@@ -62,10 +62,10 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <div className="row">
-            <span className="brand__mark" style={{ width: 24, height: 24 }}>
-              <ShieldIcon width={14} height={14} />
+            <span className="brand__mark" style={{ width: 24, height: 24, padding: 2 }}>
+              <VallumIcon width={16} height={16} />
             </span>
-            <strong style={{ fontSize: 14 }}>{currentUser ? 'User Account' : 'Sign in to VallumSST'}</strong>
+            <strong style={{ fontSize: 14 }}>{currentUser ? 'User Account' : 'Sign in to Vallum'}</strong>
           </div>
           <button className="btn btn--ghost btn--icon" onClick={onClose} aria-label="Close modal">
             <XIcon />
@@ -192,7 +192,7 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
               </div>
 
               <div className="note" style={{ marginTop: 14 }}>
-                VallumSST enforces client privacy. Pentest commands are never shared across accounts.
+                Vallum enforces client privacy. Pentest commands are never shared across accounts.
               </div>
 
               <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>

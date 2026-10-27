@@ -7,7 +7,7 @@ import {
   signInWithEmailPassword,
   signUpWithEmailPassword,
 } from '../lib/supabaseClient';
-import { GoogleIcon, GithubIcon, MailIcon, MoonIcon, ShieldIcon, SunIcon, CheckIcon, AlertIcon } from './Icons';
+import { GoogleIcon, GithubIcon, MailIcon, MoonIcon, ShieldIcon, SunIcon, CheckIcon, AlertIcon, VallumIcon } from './Icons';
 
 interface Props {
   onAuthenticated: (user: UserProfile) => void;
@@ -211,13 +211,13 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
       {/* Top Header */}
       <header className="landing-nav">
         <div className="brand">
-          <span className="brand__mark">
-            <ShieldIcon width={16} height={16} />
+          <span className="brand__mark" style={{ width: 28, height: 28, padding: 3 }}>
+            <VallumIcon width={22} height={22} />
           </span>
-          <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
-            Vallum<span style={{ color: 'var(--accent)' }}>SST</span>
+          <span style={{ fontWeight: 800, fontSize: 16, letterSpacing: '0.02em', color: 'var(--text)' }}>
+            Vallum
           </span>
-          <span className="brand__sub">AI Safety &amp; Scope Tool</span>
+          <span className="brand__sub">AI Safety &amp; Scope Boundary Engine</span>
         </div>
 
         <div className="row">
@@ -246,7 +246,7 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
             Verify Offensive AI Advice Before It Touches Real Systems.
           </h1>
           <p className="landing-desc">
-            VallumSST parses frontier model pentest instructions, detects out-of-scope targets and destructive arguments, and generates compliant, self-sanitized bash commands in real time.
+            Vallum parses frontier model pentest instructions, detects out-of-scope targets and destructive arguments, and generates compliant, self-sanitized bash commands in real time.
           </p>
 
           <div className="landing-features">

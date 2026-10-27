@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { checkBackendHealth, isLiveMode, subscribeLiveStatus } from '../services/auditService';
 import type { UserProfile } from '../types/user';
-import { HistoryIcon, MoonIcon, SettingsIcon, ShieldIcon, SunIcon, UserIcon } from './Icons';
+import { HistoryIcon, MoonIcon, SettingsIcon, SunIcon, UserIcon, VallumIcon } from './Icons';
 
 export type AppPage = 'studio' | 'history' | 'settings';
 
@@ -35,13 +35,13 @@ export function NavBar({
       <div className="container nav__inner">
         {/* Brand */}
         <div className="brand" onClick={() => onNavigate('studio')} style={{ cursor: 'pointer' }}>
-          <span className="brand__mark">
-            <ShieldIcon width={16} height={16} />
+          <span className="brand__mark" style={{ width: 26, height: 26, padding: 3 }}>
+            <VallumIcon width={20} height={20} />
           </span>
-          <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
-            Vallum<span style={{ color: 'var(--accent)' }}>SST</span>
+          <span style={{ fontWeight: 800, fontSize: 15.5, letterSpacing: '0.02em', color: 'var(--text)' }}>
+            Vallum
           </span>
-          <span className="brand__sub" style={{ display: 'none' }}>AI Safety &amp; Scope Tool</span>
+          <span className="brand__sub" style={{ display: 'none' }}>AI Safety &amp; Scope Boundary Engine</span>
         </div>
 
         {/* Primary Page Navigation Tabs */}
