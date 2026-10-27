@@ -1,13 +1,13 @@
 /* ==========================================================================
-   SST Design System — Themed after Khushal Arora's Portfolio
-   Tactile dark desk & warm light parchment palette with Space Grotesk
+   SST Design System — Tactile Dark Desk & High-Contrast Typography
+   Charcoal canvas & warm light stone palette with Space Grotesk
    ========================================================================== */
 
 :root {
   --font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
 
-  /* Light Mode (Portfolio warm stone/parchment) */
+  /* Light Mode (Warm stone/parchment) */
   --bg: #f0ede8;
   --bg-2: #e8e5df;
   --bg-3: #dedad3;
