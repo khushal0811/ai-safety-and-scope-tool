@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { UserProfile } from '../types/user';
 import {
   getOpenRouterKey,
@@ -6,8 +6,12 @@ import {
   saveAllApiKeys,
   saveKeysToVault,
   revokeAndWipeUserKeys,
+  fetchVaultStatus,
+  testApiKeys,
+  type KeyVerificationResult,
+  type VaultStatus,
 } from '../lib/keyStore';
-import { GoogleIcon, CheckIcon, TrashIcon, UserIcon } from './Icons';
+import { GoogleIcon, CheckIcon, TrashIcon, UserIcon, SparkIcon, AlertIcon } from './Icons';
 import { KeyProtectionNotice } from './KeyProtectionNotice';
 
 interface Props {
@@ -25,6 +29,21 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
   const [revoking, setRevoking] = useState(false);
   const [revokedNotice, setRevokedNotice] = useState(false);
 
+  // Key testing state
+  const [testing, setTesting] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<{
+    success: boolean;
+    results: KeyVerificationResult[];
+    error?: string;
+  } | null>(null);
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      fetchVaultStatus(currentUser.id).then(setVaultStatus).catch(() => {});
+    }
+  }, [currentUser?.id]);
+
   // Verification rule toggles
   const [strictNormalization, setStrictNormalization] = useState(true);
   const [blockGateway, setBlockGateway] = useState(true);
@@ -34,6 +53,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
   async function handleSaveKeys() {
     if (currentUser) {
       await saveKeysToVault(currentUser.id, { openRouterKey, groqKey });
+      fetchVaultStatus(currentUser.id).then(setVaultStatus).catch(() => {});
     } else {
       saveAllApiKeys({ openRouterKey, groqKey });
     }
@@ -43,14 +63,37 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
 
   async function handleRevokeKeys() {
     setRevoking(true);
+    setTestFeedback(null);
     try {
       await revokeAndWipeUserKeys(currentUser?.id);
       setOpenRouterKey('');
       setGroqKey('');
+      setVaultStatus(null);
       setRevokedNotice(true);
       setTimeout(() => setRevokedNotice(false), 3000);
     } finally {
       setRevoking(false);
+    }
+  }
+
+  async function handleTestKeys() {
+    setTesting(true);
+    setTestFeedback(null);
+    try {
+      const res = await testApiKeys({
+        openRouterKey: openRouterKey.trim() || undefined,
+        groqKey: groqKey.trim() || undefined,
+        userId: currentUser?.id,
+      });
+      setTestFeedback(res);
+    } catch (err: any) {
+      setTestFeedback({
+        success: false,
+        results: [],
+        error: err?.message || 'Failed to verify API key connection.',
+      });
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -181,15 +224,78 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                   <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
                     Bring your own OpenRouter API key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1) in real-time. Keys are encrypted with AES-256-GCM before saving to your database vault.
                   </p>
-                  <input
-                    type="password"
-                    className="input mono"
-                    placeholder="Paste OpenRouter API key (sk-or-v1-...)"
-                    value={openRouterKey}
-                    onChange={(e) => setOpenRouterKey(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
+                  <div className="row" style={{ gap: 8, marginTop: 4 }}>
+                    <input
+                      type="password"
+                      className="input mono"
+                      style={{ flex: 1 }}
+                      placeholder={
+                        vaultStatus?.hasOpenRouterKey && !openRouterKey
+                          ? `Vault configured (${vaultStatus.openRouterHint || '••••••'}) — paste new key to update`
+                          : 'Paste OpenRouter API key (sk-or-v1-...)'
+                      }
+                      value={openRouterKey}
+                      onChange={(e) => {
+                        setOpenRouterKey(e.target.value);
+                        setTestFeedback(null);
+                      }}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      id="test-key-inline-btn"
+                      className="btn btn--secondary btn--sm row"
+                      style={{ gap: 6, flexShrink: 0 }}
+                      disabled={testing || (!openRouterKey.trim() && !vaultStatus?.hasOpenRouterKey && !getOpenRouterKey())}
+                      onClick={handleTestKeys}
+                      title="Test connection and check if this API key is valid and working"
+                    >
+                      {testing ? (
+                        <>
+                          <span className="spinner" style={{ width: 12, height: 12 }} /> Testing…
+                        </>
+                      ) : (
+                        <>
+                          <SparkIcon width={13} height={13} /> Test Key
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {testFeedback && (
+                    <div style={{ marginTop: 12 }}>
+                      {testFeedback.error ? (
+                        <div className="key-test-banner key-test-banner--error">
+                          <AlertIcon width={16} height={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                          <div style={{ flex: 1 }}>
+                            <strong>Connection Test Failed:</strong> {testFeedback.error}
+                          </div>
+                        </div>
+                      ) : (
+                        testFeedback.results.map((r, idx) => (
+                          <div
+                            key={idx}
+                            className={`key-test-banner ${r.valid ? 'key-test-banner--success' : 'key-test-banner--error'}`}
+                          >
+                            {r.valid ? (
+                              <CheckIcon width={16} height={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                            ) : (
+                              <AlertIcon width={16} height={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                            )}
+                            <div style={{ flex: 1 }}>
+                              <strong>{r.provider} Test:</strong> {r.message}
+                              {r.latencyMs > 0 && (
+                                <span className="mono font-xs" style={{ marginLeft: 8, opacity: 0.85 }}>
+                                  ({r.latencyMs}ms response)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Advanced: Optional Custom Groq Key Override */}
@@ -270,12 +376,33 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                     <button
                       className="btn btn--danger btn--sm row"
                       onClick={handleRevokeKeys}
-                      disabled={revoking || (!openRouterKey && !groqKey && !getOpenRouterKey() && !getGroqKey())}
+                      disabled={revoking || (!openRouterKey && !groqKey && !getOpenRouterKey() && !getGroqKey() && !vaultStatus?.isConfigured)}
                       title="Revoke and completely wipe API keys from the database and session"
                       style={{ gap: 6 }}
                     >
                       <TrashIcon width={14} height={14} />
                       {revoking ? 'Revoking...' : 'Revoke / Delete Key'}
+                    </button>
+                    <button
+                      type="button"
+                      id="test-keys-btn"
+                      className="btn btn--secondary btn--sm row"
+                      onClick={handleTestKeys}
+                      disabled={testing || (!openRouterKey.trim() && !groqKey.trim() && !vaultStatus?.hasOpenRouterKey && !getOpenRouterKey())}
+                      title="Test connection and verify that entered API keys are valid and working"
+                      style={{ gap: 6 }}
+                    >
+                      {testing ? (
+                        <>
+                          <span className="spinner" style={{ width: 13, height: 13 }} />
+                          Testing Connection…
+                        </>
+                      ) : (
+                        <>
+                          <SparkIcon width={14} height={14} />
+                          Test Connection
+                        </>
+                      )}
                     </button>
                     <button className="btn btn--primary" onClick={handleSaveKeys}>
                       Save Keys
