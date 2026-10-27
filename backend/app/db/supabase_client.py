@@ -54,7 +54,13 @@ def save_audit_log(
     user_id: Optional[str] = None,
     execution_time_ms: int = 0,
 ) -> bool:
-    """Save an evaluated audit result to the PostgreSQL audit_logs table."""
+    """Save an evaluated audit result to the PostgreSQL audit_logs table.
+    
+    Strict Privacy Rule: Only persists when user_id is provided. Guest audits are never stored.
+    """
+    if not user_id:
+        return False
+
     client = get_supabase()
     if not client:
         return False
@@ -86,16 +92,16 @@ def save_audit_log(
 
 
 def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-    """Retrieve audit history from PostgreSQL audit_logs table."""
+    """Retrieve audit history from PostgreSQL audit_logs table for authenticated user only."""
+    if not user_id:
+        return []
+
     client = get_supabase()
     if not client:
         return []
 
     try:
-        query = client.table("audit_logs").select("*").order("created_at", desc=True).limit(limit)
-        if user_id:
-            query = query.eq("user_id", user_id)
-        res = query.execute()
+        res = client.table("audit_logs").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch audit history: {e}")
@@ -103,21 +109,21 @@ def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[
 
 
 def fetch_audit_metrics(user_id: Optional[str] = None) -> Dict[str, Any]:
-    """Calculate aggregated telemetry metrics from PostgreSQL audit_logs."""
+    """Calculate aggregated telemetry metrics for authenticated user only."""
+    if not user_id:
+        return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
+
     client = get_supabase()
     if not client:
         return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
     try:
-        query = client.table("audit_logs").select("verdict, execution_time_ms")
-        if user_id:
-            query = query.eq("user_id", user_id)
-        res = query.execute()
+        res = client.table("audit_logs").select("verdict, execution_time_ms").eq("user_id", user_id).execute()
         rows = res.data or []
 
         total = len(rows)
         if total == 0:
-            return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 100, "avg_latency_ms": 0}
+            return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
         unsafe = sum(1 for r in rows if r.get("verdict") == "Unsafe")
         correct = sum(1 for r in rows if r.get("verdict") == "Correct")

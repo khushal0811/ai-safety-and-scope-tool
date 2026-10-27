@@ -105,15 +105,15 @@ export function PastAuditsView({
           <span className="tag tag--ok">● Cloud Sync Live</span>
         </div>
       ) : (
-        <div className="scope-banner" style={{ marginBottom: 24 }}>
+        <div className="scope-banner" style={{ marginBottom: 24, borderColor: 'var(--border)' }}>
           <div className="scope-banner__info">
-            <span className="ndot" />
+            <span className="ndot" style={{ background: 'var(--text-subtle)' }} />
             <span>
-              <strong>Guest Session Active:</strong> Logs are stored in local browser memory. Sign in with Google to preserve audit records in PostgreSQL.
+              <strong>Guest Privacy Active:</strong> Past audits are strictly isolated to authenticated user accounts and stored in Supabase PostgreSQL with Row Level Security. No audits are stored in guest memory or cookies.
             </span>
           </div>
           <button className="btn btn--sm btn--primary" onClick={onOpenLogin}>
-            Sign In with Google
+            Sign In to View Saved Audits
           </button>
         </div>
       )}
@@ -209,10 +209,19 @@ export function PastAuditsView({
           <div className="empty__icon">
             <HistoryIcon width={22} height={22} />
           </div>
-          <h3>No matching audit logs found</h3>
-          <p className="card__desc">
-            {search ? 'Try clearing your search query.' : 'Run your first audit in the Studio to generate logs.'}
+          <h3>{currentUser ? (search ? 'No matching audit logs found' : 'No audit logs yet') : 'No Audit History in Guest Mode'}</h3>
+          <p className="card__desc" style={{ maxWidth: 540, margin: '8px auto 16px' }}>
+            {currentUser
+              ? search
+                ? 'Try clearing your search query.'
+                : 'Run an audit in the Studio to generate persistent logs under your account.'
+              : 'Audit history is private and only saved to the cloud database for registered users. Sign in to access your saved penetration testing audits.'}
           </p>
+          {!currentUser && (
+            <button className="btn btn--primary" onClick={onOpenLogin}>
+              Sign In to Access Saved Audits
+            </button>
+          )}
         </div>
       ) : (
         <div className="history-table-card">
