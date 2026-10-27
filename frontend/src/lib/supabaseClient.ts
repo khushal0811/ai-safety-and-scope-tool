@@ -74,6 +74,50 @@ export async function signInWithGoogle(): Promise<{ error: Error | null }> {
 }
 
 /**
+ * Sign in using email and password
+ */
+export async function signInWithEmailPassword(
+  email: string,
+  password: string
+): Promise<{ session: Session | null; user: User | null; error: Error | null }> {
+  if (!supabase) return { session: null, user: null, error: null };
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    return { session: data.session, user: data.user, error };
+  } catch (err: any) {
+    return { session: null, user: null, error: err };
+  }
+}
+
+/**
+ * Register a new user using email and password
+ */
+export async function signUpWithEmailPassword(
+  email: string,
+  password: string,
+  fullName?: string
+): Promise<{ session: Session | null; user: User | null; error: Error | null }> {
+  if (!supabase) return { session: null, user: null, error: null };
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName || email.split('@')[0],
+        },
+      },
+    });
+    return { session: data.session, user: data.user, error };
+  } catch (err: any) {
+    return { session: null, user: null, error: err };
+  }
+}
+
+/**
  * Sign out from active Supabase session
  */
 export async function signOutSupabase(): Promise<void> {

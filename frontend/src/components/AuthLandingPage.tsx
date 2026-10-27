@@ -1,6 +1,11 @@
 import { useState, useRef, type FormEvent } from 'react';
 import type { UserProfile } from '../types/user';
-import { createGoogleUser, createEmailUser } from '../lib/authStore';
+import { createEmailUser } from '../lib/authStore';
+import {
+  signInWithGoogle,
+  signInWithEmailPassword,
+  signUpWithEmailPassword,
+} from '../lib/supabaseClient';
 import { GoogleIcon, MailIcon, MoonIcon, ShieldIcon, SunIcon, CheckIcon, AlertIcon } from './Icons';
 
 interface Props {
@@ -28,17 +33,30 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
   const [error, setError] = useState<string | null>(null);
   const [resendNotice, setResendNotice] = useState(false);
 
-  function handleGoogleLogin() {
+  async function handleGoogleLogin() {
     setLoading(true);
     setError(null);
-    setTimeout(() => {
-      const user = createGoogleUser(email || 'khushal.arora@example.com', name || 'Khushal Arora');
-      onAuthenticated(user);
+    try {
+      const { error: supaError } = await signInWithGoogle();
+      if (supaError) {
+        setLoading(false);
+        const msg = supaError.message || '';
+        if (msg.includes('not enabled') || msg.includes('Unsupported provider') || msg.includes('validation_failed')) {
+          setError(
+            'Google OAuth is not enabled in your Supabase project yet. In your Supabase Dashboard, go to Authentication > Providers > Google and toggle it ON. In the meantime, you can sign in directly with your email below!'
+          );
+        } else {
+          setError(`Google Sign-In error: ${msg}`);
+        }
+      }
+      // On success, browser automatically redirects to accounts.google.com!
+    } catch (err: any) {
       setLoading(false);
-    }, 450);
+      setError(err?.message || 'Google Sign-In failed');
+    }
   }
 
-  function handleSignInSubmit(e: FormEvent) {
+  async function handleSignInSubmit(e: FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
       setError('Please provide your email and password.');
@@ -47,15 +65,35 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
 
     setLoading(true);
     setError(null);
-    setTimeout(() => {
-      // In demo/production, if email exists, sign in directly with verified flag
-      const user = createEmailUser(email, name, true);
-      onAuthenticated(user);
-      setLoading(false);
-    }, 400);
+
+    const { user: supaUser, error: supaError } = await signInWithEmailPassword(email.trim(), password);
+    setLoading(false);
+
+    if (supaError) {
+      // If user doesn't exist yet, show friendly guidance
+      if (supaError.message.includes('Invalid login credentials')) {
+        setError('Invalid login credentials. If you are new, click "Create one now" below to register.');
+      } else {
+        setError(supaError.message);
+      }
+      return;
+    }
+
+    if (supaUser) {
+      const profile: UserProfile = {
+        id: supaUser.id,
+        email: supaUser.email || email.trim(),
+        name: (supaUser.user_metadata?.full_name || email.trim().split('@')[0]) as string,
+        avatarUrl: (supaUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email.trim())}`) as string,
+        provider: 'email',
+        isVerified: true,
+        createdAt: supaUser.created_at || new Date().toISOString(),
+      };
+      onAuthenticated(profile);
+    }
   }
 
-  function handleRegisterSubmit(e: FormEvent) {
+  async function handleRegisterSubmit(e: FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
       setError('Please provide an email and password to register.');
@@ -68,11 +106,36 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
 
     setLoading(true);
     setError(null);
-    setTimeout(() => {
-      setLoading(false);
-      setMode('verify'); // Transition directly to Email Verification step!
+
+    const { user: supaUser, session, error: supaError } = await signUpWithEmailPassword(
+      email.trim(),
+      password,
+      name.trim()
+    );
+    setLoading(false);
+
+    if (supaError) {
+      setError(supaError.message);
+      return;
+    }
+
+    if (session && supaUser) {
+      // Immediate session created
+      const profile: UserProfile = {
+        id: supaUser.id,
+        email: supaUser.email || email.trim(),
+        name: (supaUser.user_metadata?.full_name || name.trim() || email.trim().split('@')[0]) as string,
+        avatarUrl: (supaUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email.trim())}`) as string,
+        provider: 'email',
+        isVerified: true,
+        createdAt: supaUser.created_at || new Date().toISOString(),
+      };
+      onAuthenticated(profile);
+    } else {
+      // Transition to OTP verification
+      setMode('verify');
       setOtp(['', '', '', '', '', '']);
-    }, 400);
+    }
   }
 
   function handleOtpChange(val: string, idx: number) {
