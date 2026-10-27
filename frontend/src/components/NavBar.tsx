@@ -1,4 +1,5 @@
-import { isLiveMode } from '../services/auditService';
+import { useEffect, useState } from 'react';
+import { checkBackendHealth, isLiveMode, subscribeLiveStatus } from '../services/auditService';
 import type { UserProfile } from '../types/user';
 import { GoogleIcon, HistoryIcon, MoonIcon, SettingsIcon, ShieldIcon, SunIcon } from './Icons';
 
@@ -23,7 +24,11 @@ export function NavBar({
   onToggleTheme,
   onOpenAuth,
 }: Props) {
-  const live = isLiveMode();
+  const [live, setLive] = useState<boolean>(isLiveMode());
+
+  useEffect(() => {
+    return subscribeLiveStatus(setLive);
+  }, []);
 
   return (
     <header className="nav">
@@ -67,7 +72,9 @@ export function NavBar({
           {/* Status pill */}
           <span
             className="status-pill"
-            title={live ? 'Connected to backend engine' : 'Running client-side demo engine'}
+            title={live ? 'Connected to FastAPI backend engine (click to refresh status)' : 'Running client-side demo engine (click to probe backend)'}
+            onClick={() => checkBackendHealth()}
+            style={{ cursor: 'pointer' }}
           >
             <span className={`status-pill__dot ${live ? 'status-pill__dot--live' : ''}`} />
             <span className="status-pill__text">{live ? 'Live Engine' : 'Demo Mode'}</span>
