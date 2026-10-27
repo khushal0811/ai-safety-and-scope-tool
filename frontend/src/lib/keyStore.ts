@@ -82,7 +82,9 @@ export function getAllApiKeys(): ApiKeys {
   };
 }
 
-export function saveAllApiKeys(keys: { openRouterKey?: string; groqKey?: string }, mode: KeyStorageMode): void {
+import { supabase } from './supabaseClient';
+
+export function saveAllApiKeys(keys: { openRouterKey?: string; groqKey?: string }, mode: KeyStorageMode = 'session'): void {
   setStorageMode(mode);
   if (keys.openRouterKey !== undefined) {
     if (keys.openRouterKey.trim()) {
@@ -103,6 +105,27 @@ export function saveAllApiKeys(keys: { openRouterKey?: string; groqKey?: string 
 export function clearAllKeys(): void {
   clearOpenRouterKey();
   clearGroqKey();
+}
+
+/**
+ * Completely wipe API keys from client session and delete the row from the Supabase database vault.
+ */
+export async function revokeAndWipeUserKeys(userId?: string): Promise<{ success: boolean; error?: string }> {
+  clearAllKeys();
+  if (!userId || !supabase) {
+    return { success: true };
+  }
+  try {
+    const { error } = await supabase.from('user_api_vault').delete().eq('user_id', userId);
+    if (error) {
+      // In offline mode or table not yet migrated, log warning but local keys are still wiped
+      console.warn('Database key vault delete notice:', error.message);
+      return { success: true, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to revoke keys' };
+  }
 }
 
 export function maskKey(key: string): string {

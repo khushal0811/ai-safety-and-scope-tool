@@ -3,11 +3,10 @@ import type { UserProfile } from '../types/user';
 import {
   getOpenRouterKey,
   getGroqKey,
-  getStorageMode,
   saveAllApiKeys,
-  type KeyStorageMode,
 } from '../lib/keyStore';
 import { SparkIcon, ShieldIcon, CheckIcon, KeyIcon } from './Icons';
+import { KeyProtectionNotice } from './KeyProtectionNotice';
 
 interface Props {
   user: UserProfile | null;
@@ -19,7 +18,6 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
   const [choice, setChoice] = useState<'system' | 'custom'>('system');
   const [openRouterKey, setOpenRouterKey] = useState(getOpenRouterKey() || '');
   const [groqKey, setGroqKey] = useState(getGroqKey() || '');
-  const [storageMode, setStorageMode] = useState<KeyStorageMode>(getStorageMode());
 
   if (!isOpen) return null;
 
@@ -35,7 +33,7 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
   function handleSaveAndContinue() {
     markCompleted();
     if (choice === 'custom') {
-      saveAllApiKeys({ openRouterKey, groqKey }, storageMode);
+      saveAllApiKeys({ openRouterKey, groqKey });
     }
     onClose();
   }
@@ -100,111 +98,114 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
             </p>
           </div>
 
-          {/* Option 2: Enter Custom API Keys */}
-          <div
-            onClick={() => setChoice('custom')}
-            style={{
-              border: choice === 'custom' ? '1.5px solid var(--accent)' : '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              padding: '16px 18px',
-              background: choice === 'custom' ? 'rgba(98, 114, 240, 0.05)' : 'var(--surface-sunken)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: choice === 'custom' ? '0 0 0 1px var(--accent-glow)' : 'none',
-            }}
-          >
-            <div className="row between" style={{ marginBottom: 6 }}>
-              <div className="row" style={{ gap: 10 }}>
-                <input
-                  type="radio"
-                  name="inferenceChoice"
-                  checked={choice === 'custom'}
-                  onChange={() => setChoice('custom')}
-                  style={{ accentColor: 'var(--accent)' }}
-                />
-                <strong style={{ fontSize: 14 }}>Option 2: Enter Your Own API Key (BYOK)</strong>
+          {/* Option 2: Enter Custom API Keys (Registered Users Only) */}
+          {user ? (
+            <div
+              onClick={() => setChoice('custom')}
+              style={{
+                border: choice === 'custom' ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+                padding: '16px 18px',
+                background: choice === 'custom' ? 'rgba(98, 114, 240, 0.05)' : 'var(--surface-sunken)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                boxShadow: choice === 'custom' ? '0 0 0 1px var(--accent-glow)' : 'none',
+              }}
+            >
+              <div className="row between" style={{ marginBottom: 6 }}>
+                <div className="row" style={{ gap: 10 }}>
+                  <input
+                    type="radio"
+                    name="inferenceChoice"
+                    checked={choice === 'custom'}
+                    onChange={() => setChoice('custom')}
+                    style={{ accentColor: 'var(--accent)' }}
+                  />
+                  <strong style={{ fontSize: 14 }}>Option 2: Enter Your Own API Key (BYOK)</strong>
+                </div>
+                <span className="tag">Frontier Benchmarking</span>
               </div>
-              <span className="tag">Frontier Benchmarking</span>
-            </div>
-            <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, paddingLeft: 24, lineHeight: 1.5 }}>
-              Supply your own OpenRouter key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro) or enter a custom Groq key. Keys stay strictly in browser memory and are never saved on any server.
-            </p>
+              <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, paddingLeft: 24, lineHeight: 1.5 }}>
+                Supply your own OpenRouter key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro) or enter a custom Groq key. Keys are encrypted with AES-256-GCM before reaching your database.
+              </p>
 
-            {choice === 'custom' && (
-              <div
-                style={{ marginTop: 16, paddingLeft: 24, display: 'grid', gap: 12 }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="field" style={{ margin: 0 }}>
-                  <label className="field__label">
-                    <span>OpenRouter API Key</span>
-                    <span className="mono font-xs text-muted">sk-or-v1-... (Frontier Models)</span>
-                  </label>
-                  <input
-                    type="password"
-                    className="input mono"
-                    placeholder="Paste sk-or-v1-... for GPT-4o, Claude 3.5, Gemini"
-                    value={openRouterKey}
-                    onChange={(e) => setOpenRouterKey(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                    autoFocus
-                  />
-                </div>
-
-                <div className="field" style={{ margin: 0 }}>
-                  <label className="field__label">
-                    <span>Custom Groq API Key</span>
-                    <span className="mono font-xs text-muted">gsk_... (Optional Override)</span>
-                  </label>
-                  <input
-                    type="password"
-                    className="input mono"
-                    placeholder="Paste gsk_... (optional custom quota override)"
-                    value={groqKey}
-                    onChange={(e) => setGroqKey(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <span className="font-xs muted" style={{ marginTop: 3 }}>
-                    Leave blank to use the backend's shared Groq key for Llama 3.3.
-                  </span>
-                </div>
-
-                <div className="field" style={{ margin: 0 }}>
-                  <label className="field__label">
-                    <span>Key Storage Isolation</span>
-                  </label>
-                  <div className="radio-row">
-                    <label className="radio-card" style={{ padding: '8px 12px' }}>
-                      <input
-                        type="radio"
-                        name="initStorageMode"
-                        checked={storageMode === 'session'}
-                        onChange={() => setStorageMode('session')}
-                      />
-                      <span>
-                        <strong>Session Storage</strong>
-                        <span className="muted font-xs">Cleared on tab close</span>
-                      </span>
+              {choice === 'custom' && (
+                <div
+                  style={{ marginTop: 16, paddingLeft: 24, display: 'grid', gap: 12 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="field" style={{ margin: 0 }}>
+                    <label className="field__label">
+                      <span>OpenRouter API Key</span>
+                      <span className="mono font-xs text-muted">sk-or-v1-... (Frontier Models)</span>
                     </label>
-                    <label className="radio-card" style={{ padding: '8px 12px' }}>
-                      <input
-                        type="radio"
-                        name="initStorageMode"
-                        checked={storageMode === 'memory'}
-                        onChange={() => setStorageMode('memory')}
-                      />
-                      <span>
-                        <strong>In-Memory Only</strong>
-                        <span className="muted font-xs">Cleared on page reload</span>
-                      </span>
+                    <input
+                      type="password"
+                      className="input mono"
+                      placeholder="Paste sk-or-v1-... for GPT-4o, Claude 3.5, Gemini"
+                      value={openRouterKey}
+                      onChange={(e) => setOpenRouterKey(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="field" style={{ margin: 0 }}>
+                    <label className="field__label">
+                      <span>Custom Groq API Key</span>
+                      <span className="mono font-xs text-muted">gsk_... (Optional Override)</span>
                     </label>
+                    <input
+                      type="password"
+                      className="input mono"
+                      placeholder="Paste gsk_... (optional custom quota override)"
+                      value={groqKey}
+                      onChange={(e) => setGroqKey(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <span className="font-xs muted" style={{ marginTop: 3 }}>
+                      Leave blank to use the backend's shared Groq key for Llama 3.3.
+                    </span>
+                  </div>
+
+                  <div style={{ marginTop: 4 }}>
+                    <KeyProtectionNotice compact />
                   </div>
                 </div>
+              )}
+            </div>
+          ) : (
+            /* Locked Option 2 for Guest Mode */
+            <div
+              style={{
+                border: '1px dashed var(--border)',
+                borderRadius: 'var(--radius)',
+                padding: '16px 18px',
+                background: 'var(--surface-sunken)',
+                opacity: 0.75,
+              }}
+            >
+              <div className="row between" style={{ marginBottom: 6 }}>
+                <div className="row" style={{ gap: 10 }}>
+                  <input
+                    type="radio"
+                    name="inferenceChoice"
+                    checked={false}
+                    disabled
+                  />
+                  <strong style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+                    Option 2: Enter Your Own API Key (BYOK)
+                  </strong>
+                </div>
+                <span className="tag tag--warn">🔒 Account Required</span>
               </div>
-            )}
-          </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, paddingLeft: 24, lineHeight: 1.5 }}>
+                Guest users only use the system's own Groq key. Because guest sessions do not have a database vault to store and encrypt API keys, custom keys are disabled. Sign in with Google or Email to unlock custom API keys.
+              </p>
+            </div>
+          )}
 
           {/* Reassurance Notice that initial settings can be changed later */}
           <div
