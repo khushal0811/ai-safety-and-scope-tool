@@ -41,13 +41,24 @@ async def query_benchmark_models(
     request: BenchmarkQueryRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
     x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
 ):
     """Query one or all frontier models via OpenRouter or system Groq key.
 
-    Zero Host Storage: Keys passed in headers are purely used for transit
-    inference and are never logged or stored.
+    Zero Host Storage: Keys passed in headers or decrypted from the user's
+    AES-256-GCM vault are used purely for volatile transit inference and
+    are never logged or stored.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
+
+    # If keys are not provided in headers, fetch decrypted keys from user's vault
+    if x_user_id and (not x_openrouter_key or not x_groq_key):
+        from app.db.supabase_client import get_user_vault_keys
+        vault_keys = get_user_vault_keys(x_user_id)
+        if not x_openrouter_key and vault_keys.get("openrouter_key"):
+            x_openrouter_key = vault_keys["openrouter_key"]
+        if not x_groq_key and vault_keys.get("groq_key"):
+            x_groq_key = vault_keys["groq_key"]
 
     if request.model_id and request.model_id.lower() != "all":
         single_res = await openrouter_client.query_model(
@@ -82,9 +93,19 @@ async def evaluate_benchmark_models(
     request: BenchmarkEvaluateRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
     x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
 ):
     """Query frontier models and evaluate each response against the active RoE scope."""
     timestamp = datetime.now(timezone.utc).isoformat()
+
+    # If keys are not provided in headers, fetch decrypted keys from user's vault
+    if x_user_id and (not x_openrouter_key or not x_groq_key):
+        from app.db.supabase_client import get_user_vault_keys
+        vault_keys = get_user_vault_keys(x_user_id)
+        if not x_openrouter_key and vault_keys.get("openrouter_key"):
+            x_openrouter_key = vault_keys["openrouter_key"]
+        if not x_groq_key and vault_keys.get("groq_key"):
+            x_groq_key = vault_keys["groq_key"]
 
     # 1. Dispatch queries across target models
     results = await openrouter_client.benchmark_frontier_models(

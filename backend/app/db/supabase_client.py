@@ -223,3 +223,158 @@ def fetch_custom_roes(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch custom RoEs: {e}")
         return []
+
+
+def save_user_vault_keys(
+    user_id: str,
+    openrouter_key: Optional[str] = None,
+    groq_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Encrypt user API keys with AES-256-GCM and store in user_api_vault."""
+    if not is_valid_uuid(user_id):
+        raise ValueError("A valid user_id UUID is required to store API keys in vault.")
+
+    client = get_supabase()
+    if not client:
+        raise RuntimeError("Database connection unavailable.")
+
+    from app.engine.crypto_vault import encrypt_api_key, mask_api_key
+
+    payload: Dict[str, Any] = {
+        "user_id": user_id,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+    if openrouter_key is not None:
+        clean_or = openrouter_key.strip()
+        if clean_or:
+            payload["encrypted_openrouter_key"] = encrypt_api_key(clean_or)
+            payload["key_hint_openrouter"] = mask_api_key(clean_or)
+        else:
+            payload["encrypted_openrouter_key"] = None
+            payload["key_hint_openrouter"] = None
+
+    if groq_key is not None:
+        clean_groq = groq_key.strip()
+        if clean_groq:
+            payload["encrypted_groq_key"] = encrypt_api_key(clean_groq)
+            payload["key_hint_groq"] = mask_api_key(clean_groq)
+        else:
+            payload["encrypted_groq_key"] = None
+            payload["key_hint_groq"] = None
+
+    client.table("user_api_vault").upsert(payload, on_conflict="user_id").execute()
+    return {
+        "success": True,
+        "has_openrouter_key": bool(payload.get("encrypted_openrouter_key")),
+        "openrouter_hint": payload.get("key_hint_openrouter"),
+        "has_groq_key": bool(payload.get("encrypted_groq_key")),
+        "groq_hint": payload.get("key_hint_groq"),
+    }
+
+
+def get_user_vault_keys(user_id: str) -> Dict[str, Optional[str]]:
+    """Retrieve and decrypt user API keys in memory.
+    
+    Plaintext keys are NEVER logged or saved to disk.
+    """
+    if not is_valid_uuid(user_id):
+        return {"openrouter_key": None, "groq_key": None}
+
+    client = get_supabase()
+    if not client:
+        return {"openrouter_key": None, "groq_key": None}
+
+    try:
+        from app.engine.crypto_vault import decrypt_api_key
+
+        res = client.table("user_api_vault").select("encrypted_openrouter_key, encrypted_groq_key").eq("user_id", user_id).limit(1).execute()
+        rows = res.data or []
+        if not rows:
+            return {"openrouter_key": None, "groq_key": None}
+
+        row = rows[0]
+        enc_or = row.get("encrypted_openrouter_key")
+        enc_groq = row.get("encrypted_groq_key")
+
+        decrypted_or = decrypt_api_key(enc_or) if enc_or else None
+        decrypted_groq = decrypt_api_key(enc_groq) if enc_groq else None
+
+        return {
+            "openrouter_key": decrypted_or,
+            "groq_key": decrypted_groq,
+        }
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to retrieve vault keys for user {user_id}: {e}")
+        return {"openrouter_key": None, "groq_key": None}
+
+
+def revoke_user_vault_keys(user_id: str) -> bool:
+    """Permanently delete user's API vault row from the database."""
+    if not is_valid_uuid(user_id):
+        return False
+
+    client = get_supabase()
+    if not client:
+        return False
+
+    try:
+        client.table("user_api_vault").delete().eq("user_id", user_id).execute()
+        return True
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to revoke vault keys for user {user_id}: {e}")
+        return False
+
+
+def get_user_vault_status(user_id: str) -> Dict[str, Any]:
+    """Get metadata/hints for stored keys without exposing decrypted plaintext."""
+    if not is_valid_uuid(user_id):
+        return {
+            "is_configured": False,
+            "has_openrouter_key": False,
+            "openrouter_hint": None,
+            "has_groq_key": False,
+            "groq_hint": None,
+        }
+
+    client = get_supabase()
+    if not client:
+        return {
+            "is_configured": False,
+            "has_openrouter_key": False,
+            "openrouter_hint": None,
+            "has_groq_key": False,
+            "groq_hint": None,
+        }
+
+    try:
+        res = client.table("user_api_vault").select("key_hint_openrouter, key_hint_groq, encrypted_openrouter_key, encrypted_groq_key").eq("user_id", user_id).limit(1).execute()
+        rows = res.data or []
+        if not rows:
+            return {
+                "is_configured": False,
+                "has_openrouter_key": False,
+                "openrouter_hint": None,
+                "has_groq_key": False,
+                "groq_hint": None,
+            }
+
+        row = rows[0]
+        has_or = bool(row.get("encrypted_openrouter_key"))
+        has_groq = bool(row.get("encrypted_groq_key"))
+        return {
+            "is_configured": has_or or has_groq,
+            "has_openrouter_key": has_or,
+            "openrouter_hint": row.get("key_hint_openrouter"),
+            "has_groq_key": has_groq,
+            "groq_hint": row.get("key_hint_groq"),
+        }
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to get vault status for user {user_id}: {e}")
+        return {
+            "is_configured": False,
+            "has_openrouter_key": False,
+            "openrouter_hint": None,
+            "has_groq_key": False,
+            "groq_hint": None,
+        }
