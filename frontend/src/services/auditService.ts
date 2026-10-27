@@ -1,6 +1,23 @@
 import type { AuditRequest, AuditResult, RoeScope } from '../types/audit';
 import { runDemoAudit } from './demoEngine';
 import { ROE_PRESETS } from '../data/presets';
+import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
+
+function getApiHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  const openRouter = getOpenRouterKey();
+  if (openRouter) {
+    headers['X-OpenRouter-Key'] = openRouter;
+  }
+  const groq = getGroqKey();
+  if (groq) {
+    headers['X-Groq-Key'] = groq;
+  }
+  return headers;
+}
 
 /**
  * Single entry point the UI uses for safety and scope audits.
@@ -85,10 +102,7 @@ export async function runAudit(req: AuditRequest, userId?: string): Promise<Audi
     const url = `${API_BASE_URL}/api/audit${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers: getApiHeaders(),
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(10000),
     });
@@ -115,10 +129,7 @@ export async function parseRoeText(content: string, filename?: string, userId?: 
   const url = `${API_BASE_URL}/api/roe/parse-text${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: getApiHeaders(),
     body: JSON.stringify({ content, filename: filename || 'custom_roe.md' }),
     signal: AbortSignal.timeout(15000),
   });
@@ -140,8 +151,15 @@ export async function parseRoeFile(file: File, userId?: string): Promise<RoeScop
   formData.append('file', file);
 
   const url = `${API_BASE_URL}/api/roe/parse-document${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
+  const fileHeaders: Record<string, string> = {};
+  const openRouter = getOpenRouterKey();
+  if (openRouter) fileHeaders['X-OpenRouter-Key'] = openRouter;
+  const groq = getGroqKey();
+  if (groq) fileHeaders['X-Groq-Key'] = groq;
+
   const res = await fetch(url, {
     method: 'POST',
+    headers: fileHeaders,
     body: formData,
     signal: AbortSignal.timeout(15000),
   });

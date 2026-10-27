@@ -5,7 +5,7 @@ Zero Host Execution: SST is strictly a static analysis and verification engine.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import roe_router, audit_router, normalize_router
+from app.api import roe_router, audit_router, normalize_router, benchmark_router
 from app.config import settings
 from app.engine.cve_validator import load_cve_database
 
@@ -30,6 +30,7 @@ app.add_middleware(
 app.include_router(roe_router)
 app.include_router(audit_router)
 app.include_router(normalize_router)
+app.include_router(benchmark_router)
 
 
 @app.get("/")

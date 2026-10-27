@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import type { UserProfile } from '../types/user';
-import { getApiKey, saveApiKey, clearApiKey, getStorageMode, type KeyStorageMode } from '../lib/keyStore';
+import {
+  getOpenRouterKey,
+  getGroqKey,
+  saveAllApiKeys,
+  clearAllKeys,
+  getStorageMode,
+  type KeyStorageMode,
+} from '../lib/keyStore';
 import { GoogleIcon, ShieldIcon, CheckIcon } from './Icons';
 
 interface Props {
@@ -11,7 +18,8 @@ interface Props {
 }
 
 export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistory }: Props) {
-  const [openRouterKey, setOpenRouterKey] = useState(getApiKey() || '');
+  const [openRouterKey, setOpenRouterKey] = useState(getOpenRouterKey() || '');
+  const [groqKey, setGroqKey] = useState(getGroqKey() || '');
   const [storageMode, setStorageMode] = useState<KeyStorageMode>(getStorageMode());
   const [savedNotice, setSavedNotice] = useState(false);
 
@@ -22,12 +30,15 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
   const [filterDestructiveArgs, setFilterDestructiveArgs] = useState(true);
 
   function handleSaveKeys() {
-    if (openRouterKey.trim()) {
-      saveApiKey(openRouterKey.trim(), storageMode);
-    } else {
-      clearApiKey();
-    }
+    saveAllApiKeys({ openRouterKey, groqKey }, storageMode);
+    setSavedNotice(true);
+    setTimeout(() => setSavedNotice(false), 2500);
+  }
 
+  function handleClearKeys() {
+    clearAllKeys();
+    setOpenRouterKey('');
+    setGroqKey('');
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
   }
@@ -107,16 +118,54 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
           <div className="card__body">
             <div className="field">
               <label className="field__label">
-                <span>OpenRouter API Key</span>
+                <span className="row" style={{ gap: 8 }}>
+                  <span>OpenRouter API Key</span>
+                  {getOpenRouterKey() ? (
+                    <span className="tag tag--ok">Active</span>
+                  ) : (
+                    <span className="tag">Optional</span>
+                  )}
+                </span>
                 <span className="mono font-xs text-muted">sk-or-v1-...</span>
               </label>
               <input
                 type="password"
                 className="input mono"
-                placeholder="Paste OpenRouter API key"
+                placeholder="sk-or-v1-..."
                 value={openRouterKey}
                 onChange={(e) => setOpenRouterKey(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
               />
+              <p className="font-xs muted" style={{ marginTop: 4 }}>
+                Powers real-time benchmarking across frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1).
+              </p>
+            </div>
+
+            <div className="field">
+              <label className="field__label">
+                <span className="row" style={{ gap: 8 }}>
+                  <span>Groq API Key</span>
+                  {getGroqKey() ? (
+                    <span className="tag tag--ok">Active</span>
+                  ) : (
+                    <span className="tag">Optional</span>
+                  )}
+                </span>
+                <span className="mono font-xs text-muted">gsk_...</span>
+              </label>
+              <input
+                type="password"
+                className="input mono"
+                placeholder="gsk_..."
+                value={groqKey}
+                onChange={(e) => setGroqKey(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <p className="font-xs muted" style={{ marginTop: 4 }}>
+                Powers ultra-low latency Llama-3.3 inference for RoE document extraction and command rewriting.
+              </p>
             </div>
 
             <div className="field">
@@ -165,7 +214,14 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                   <CheckIcon width={16} height={16} /> API keys saved to browser vault
                 </span>
               )}
-              <div style={{ marginLeft: 'auto' }}>
+              <div className="row" style={{ marginLeft: 'auto', gap: 8 }}>
+                <button
+                  className="btn btn--danger btn--sm"
+                  onClick={handleClearKeys}
+                  disabled={!openRouterKey && !groqKey && !getOpenRouterKey() && !getGroqKey()}
+                >
+                  Clear Keys
+                </button>
                 <button className="btn btn--primary" onClick={handleSaveKeys}>
                   Save Keys
                 </button>

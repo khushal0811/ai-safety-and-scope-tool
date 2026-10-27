@@ -16,6 +16,17 @@ from app.models.audit import (
     NormalizeIpResponse,
 )
 
+from app.models.benchmark import (
+    FrontierModelInfo,
+    BenchmarkQueryRequest,
+    ModelBenchmarkResult,
+    BenchmarkQueryResponse,
+    BenchmarkEvaluateRequest,
+    BenchmarkEvaluateItem,
+    BenchmarkSummary,
+    BenchmarkEvaluateResponse,
+)
+
 __all__ = [
     "RoeScope",
     "Verdict",
@@ -30,4 +41,12 @@ __all__ = [
     "AuditResult",
     "NormalizeIpRequest",
     "NormalizeIpResponse",
+    "FrontierModelInfo",
+    "BenchmarkQueryRequest",
+    "ModelBenchmarkResult",
+    "BenchmarkQueryResponse",
+    "BenchmarkEvaluateRequest",
+    "BenchmarkEvaluateItem",
+    "BenchmarkSummary",
+    "BenchmarkEvaluateResponse",
 ]
