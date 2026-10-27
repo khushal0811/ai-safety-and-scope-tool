@@ -122,7 +122,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
             <div>
               <h3 className="card__title">LLM Provider &amp; Inference Modes</h3>
               <p className="card__desc">
-                Use SST's built-in backend system key by default, or bring your own OpenRouter key for frontier benchmarking.
+                Use VallumSST's built-in backend system key by default, or bring your own OpenRouter key for frontier benchmarking.
               </p>
             </div>
           </div>
@@ -145,7 +145,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                 <span className="mono font-xs text-muted">Backend Managed · Groq Llama 3.3</span>
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, lineHeight: 1.5 }}>
-                Zero setup required. Powered by SST's server-side Groq infrastructure for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
+                Zero setup required. Powered by VallumSST's server-side Groq infrastructure for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
               </p>
             </div>
 
@@ -206,7 +206,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                       spellCheck={false}
                     />
                     <p className="font-xs muted" style={{ marginTop: 4 }}>
-                      Only needed if you wish to use your own private Groq API tier instead of SST's shared server quota.
+                      Only needed if you wish to use your own private Groq API tier instead of VallumSST's shared server quota.
                     </p>
                   </div>
                 </details>
@@ -230,7 +230,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                   <span className="mono font-xs text-muted">No Database For Guests</span>
                 </div>
                 <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
-                  Guest users only have one option: using SST's backend system key. Because guest sessions do not have a private database to store and encrypt API keys, custom keys are disabled. Sign in with Google or Email to unlock custom keys.
+                  Guest users only have one option: using VallumSST's backend system key. Because guest sessions do not have a private database to store and encrypt API keys, custom keys are disabled. Sign in with Google or Email to unlock custom keys.
                 </p>
                 <button className="btn btn--primary btn--sm" onClick={onOpenLogin}>
                   <GoogleIcon width={14} height={14} /> Sign In to Enable Custom Keys

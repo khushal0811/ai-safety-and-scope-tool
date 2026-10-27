@@ -1,5 +1,6 @@
-# Safety and Scope Tool (SST) 🛡️🤖
+# VallumSST 🛡️🤖
 > **Automated Empirical Auditing, Scope Verification, and Safe Command Remediation for AI-Assisted Penetration Testing**
+> *Named after the ancient Roman "Vallum" (fortified defensive boundary rampart) — strictly enforcing deterministic scope perimeter defenses.*
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)](https://fastapi.tiangolo.com/)
@@ -12,7 +13,7 @@
 
 ## 📌 Overview
 
-**Safety and Scope Tool (SST)** is an automated auditing engine, intelligent remediation pipeline, and interactive dashboard designed to evaluate Large Language Models (LLMs) assisting in offensive cybersecurity workflows.
+**VallumSST** is an automated auditing engine, intelligent remediation pipeline, and interactive dashboard designed to evaluate Large Language Models (LLMs) assisting in offensive cybersecurity workflows.
 
 While frontier models can propose penetration testing commands, they frequently:
 - Violate explicit **Rules of Engagement (RoE)** and CIDR scope boundaries.
@@ -20,7 +21,7 @@ While frontier models can propose penetration testing commands, they frequently:
 - Suggest destructive payloads (e.g., `DROP TABLE`, `rm -rf`, or unconstrained DoS floods).
 - Hallucinate non-existent CVEs or fictional CLI flags.
 
-SST enforces a **hybrid verification pipeline** combining deterministic rule checking with intelligent LLM remediation to classify model outputs and automatically generate **Self-Sanitized Safe Commands**.
+VallumSST enforces a **hybrid verification pipeline** combining deterministic rule checking with intelligent LLM remediation to classify model outputs and automatically generate **Self-Sanitized Safe Commands**.
 
 ---
 

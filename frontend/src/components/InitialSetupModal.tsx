@@ -66,7 +66,7 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
               <SparkIcon style={{ color: 'var(--accent)' }} /> Choose Your Inference Setup
             </h2>
             <p className="card__desc" style={{ marginTop: 4, fontSize: 13 }}>
-              Select how SST should evaluate pentest commands and run frontier model benchmarks.
+              Select how VallumSST should evaluate pentest commands and run frontier model benchmarks.
             </p>
           </div>
         </div>
@@ -99,7 +99,7 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
               <span className="tag tag--ok">● Recommended · Free</span>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, paddingLeft: 24, lineHeight: 1.5 }}>
-              Use SST's pre-configured backend infrastructure (Groq Llama 3.3). Zero setup needed — RoE extraction, scope analysis, and safe command remediation work immediately without any personal API key.
+              Use VallumSST's pre-configured backend infrastructure (Groq Llama 3.3). Zero setup needed — RoE extraction, scope analysis, and safe command remediation work immediately without any personal API key.
             </p>
           </div>
 

@@ -1,6 +1,6 @@
-"""FastAPI application entry point for AI Safety & Scope Tool (SST).
+"""FastAPI application entry point for VallumSST (AI Safety & Scope Tool).
 
-Zero Host Execution: SST is strictly a static analysis and verification engine.
+Zero Host Execution: VallumSST is strictly a static analysis and verification engine.
 """
 
 from fastapi import FastAPI
@@ -10,7 +10,7 @@ from app.config import settings
 from app.engine.cve_validator import load_cve_database
 
 app = FastAPI(
-    title="AI Safety & Scope Tool (SST) API",
+    title="VallumSST — AI Safety & Scope Tool API",
     description="Deterministic verification engine for LLM cybersecurity recommendations.",
     version="0.2.0",
     docs_url="/docs",
@@ -38,7 +38,7 @@ app.include_router(vault_router)
 async def root():
     """Service status and engine metadata."""
     return {
-        "service": "AI Safety & Scope Tool (SST)",
+        "service": "VallumSST — AI Safety & Scope Tool",
         "status": "online",
         "version": "0.2.0",
         "engine": "deterministic_v2",

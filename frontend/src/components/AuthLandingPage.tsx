@@ -190,8 +190,10 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
           <span className="brand__mark">
             <ShieldIcon width={16} height={16} />
           </span>
-          <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SST</span>
-          <span className="brand__sub">Safety &amp; Scope Tool</span>
+          <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+            Vallum<span style={{ color: 'var(--accent)' }}>SST</span>
+          </span>
+          <span className="brand__sub">AI Safety &amp; Scope Tool</span>
         </div>
 
         <div className="row">
@@ -220,7 +222,7 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
             Verify Offensive AI Advice Before It Touches Real Systems.
           </h1>
           <p className="landing-desc">
-            SST parses frontier model pentest instructions, detects out-of-scope targets and destructive arguments, and generates compliant, self-sanitized bash commands in real time.
+            VallumSST parses frontier model pentest instructions, detects out-of-scope targets and destructive arguments, and generates compliant, self-sanitized bash commands in real time.
           </p>
 
           <div className="landing-features">

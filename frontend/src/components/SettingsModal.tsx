@@ -76,7 +76,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <span className="tag tag--ok">● Ready</span>
             </div>
             <p className="font-xs muted" style={{ margin: 0, lineHeight: 1.4 }}>
-              SST provides a backend-managed Groq key by default. Basic audits, RoE parsing, and remediation work without entering any key.
+              VallumSST provides a backend-managed Groq key by default. Basic audits, RoE parsing, and remediation work without entering any key.
             </p>
           </div>
 

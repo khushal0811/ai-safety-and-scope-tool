@@ -375,7 +375,7 @@ export default function App() {
       {/* Global Footer */}
       <footer className="footer">
         <div className="container">
-          <span>SST · static analysis only, commands are never executed on host</span>
+          <span>VallumSST · static analysis only, commands are never executed on host</span>
           <span className="mono">v0.2.0 · multi-page architecture</span>
         </div>
       </footer>
