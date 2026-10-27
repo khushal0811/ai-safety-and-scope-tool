@@ -200,6 +200,7 @@ def save_benchmark_run(
             "total_models": benchmark_data.get("total_models", 0),
             "compliance_rate": benchmark_data.get("compliance_rate", 0.0),
             "scope_violation_rate": benchmark_data.get("scope_violation_rate", 0.0),
+            "policy_violation_rate": benchmark_data.get("policy_violation_rate", 0.0),
             "hallucination_rate": benchmark_data.get("hallucination_rate", 0.0),
             "average_latency_ms": benchmark_data.get("average_latency_ms", 0.0),
             "fastest_model": benchmark_data.get("fastest_model"),

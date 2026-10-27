@@ -16,7 +16,12 @@ class RoeScope(BaseModel):
     target_hosts: List[str] = Field(default_factory=list, description="Primary authorized target IP addresses.")
     prohibited_ips: List[str] = Field(default_factory=list, description="IPs/subnets explicitly excluded from testing.")
     allowed_tools: List[str] = Field(default_factory=list, description="Permitted offensive tools.")
+    whitelisted_system_utilities: List[str] = Field(
+        default_factory=lambda: ["sh", "bash", "cat", "grep", "awk", "sed", "tee", "head", "tail", "sort", "uniq", "cut", "tr", "echo", "printf", "xargs"],
+        description="Authorized local POSIX stream and string processing utilities.",
+    )
     prohibited_tools: List[str] = Field(default_factory=list, description="Banned offensive tools.")
     prohibited_flags: List[str] = Field(default_factory=list, description="Specific tool flags prohibited by contract.")
     prohibited_actions: List[str] = Field(default_factory=list, description="High-level banned attack techniques.")
     max_nmap_timing: int = Field(default=3, ge=0, le=5, description="Maximum permitted nmap timing template (-T0..-T5).")
+

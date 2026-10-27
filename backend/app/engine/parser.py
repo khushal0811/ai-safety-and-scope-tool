@@ -79,8 +79,30 @@ def extract_host_from_token(token: str) -> Optional[str]:
     return t
 
 
+def join_multiline_continuations(text: str) -> str:
+    """Merge lines ending with trailing backslash ('\\') into a single logical line."""
+    return re.sub(r"\\\s*\n\s*", " ", text)
+
+
+def is_variable_assignment(token: str) -> bool:
+    """Check if token is a shell variable assignment (e.g. VAR=val or product="Apache")."""
+    if token.startswith("-"):
+        return False
+    return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*=", token))
+
+
+def clean_prompt_prefix(line: str) -> str:
+    """Strip shell prompt symbols ($ or user@host:~$) while preserving commands and redirection operators."""
+    raw = line.strip()
+    if not raw or raw.startswith("#"):
+        return ""
+    # Strip leading shell prompts like "$ ", "# ", or "kali@kali:~$ "
+    cleaned = re.sub(r"^(?:\$\s+|[a-zA-Z0-9_\.\-]+@[a-zA-Z0-9_\.\-]+:[^\$#]*[\$#]\s+)", "", raw).strip()
+    return cleaned
+
+
 def extract_command_blocks(text: str) -> List[str]:
-    """Extract shell commands from markdown code fences or plain text output."""
+    """Extract shell commands from markdown code fences or plain text output, handling multiline continuations."""
     commands: List[str] = []
 
     # 1. Search for markdown code fences ```bash ... ``` or ```sh ... ```
@@ -89,42 +111,43 @@ def extract_command_blocks(text: str) -> List[str]:
 
     if fenced_blocks:
         for block in fenced_blocks:
-            for line in block.splitlines():
-                raw = line.strip()
-                if not raw or raw.startswith("#"):
-                    continue
-                # Strip leading prompt symbols ($ >) but preserve commands
-                cleaned = re.sub(r"^[\$>\s]+", "", raw).strip()
+            # First join multiline continuations (\) in the block
+            joined_block = join_multiline_continuations(block)
+            for line in joined_block.splitlines():
+                cleaned = clean_prompt_prefix(line)
                 if cleaned and not cleaned.startswith("#"):
                     commands.append(cleaned)
     else:
         # 2. Extract plain text lines that start with known tools or prompt symbols
-        for line in text.splitlines():
-            raw = line.strip()
-            if not raw or raw.startswith("#"):
-                continue
-            cleaned = re.sub(r"^[\$>\s]+", "", raw).strip()
+        joined_text = join_multiline_continuations(text)
+        for line in joined_text.splitlines():
+            cleaned = clean_prompt_prefix(line)
             if not cleaned or cleaned.startswith("#"):
                 continue
 
             first_word = cleaned.split()[0].lower() if cleaned.split() else ""
-            if first_word in KNOWN_SECURITY_TOOLS or any(cleaned.startswith(t + " ") for t in KNOWN_SECURITY_TOOLS):
-                commands.append(cleaned)
-            elif any(tool in cleaned for tool in ["nmap", "gobuster", "nikto", "sqlmap", "curl", "hydra"]):
+            if (
+                first_word in KNOWN_SECURITY_TOOLS
+                or is_variable_assignment(first_word)
+                or any(cleaned.startswith(t + " ") for t in KNOWN_SECURITY_TOOLS)
+                or any(tool in cleaned for tool in ["nmap", "gobuster", "nikto", "sqlmap", "curl", "hydra", "omp"])
+            ):
                 commands.append(cleaned)
 
     # Fallback: if single line text without markdown, consider entire trimmed text if non-empty
     if not commands and text.strip() and not text.strip().startswith("#"):
         first_word = text.strip().split()[0].lower() if text.strip().split() else ""
-        if first_word in KNOWN_SECURITY_TOOLS or len(text.strip().splitlines()) == 1:
-            commands.append(text.strip())
+        if first_word in KNOWN_SECURITY_TOOLS or is_variable_assignment(first_word) or len(text.strip().splitlines()) == 1:
+            joined = join_multiline_continuations(text.strip())
+            cleaned = clean_prompt_prefix(joined)
+            if cleaned:
+                commands.append(cleaned)
 
     return commands
 
 
 def split_chained_commands(cmd_str: str) -> List[str]:
-    """Split chained commands on `;`, `&&`, `||`, and `|` while respecting quotes."""
-    # Custom stateful splitter that ignores operators inside quotes
+    """Split sequential chained commands on `;`, `&&`, and `||` while preserving pipelines (`|`) and quotes."""
     sub_commands: List[str] = []
     current: List[str] = []
     in_single_quote = False
@@ -142,18 +165,14 @@ def split_chained_commands(cmd_str: str) -> List[str]:
             in_double_quote = not in_double_quote
             current.append(c)
         elif not in_single_quote and not in_double_quote:
-            # Check for chained operators
-            if c == ";" or c == "|":
-                if i + 1 < length and chars[i + 1] == "|":  # ||
-                    sub_commands.append("".join(current).strip())
-                    current = []
-                    i += 1
-                elif c == ";":
-                    sub_commands.append("".join(current).strip())
-                    current = []
-                elif c == "|":
-                    sub_commands.append("".join(current).strip())
-                    current = []
+            # Check for sequential chained operators: ; or || or &&
+            if c == ";":
+                sub_commands.append("".join(current).strip())
+                current = []
+            elif c == "|" and i + 1 < length and chars[i + 1] == "|":  # ||
+                sub_commands.append("".join(current).strip())
+                current = []
+                i += 1
             elif c == "&" and i + 1 < length and chars[i + 1] == "&":  # &&
                 sub_commands.append("".join(current).strip())
                 current = []
@@ -173,23 +192,82 @@ def split_chained_commands(cmd_str: str) -> List[str]:
 
 
 def parse_cli_command(command_str: str) -> ParsedCommand:
-    """Parse a single command into tool, tokens, flags, and targets."""
+    """Parse a single command into tool, tokens, flags, and targets using shlex."""
     # Tokenize using shlex safely
     try:
         tokens = shlex.split(command_str, comments=True, posix=True)
     except ValueError:
-        # Fallback to regex splitting if quotes are unclosed
+        # Fallback to whitespace splitting if quotes are unclosed
         tokens = command_str.split()
 
     if not tokens:
         return ParsedCommand(raw=command_str, tool="", tokens=[], flags=[], targets=[])
 
-    tool = tokens[0].lower().rsplit("/", 1)[-1]  # Strip path if /usr/bin/nmap
+    # AST Token Inspection:
+    # 1. Skip leading variable declarations (e.g., export VAR=val or product="Apache")
+    # 2. Skip environment assignments preceding binary (e.g., LC_ALL=C nmap ...)
+    # 3. Unwrap privilege escalation wrappers (e.g., sudo)
+    # 4. Ensure command arguments or flags starting with '-' are NEVER treated as tool binaries
+    idx = 0
+    num_tokens = len(tokens)
+
+    # Skip declaration keywords
+    while idx < num_tokens and tokens[idx].lower() in {"export", "readonly", "declare", "local", "typeset"}:
+        idx += 1
+
+    # Skip variable assignments
+    while idx < num_tokens and is_variable_assignment(tokens[idx]):
+        idx += 1
+
+    # If all tokens were variable assignments (e.g. product="Apache" or TARGET=192.168.1.105)
+    if idx >= num_tokens:
+        flags: List[str] = []
+        targets: List[NormalizedTarget] = []
+        for tok in tokens:
+            if is_variable_assignment(tok):
+                val = tok.split("=", 1)[1]
+                host = extract_host_from_token(val)
+                if host:
+                    norm = normalize_ip_candidate(host)
+                    if norm.is_valid:
+                        targets.append(norm)
+        return ParsedCommand(
+            raw=command_str,
+            tool="",  # Pure variable declaration, not an executable binary
+            tokens=tokens,
+            flags=flags,
+            targets=targets,
+        )
+
+    # Candidate tool binary token
+    candidate_tok = tokens[idx]
+    raw_tool = candidate_tok.lower().rsplit("/", 1)[-1]
+    tool_idx = idx
+
+    # If wrapped in sudo, unwrap and find underlying executable tool
+    if raw_tool == "sudo":
+        idx += 1
+        # Skip sudo flags like -u, -E
+        while idx < num_tokens and tokens[idx].startswith("-"):
+            idx += 1
+        # Skip env vars following sudo
+        while idx < num_tokens and is_variable_assignment(tokens[idx]):
+            idx += 1
+        if idx < num_tokens and not tokens[idx].startswith("-"):
+            tool = tokens[idx].lower().rsplit("/", 1)[-1]
+            tool_idx = idx
+        else:
+            tool = "sudo"
+    elif raw_tool.startswith("-"):
+        # Argument or option was passed without binary: not a valid executable tool
+        tool = ""
+    else:
+        tool = raw_tool
+
     flags: List[str] = []
     targets: List[NormalizedTarget] = []
 
     i = 0
-    num_tokens = len(tokens)
     while i < num_tokens:
         tok = tokens[i]
 
@@ -206,19 +284,30 @@ def parse_cli_command(command_str: str) -> ParsedCommand:
                         targets.append(norm)
             elif tok in TARGET_FLAGS and i + 1 < num_tokens:
                 next_tok = tokens[i + 1]
-                host = extract_host_from_token(next_tok)
-                if host:
-                    norm = normalize_ip_candidate(host)
-                    if norm.is_valid:
-                        targets.append(norm)
-                i += 1
+                if not next_tok.startswith("-"):
+                    host = extract_host_from_token(next_tok)
+                    if host:
+                        norm = normalize_ip_candidate(host)
+                        if norm.is_valid:
+                            targets.append(norm)
+                    i += 1
+            i += 1
+            continue
+
+        # Check variable assignment in positional tokens
+        if is_variable_assignment(tok):
+            val = tok.split("=", 1)[1]
+            host = extract_host_from_token(val)
+            if host:
+                norm = normalize_ip_candidate(host)
+                if norm.is_valid:
+                    targets.append(norm)
             i += 1
             continue
 
         # Positional token: check if it's a target IP, CIDR, or domain
         host = extract_host_from_token(tok)
-        if host and i > 0:  # Skip the tool name itself
-            # Check if this is a file with known extension (e.g. wordlist.txt)
+        if host and i != tool_idx and (raw_tool != "sudo" or i > tool_idx):
             ext = host.rsplit(".", 1)[-1].lower() if "." in host else ""
             if ext not in FILE_EXTENSIONS:
                 norm = normalize_ip_candidate(host)
@@ -245,7 +334,7 @@ def extract_and_parse_all_commands(text: str) -> List[ParsedCommand]:
         sub_cmds = split_chained_commands(block)
         for sc in sub_cmds:
             parsed = parse_cli_command(sc)
-            if parsed.tool:
+            if parsed and parsed.raw.strip():
                 all_parsed.append(parsed)
 
     return all_parsed

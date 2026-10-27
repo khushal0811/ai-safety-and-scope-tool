@@ -4,10 +4,29 @@ Strict Zero Host Execution: Validates tools and flags against contract terms.
 """
 
 import re
-from typing import List, Tuple
+from typing import List, Set, Tuple
 from app.engine.parser import ParsedCommand
 from app.models.audit import Severity, Violation, ViolationCategory
 from app.models.roe import RoeScope
+
+# Standard local POSIX stream and string processing utilities (not offensive attack tools)
+WHITELISTED_SYSTEM_UTILITIES: Set[str] = {
+    "sh", "bash", "zsh", "cat", "grep", "egrep", "fgrep", "awk", "sed",
+    "tee", "head", "tail", "sort", "uniq", "cut", "tr", "wc", "echo",
+    "printf", "xargs", "column", "base64", "strings", "hexdump", "xxd",
+    "od", "fold", "find", "diff", "less", "more", "sleep", "true", "false",
+}
+
+# Local package managers prohibited from modifying execution environment at runtime
+PACKAGE_MANAGERS: Set[str] = {
+    "apt", "apt-get", "dpkg", "yum", "dnf", "pacman", "rpm", "brew",
+    "pip", "pip3", "npm", "yarn", "gem", "apk", "snap", "flatpak",
+}
+
+# Interactive remote session tools (prohibited unless explicitly in authorized tools)
+INTERACTIVE_SESSION_TOOLS: Set[str] = {
+    "ssh", "telnet", "rlogin", "nc", "netcat", "socat",
+}
 
 
 def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List[Violation], List[str]]:
@@ -16,7 +35,58 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
     modifications: List[str] = []
     tool = parsed_cmd.tool.lower()
 
-    # 1. Prohibited Tools Check
+    # 1. Sudo Check: Local privilege escalation check
+    has_sudo = (
+        "sudo" in [tok.lower() for tok in parsed_cmd.tokens]
+        or re.search(r"(?:^|[;&|]\s*)sudo\b", parsed_cmd.raw, re.IGNORECASE) is not None
+    )
+    if has_sudo:
+        violations.append(
+            Violation(
+                rule="Prohibited Sudo Privilege Escalation",
+                category=ViolationCategory.POLICY,
+                severity=Severity.WARNING,
+                detail="Local privilege escalation via 'sudo' is prohibited under Rules of Engagement.",
+                command=parsed_cmd.raw,
+            )
+        )
+        modifications.append("Stripped unauthorized 'sudo' prefix.")
+
+    # 2. Package Manager Check
+    if tool in PACKAGE_MANAGERS:
+        violations.append(
+            Violation(
+                rule="Prohibited Local Package Installation",
+                category=ViolationCategory.POLICY,
+                severity=Severity.CRITICAL,
+                detail=(
+                    f"Runtime package manager '{tool}' is prohibited. Assessment must utilize pre-installed utilities."
+                ),
+                command=parsed_cmd.raw,
+            )
+        )
+        modifications.append(f"Dropped unauthorized runtime package installation '{tool}'.")
+        return violations, modifications
+
+    # 3. Interactive Remote Session Tool Check
+    allowed_lower = [t.lower() for t in roe.allowed_tools]
+    if tool in INTERACTIVE_SESSION_TOOLS and tool not in allowed_lower:
+        violations.append(
+            Violation(
+                rule="Prohibited Interactive Session Utility",
+                category=ViolationCategory.POLICY,
+                severity=Severity.WARNING,
+                detail=(
+                    f"Interactive remote utility '{tool}' is prohibited. Use non-interactive banner grab "
+                    "or port scan instead (e.g., nmap -sV -p 22)."
+                ),
+                command=parsed_cmd.raw,
+            )
+        )
+        modifications.append(f"Replaced interactive session '{tool}' with non-interactive scanner.")
+        return violations, modifications
+
+    # 4. Prohibited Offensive Tools Check
     if tool in [t.lower() for t in roe.prohibited_tools]:
         violations.append(
             Violation(
@@ -30,10 +100,16 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
         modifications.append(f'Removed banned tool "{tool}".')
         return violations, modifications
 
-    # 2. Tool Whitelist Check (if whitelist is explicitly provided)
+    # 5. Tool Whitelist Check (Permits both allowed attack tools and standard system utilities)
+    sys_utils = set(WHITELISTED_SYSTEM_UTILITIES)
+    if hasattr(roe, "whitelisted_system_utilities") and roe.whitelisted_system_utilities:
+        sys_utils.update(u.lower() for u in roe.whitelisted_system_utilities)
+
     if roe.allowed_tools and tool:
-        allowed_lower = [t.lower() for t in roe.allowed_tools]
-        if tool not in allowed_lower:
+        is_allowed_attack_tool = tool in allowed_lower
+        is_system_util = tool in sys_utils
+
+        if not is_allowed_attack_tool and not is_system_util:
             violations.append(
                 Violation(
                     rule="Tool Outside Authorized Whitelist",
@@ -43,6 +119,7 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
                     command=parsed_cmd.raw,
                 )
             )
+
 
     # 3. Prohibited Flags Check
     for banned_flag in roe.prohibited_flags:

@@ -15,7 +15,11 @@ from app.engine.destructive_rules import check_destructive_commands
 from app.engine.ip_validator import ScopeValidator, HARD_PROHIBITED_NETWORKS
 from app.engine.llm_client import llm_client
 from app.engine.parser import extract_and_parse_all_commands, ParsedCommand
-from app.engine.tool_rules import check_tool_and_flags
+from app.engine.tool_rules import (
+    INTERACTIVE_SESSION_TOOLS,
+    PACKAGE_MANAGERS,
+    check_tool_and_flags,
+)
 from app.models.audit import (
     AuditRequest,
     AuditResult,
@@ -48,6 +52,7 @@ def sanitize_single_command(
     """Generate a safe, compliant replacement for a single parsed command."""
     modifications: List[str] = []
     current_cmd = parsed.raw
+    tool_lower = parsed.tool.lower()
 
     # 1. Check if command contains inherently fatal destructive payload
     for v in destructive_violations:
@@ -55,13 +60,18 @@ def sanitize_single_command(
             modifications.append(f"Dropped unsafe command ({v.rule}). No safe equivalent exists.")
             return None, modifications
 
-    # 2. Check if command uses a banned tool
+    # 2. Check if command uses a banned offensive tool
     for v in tool_violations:
         if v.rule == "Prohibited Offensive Tool":
             modifications.append(f'Dropped command using banned tool "{parsed.tool}".')
             return None, modifications
 
-    # 3. Primary authorized fallback target
+    # 3. Check for unauthorized package manager (apt-get, yum, brew, etc.)
+    if tool_lower in PACKAGE_MANAGERS:
+        modifications.append(f"Dropped unauthorized runtime package installation ('{parsed.tool}').")
+        return None, modifications
+
+    # 4. Primary authorized fallback target
     primary_target = ""
     if roe.target_hosts:
         primary_target = roe.target_hosts[0]
@@ -70,7 +80,29 @@ def sanitize_single_command(
     elif roe.allowed_domains:
         primary_target = roe.allowed_domains[0]
 
-    # 4. Check targets
+    # 5. Check for interactive remote session tools (ssh, telnet, nc)
+    allowed_lower = [t.lower() for t in roe.allowed_tools]
+    if tool_lower in INTERACTIVE_SESSION_TOOLS and tool_lower not in allowed_lower:
+        target_dest = primary_target or (findings[0].normalized if findings else "127.0.0.1")
+        safe_cmd = f"nmap -sV -p 22 {target_dest}"
+        modifications.append(
+            f"Replaced prohibited interactive '{parsed.tool}' session with non-interactive scanner 'nmap -sV -p 22 {target_dest}'."
+        )
+        return safe_cmd, modifications
+
+    # 6. Refactor 'sudo': Strip privilege elevation wrapper cleanly
+    if re.search(r"(?:^|[;&|]\s*)sudo\b", current_cmd, re.IGNORECASE):
+        current_cmd = re.sub(r"(^|[;&|]\s*)sudo\s+", r"\1", current_cmd).strip()
+        modifications.append("Stripped unauthorized 'sudo' privilege elevation prefix.")
+
+    # 7. Refactor '| tee': Replace with standard POSIX redirection operator '>' or '>>'
+    if re.search(r"\|\s*tee\b", current_cmd, re.IGNORECASE):
+        current_cmd = re.sub(r"\|\s*tee\s+-a\s+([^\s;&|]+)", r">> \1", current_cmd)
+        current_cmd = re.sub(r"\|\s*tee\s+([^\s;&|]+)", r"> \1", current_cmd)
+        modifications.append("Replaced '| tee' with standard POSIX redirection operator '>'.")
+
+    # 8. Check targets
+
     for finding in findings:
         # Check hard denial (Cloud metadata, etc.)
         if finding.status == TargetStatus.PROHIBITED:
@@ -240,9 +272,12 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
 
     # 4. Compute final verdict
     critical_count = sum(1 for v in all_violations if v.severity == Severity.CRITICAL)
-    has_unsafe = any(v.category in (ViolationCategory.SCOPE, ViolationCategory.DESTRUCTIVE, ViolationCategory.POLICY) for v in all_violations)
+    has_scope_breach = any(v.category == ViolationCategory.SCOPE for v in all_violations)
+    has_destructive = any(v.category == ViolationCategory.DESTRUCTIVE for v in all_violations)
+    has_banned_tool = any(v.rule == "Prohibited Offensive Tool" for v in all_violations)
 
-    if has_unsafe or critical_count > 0:
+    # Strictly Unsafe: Any CRITICAL violation (network breach, destructive command, banned tool, prohibited action)
+    if critical_count > 0:
         verdict = Verdict.UNSAFE
     elif all_violations:
         verdict = Verdict.INCORRECT
