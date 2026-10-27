@@ -9,17 +9,25 @@ Endpoints:
 from datetime import datetime, timezone
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Header
+from uuid import uuid4
+from fastapi import APIRouter, Header, HTTPException, status
 
+from app.db.supabase_client import (
+    delete_benchmark_runs,
+    fetch_benchmark_history,
+    save_benchmark_run,
+)
 from app.engine.openrouter_client import openrouter_client
 from app.engine.verifier import evaluate_audit
 from app.models.audit import AuditRequest, AuditResult, Verdict, ViolationCategory
 from app.models.benchmark import (
+    BenchmarkDeleteRequest,
     BenchmarkEvaluateItem,
     BenchmarkEvaluateRequest,
     BenchmarkEvaluateResponse,
     BenchmarkQueryRequest,
     BenchmarkQueryResponse,
+    BenchmarkRunRecord,
     BenchmarkSummary,
     FrontierModelInfo,
     ModelBenchmarkResult,
@@ -184,10 +192,72 @@ async def evaluate_benchmark_models(
         fastest_model=fastest_model,
     )
 
-    return BenchmarkEvaluateResponse(
+    benchmark_id = f"BM-{uuid4().hex[:8].upper()}"
+    scenario_title = request.scenario_title or "Custom Benchmark"
+
+    response = BenchmarkEvaluateResponse(
+        benchmark_id=benchmark_id,
         timestamp=timestamp,
         roe_id=request.roe.roe_id,
+        scenario_title=scenario_title,
         prompt=request.prompt,
         items=items,
         summary=summary,
     )
+
+    # Persist benchmark run to PostgreSQL if user is authenticated
+    if x_user_id:
+        try:
+            save_benchmark_run(
+                benchmark_data={
+                    "benchmark_id": benchmark_id,
+                    "roe_id": request.roe.roe_id,
+                    "scenario_title": scenario_title,
+                    "prompt": request.prompt,
+                    "total_models": total,
+                    "compliance_rate": cr,
+                    "scope_violation_rate": svr,
+                    "hallucination_rate": hr,
+                    "average_latency_ms": avg_latency,
+                    "fastest_model": fastest_model,
+                    "summary": summary.model_dump(),
+                    "items": [item.model_dump() for item in items],
+                },
+                user_id=x_user_id,
+            )
+        except Exception as e:
+            logger.error(f"[Benchmark] Failed to persist benchmark run {benchmark_id}: {e}")
+
+    return response
+
+
+@benchmark_router.get("/history", response_model=List[BenchmarkRunRecord])
+async def get_benchmark_history(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    limit: int = 50,
+):
+    """Retrieve historical benchmark runs for the authenticated user."""
+    if not x_user_id:
+        return []
+    return fetch_benchmark_history(user_id=x_user_id, limit=limit)
+
+
+@benchmark_router.delete("/history")
+async def delete_benchmark_history(
+    payload: BenchmarkDeleteRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+):
+    """Permanently delete one or more benchmark runs from the database."""
+    if not x_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to delete benchmark history.",
+        )
+    if not payload.benchmark_ids:
+        return {"deleted": 0, "status": "noop"}
+
+    success = delete_benchmark_runs(benchmark_ids=payload.benchmark_ids, user_id=x_user_id)
+    if not success:
+        logger.warning(f"[Benchmark] Failed to delete runs for user {x_user_id}")
+    return {"deleted": len(payload.benchmark_ids), "status": "success"}
+

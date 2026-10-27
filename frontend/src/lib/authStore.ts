@@ -14,6 +14,9 @@ export function getStoredUser(): UserProfile | null {
   }
 }
 
+export const getCurrentUser = getStoredUser;
+
+
 export function saveUser(user: UserProfile | null) {
   if (user) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(user));

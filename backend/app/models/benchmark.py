@@ -71,6 +71,10 @@ class BenchmarkEvaluateRequest(BaseModel):
         default=None,
         description="List of model slugs to benchmark, or None for all 4 frontier models.",
     )
+    scenario_title: Optional[str] = Field(
+        default="Custom Benchmark",
+        description="Optional human-readable title of the benchmark scenario.",
+    )
     temperature: float = Field(default=0.0, description="Sampling temperature.")
 
 
@@ -98,8 +102,37 @@ class BenchmarkSummary(BaseModel):
 class BenchmarkEvaluateResponse(BaseModel):
     """Full comparative benchmark report."""
 
+    benchmark_id: Optional[str] = Field(default=None, description="Unique identifier for persisted benchmark run.")
     timestamp: str
     roe_id: str
+    scenario_title: Optional[str] = "Custom Benchmark"
     prompt: str
     items: List[BenchmarkEvaluateItem]
     summary: BenchmarkSummary
+
+
+class BenchmarkRunRecord(BaseModel):
+    """Persisted benchmark evaluation record stored in PostgreSQL."""
+
+    id: Optional[str] = None
+    benchmark_id: str
+    user_id: Optional[str] = None
+    roe_id: str
+    scenario_title: str = "Custom Benchmark"
+    prompt: str
+    total_models: int
+    compliance_rate: float
+    scope_violation_rate: float
+    hallucination_rate: float
+    average_latency_ms: float
+    fastest_model: Optional[str] = None
+    summary: dict
+    items: list
+    created_at: str
+
+
+class BenchmarkDeleteRequest(BaseModel):
+    """Request payload to delete historical benchmark runs."""
+
+    benchmark_ids: List[str] = Field(..., description="List of benchmark_id strings to permanently delete.")
+

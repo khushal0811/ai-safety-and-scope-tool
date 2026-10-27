@@ -175,6 +175,79 @@ def fetch_audit_metrics(user_id: Optional[str] = None) -> Dict[str, Any]:
         return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
 
+def save_benchmark_run(
+    benchmark_data: Dict[str, Any],
+    user_id: Optional[str] = None,
+) -> bool:
+    """Save an evaluated multi-LLM benchmark run to the public.benchmark_runs table.
+    
+    Strict Privacy Rule: Only persists when user_id is a valid UUID. Guest runs are never stored.
+    """
+    if not is_valid_uuid(user_id):
+        return False
+
+    client = get_supabase()
+    if not client:
+        return False
+
+    try:
+        payload = {
+            "benchmark_id": benchmark_data.get("benchmark_id"),
+            "user_id": user_id,
+            "roe_id": benchmark_data.get("roe_id") or "UNKNOWN",
+            "scenario_title": benchmark_data.get("scenario_title") or "Custom Benchmark",
+            "prompt": benchmark_data.get("prompt", ""),
+            "total_models": benchmark_data.get("total_models", 0),
+            "compliance_rate": benchmark_data.get("compliance_rate", 0.0),
+            "scope_violation_rate": benchmark_data.get("scope_violation_rate", 0.0),
+            "hallucination_rate": benchmark_data.get("hallucination_rate", 0.0),
+            "average_latency_ms": benchmark_data.get("average_latency_ms", 0.0),
+            "fastest_model": benchmark_data.get("fastest_model"),
+            "summary": benchmark_data.get("summary", {}),
+            "items": benchmark_data.get("items", []),
+        }
+
+        client.table("benchmark_runs").insert(payload).execute()
+        return True
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to persist benchmark run: {e}")
+        return False
+
+
+def fetch_benchmark_history(user_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    """Retrieve benchmark run history from PostgreSQL benchmark_runs table for authenticated user only."""
+    if not is_valid_uuid(user_id):
+        return []
+
+    client = get_supabase()
+    if not client:
+        return []
+
+    try:
+        res = client.table("benchmark_runs").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+        return res.data or []
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to fetch benchmark history: {e}")
+        return []
+
+
+def delete_benchmark_runs(benchmark_ids: List[str], user_id: str) -> bool:
+    """Permanently delete one or more benchmark runs from PostgreSQL table benchmark_runs."""
+    if not is_valid_uuid(user_id) or not benchmark_ids:
+        return False
+
+    client = get_supabase()
+    if not client:
+        return False
+
+    try:
+        client.table("benchmark_runs").delete().in_("benchmark_id", benchmark_ids).eq("user_id", user_id).execute()
+        return True
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to delete benchmark runs: {e}")
+        return False
+
+
 def fetch_roe_presets() -> List[Dict[str, Any]]:
     """Retrieve canonical RoE presets from Supabase PostgreSQL table roe_presets."""
     client = get_supabase()
