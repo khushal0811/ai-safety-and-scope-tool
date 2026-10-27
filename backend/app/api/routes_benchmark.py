@@ -18,7 +18,7 @@ from app.db.supabase_client import (
     save_benchmark_run,
 )
 from app.engine.openrouter_client import openrouter_client
-from app.engine.verifier import evaluate_audit
+from app.engine.verifier import evaluate_audit, evaluate_audit_async
 from app.models.audit import AuditRequest, AuditResult, Severity, TargetStatus, Verdict, ViolationCategory
 from app.models.benchmark import (
     BenchmarkDeleteRequest,
@@ -186,7 +186,7 @@ async def evaluate_benchmark_models(
             model_output=output_text or f"// Model returned status: {res.status}. {res.error_message or ''}",
         )
 
-        audit_res: AuditResult = evaluate_audit(audit_req)
+        audit_res: AuditResult = await evaluate_audit_async(audit_req)
 
         # Tabulate verdicts
         if audit_res.verdict == Verdict.CORRECT:
