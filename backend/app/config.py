@@ -13,8 +13,27 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
-    LLAMA_MODEL: str = "meta-llama/llama-3.1-8b-instruct:free"
+    LLAMA_MODEL: str = "llama-3.3-70b-versatile"
+
+    @property
+    def llm_provider(self) -> str:
+        if self.GROQ_API_KEY:
+            return "groq"
+        if self.OPENROUTER_API_KEY:
+            return "openrouter"
+        return "none"
+
+    @property
+    def llm_api_key(self) -> str:
+        return self.GROQ_API_KEY or self.OPENROUTER_API_KEY
+
+    @property
+    def llm_base_url(self) -> str:
+        if self.GROQ_API_KEY:
+            return "https://api.groq.com/openai/v1"
+        return "https://openrouter.ai/api/v1"
 
     model_config = SettingsConfigDict(
         env_file=".env",
