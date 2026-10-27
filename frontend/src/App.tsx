@@ -36,8 +36,8 @@ export default function App() {
   const [guestMode, setGuestMode] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  // Past Audits history state
-  const [audits, setAudits] = useState<PastAudit[]>(getPastAudits);
+  // Past Audits history state (Strict Privacy: empty for guests)
+  const [audits, setAudits] = useState<PastAudit[]>(() => (user ? getPastAudits(user.id) : []));
 
   // Studio state
   const [roeMode, setRoeMode] = useState<RoeMode>('preset');
@@ -68,9 +68,13 @@ export default function App() {
     return unsub;
   }, []);
 
-  // Synchronize past audits with Supabase PostgreSQL cloud database
+  // Synchronize past audits with Supabase PostgreSQL cloud database (Strictly isolated by user_id)
   useEffect(() => {
-    syncPastAuditsFromCloud(user?.id).then(setAudits);
+    if (user) {
+      syncPastAuditsFromCloud(user.id).then(setAudits);
+    } else {
+      setAudits([]);
+    }
   }, [user, page]);
 
   function handleLogin(u: UserProfile) {
@@ -81,12 +85,13 @@ export default function App() {
   function handleLogout() {
     setUser(null);
     saveUser(null);
+    setAudits([]);
     setGuestMode(false);
     setPage('studio');
   }
 
   function handleClearHistory() {
-    clearPastAudits();
+    clearPastAudits(user?.id);
     setAudits([]);
   }
 
@@ -125,23 +130,25 @@ export default function App() {
       setResult(res);
       setStep(3); // Transition into Step 3 (Audit Verdict & Safe Rewriter)
 
-      // Automatically record audit to Past Audits store
-      const modelObj = MODELS.find((m) => m.id === modelId);
-      const newAudit: PastAudit = {
-        id: 'aud_' + Math.random().toString(36).substring(2, 8),
-        timestamp: new Date().toISOString(),
-        roeId: activeScope.roe_id,
-        roeName: activeScope.name,
-        modelId,
-        modelName: modelObj ? modelObj.label : modelId,
-        prompt: prompt.trim() || 'Custom Prompt',
-        proposedCommand: modelOutput.trim(),
-        executionTimeMs: 34,
-        result: res,
-      };
+      // Automatically record audit to Past Audits store ONLY for authenticated users
+      if (user) {
+        const modelObj = MODELS.find((m) => m.id === modelId);
+        const newAudit: PastAudit = {
+          id: res.audit_id || 'aud_' + Math.random().toString(36).substring(2, 8),
+          timestamp: new Date().toISOString(),
+          roeId: activeScope.roe_id,
+          roeName: activeScope.name,
+          modelId,
+          modelName: modelObj ? modelObj.label : modelId,
+          prompt: prompt.trim() || 'Custom Prompt',
+          proposedCommand: modelOutput.trim(),
+          executionTimeMs: 34,
+          result: res,
+        };
 
-      const updated = savePastAudit(newAudit);
-      setAudits(updated);
+        const updated = savePastAudit(newAudit, user.id);
+        setAudits(updated);
+      }
     } finally {
       setLoading(false);
     }
