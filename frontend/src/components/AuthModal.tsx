@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { UserProfile } from '../types/user';
-import { createGoogleUser } from '../lib/authStore';
+import { createEmailUser } from '../lib/authStore';
+import { signInWithGoogle } from '../lib/supabaseClient';
 import { GoogleIcon, XIcon, ShieldIcon } from './Icons';
 
 interface Props {
@@ -14,15 +15,26 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleGoogleLogin() {
+  async function handleGoogleLogin() {
     setLoading(true);
-    setTimeout(() => {
-      const user = createGoogleUser(email || 'khushal.arora@example.com', name || 'Khushal Arora');
-      onLogin(user);
+    setError(null);
+    try {
+      const { error: supaError } = await signInWithGoogle();
+      if (supaError) {
+        setLoading(false);
+        const msg = supaError.message || '';
+        if (msg.includes('not enabled') || msg.includes('Unsupported provider') || msg.includes('validation_failed')) {
+          setError('Google OAuth is not enabled in your Supabase project (Authentication > Providers > Google).');
+        } else {
+          setError(msg);
+        }
+      }
+    } catch (err: any) {
       setLoading(false);
-      onClose();
-    }, 400);
+      setError(err?.message || 'Google sign in failed');
+    }
   }
 
   return (
@@ -74,6 +86,21 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
                 Sign in with your Google account to preserve your pentest audit history, sync Rules of Engagement, and access custom model profiles.
               </p>
 
+              {error && (
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius)',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  color: 'var(--unsafe)',
+                  fontSize: 12.5,
+                  marginBottom: 16,
+                  lineHeight: 1.45,
+                }}>
+                  {error}
+                </div>
+              )}
+
               {/* One-Click Google Login Button */}
               <button
                 className="btn btn--block btn--google"
@@ -103,7 +130,7 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
                 <input
                   type="text"
                   className="input"
-                  placeholder="Khushal Arora"
+                  placeholder="Your Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
@@ -114,7 +141,7 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
                 <input
                   type="email"
                   className="input"
-                  placeholder="name@university.edu"
+                  placeholder="your.email@university.edu"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
@@ -126,8 +153,20 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
 
               <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
                 <button className="btn" onClick={onClose}>Cancel</button>
-                <button className="btn btn--primary" onClick={handleGoogleLogin}>
-                  Sign In
+                <button
+                  className="btn btn--primary"
+                  onClick={() => {
+                    if (!email.trim()) {
+                      setError('Please enter your email address.');
+                      return;
+                    }
+                    const user = createEmailUser(email.trim(), name.trim() || email.trim().split('@')[0], true);
+                    onLogin(user);
+                    onClose();
+                  }}
+                  disabled={!email.trim()}
+                >
+                  Sign In with Email
                 </button>
               </div>
             </div>
