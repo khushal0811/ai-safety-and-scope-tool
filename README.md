@@ -68,13 +68,35 @@ flowchart TD
 
 ---
 
-## 🎨 UI/UX Design Philosophy
+---
 
-Inspired by minimalist aesthetic design (such as Napkin AI):
-- **Grid Canvas:** Subtle geometric grid background canvas (`grid-pattern`) easy on the eyes.
-- **Monochromatic Palette:** Clean slate whites, charcoal grays, and deep black (`#09090b`) with refined 1px hairline borders.
-- **Restrained Badges:** Non-distracting, high-contrast badges for status indications without loud neon effects or heavy glassmorphism.
-- **Action-Oriented:** One-click copyable sanitized commands, side-by-side diff viewers, and quick preset switches.
+## 🎨 UI/UX Design Philosophy & Multi-Page Architecture
+
+Crafted after Khushal Arora's tactile portfolio design system:
+- **Dark Desk & Warm Stone Canvas:** Deep charcoal background (`#222225`) in dark mode with refined card surfaces (`#2b2b2f`) and sunken panels (`#1a1a1c`), accompanied by a warm stone light mode (`#f0ede8`).
+- **Subtle Geometric Grid:** Crisp 24px hairline grid lines providing an architectural canvas feel.
+- **Modern Typography:** `Space Grotesk` for headlines and narrative typography, paired with `JetBrains Mono` for CLI syntax, tags, and audit telemetry.
+- **Tactile Accents:** Vibrant periwinkle/indigo accents (`#6272f0` dark / `#4a5ce0` light), subtle micro-elevations on hover, and pulsating engine health indicators.
+
+### Multi-Page System Structure
+1. **Access Control Portal (`AuthLandingPage.tsx`):**
+   - Entry landing page for unauthenticated visitors.
+   - One-click Google OAuth integration.
+   - Account registration with an interactive **6-digit email verification code (OTP)** screen.
+   - Demo guest mode bypass for immediate evaluations.
+2. **Audit Studio (`App.tsx`):**
+   - Gamma AI-inspired progressive 3-step workflow (1. Rules of Engagement $\to$ 2. Model & Pentest Prompt $\to$ 3. Audit Verdict & Safe Rewriter).
+   - Side-by-side diff highlighting original vs. remediated commands.
+3. **Past Audits & Compliance History (`PastAuditsView.tsx`):**
+   - High-level telemetry metric cards (Total Audits, Unsafe Interceptions, Compliance Rate, Latency).
+   - Real-time search across commands, target IPs, and prompts.
+   - Quick verdict filters (`All`, `Unsafe`, `Incorrect`, `Correct`).
+   - Detailed inspection drawer with violation breakdowns and a "Load in Studio ↗" re-audit action.
+   - JSON report export.
+4. **Dedicated Settings (`SettingsView.tsx`):**
+   - User account profile and PostgreSQL sync state.
+   - Ephemeral API key vault (`sessionStorage` vs. paranoid `In-Memory Only`).
+   - Deterministic verification engine policy toggles.
 
 ---
 
@@ -102,17 +124,18 @@ ai-safety-and-scope-tool/
 │   ├── tests/                # Deterministic unit test suite
 │   ├── requirements.txt
 │   └── .env.example
-├── frontend/                 # React + Vite web dashboard (Napkin AI aesthetic)
+├── frontend/                 # React + Vite multi-page web application
 │   ├── src/
-│   │   ├── components/       # Grid canvas, RoE selector, sanitized command box
-│   │   ├── views/            # Audit Playground, Benchmark View, History
-│   │   └── styles/           # Minimalist CSS tokens & grid styling
+│   │   ├── components/       # AuthLandingPage, RoeSelector, PromptComposer, AuditResultView, PastAuditsView, SettingsView, NavBar
+│   │   ├── data/             # RoE presets and offensive model templates
+│   │   ├── lib/              # Auth store, history store, IP normalizer, diff engine, key store
+│   │   ├── services/         # Audit service & client-side deterministic demo engine
+│   │   └── types/            # TypeScript interfaces (AuditResult, RoE, PastAudit, UserProfile)
 │   ├── package.json
-│   └── vite.config.js
-├── supabase/                 # Database migrations & RLS policies
-│   └── migrations/           # PostgreSQL schema for presets, sessions, and audits
+│   └── vite.config.ts
+├── supabase/                 # PostgreSQL migrations & Row Level Security
+│   └── migrations/           # 001_initial_schema.sql (profiles & audit_logs with RLS)
 ├── scenarios/                # Standardized JSON scenario presets
-├── data/                     # Offline NVD CVE snapshot & tool signatures
 └── docs/                     # Architecture documentation & API specs
 ```
 
