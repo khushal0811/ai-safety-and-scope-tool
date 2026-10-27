@@ -116,11 +116,12 @@ class OpenRouterClient:
         prompt: str,
         system_prompt: Optional[str] = None,
         api_key: Optional[str] = None,
+        groq_key: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 1024,
         timeout: float = 40.0,
     ) -> ModelBenchmarkResult:
-        """Query a single model via OpenRouter and collect benchmark telemetry."""
+        """Query a single model via OpenRouter or fallback to system Groq key."""
         resolved_id = self.resolve_model_id(model_id)
         model_meta = FRONTIER_MODELS.get(
             resolved_id,
@@ -134,13 +135,36 @@ class OpenRouterClient:
 
         effective_key = self.get_effective_key(api_key)
         if not effective_key:
+            # Check if this model can run on the backend's built-in system Groq key
+            effective_groq = (groq_key or settings.GROQ_API_KEY).strip()
+            is_groq_compatible = (
+                "llama" in resolved_id.lower()
+                or "system" in resolved_id.lower()
+                or "groq" in resolved_id.lower()
+            )
+
+            if effective_groq and is_groq_compatible:
+                return await self._query_groq_system(
+                    resolved_id=resolved_id,
+                    model_meta=model_meta,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    groq_key=effective_groq,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+
             return ModelBenchmarkResult(
                 model_id=resolved_id,
                 model_name=model_meta.name,
                 provider=model_meta.provider,
                 latency_ms=0.0,
                 status="unauthorized",
-                error_message="No OpenRouter API key provided. Please configure your key in Settings or pass X-OpenRouter-Key header.",
+                error_message=(
+                    f"Benchmarking {model_meta.name} requires a personal OpenRouter API key. "
+                    "Configure your key in Settings or use the built-in system key (Groq)."
+                ),
             )
 
         headers = {
@@ -247,12 +271,95 @@ class OpenRouterClient:
                 error_message=str(e),
             )
 
+    async def _query_groq_system(
+        self,
+        resolved_id: str,
+        model_meta: FrontierModelInfo,
+        prompt: str,
+        system_prompt: Optional[str],
+        groq_key: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+    ) -> ModelBenchmarkResult:
+        """Execute inference using backend server-side Groq system key."""
+        start_time = time.perf_counter()
+        headers = {
+            "Authorization": f"Bearer {groq_key}",
+            "Content-Type": "application/json",
+        }
+        groq_model = settings.LLAMA_MODEL or "openai/gpt-oss-120b"
+        payload = {
+            "model": groq_model,
+            "messages": [
+                {"role": "system", "content": system_prompt or DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                res = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+                if res.status_code == 200:
+                    data = res.json()
+                    choices = data.get("choices", [])
+                    raw_content = ""
+                    if choices:
+                        raw_content = choices[0].get("message", {}).get("content", "")
+
+                    usage = data.get("usage", {})
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+                    total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+                    extracted = extract_command_blocks(raw_content)
+
+                    return ModelBenchmarkResult(
+                        model_id=resolved_id,
+                        model_name=f"{model_meta.name} (via System Groq)",
+                        provider="Groq (System Key)",
+                        latency_ms=latency_ms,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        raw_output=raw_content,
+                        extracted_commands=extracted,
+                        status="success",
+                    )
+                else:
+                    return ModelBenchmarkResult(
+                        model_id=resolved_id,
+                        model_name=model_meta.name,
+                        provider="Groq (System Key)",
+                        latency_ms=latency_ms,
+                        status="error",
+                        error_message=f"Groq HTTP {res.status_code}: {res.text[:200]}",
+                    )
+        except Exception as e:
+            latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            return ModelBenchmarkResult(
+                model_id=resolved_id,
+                model_name=model_meta.name,
+                provider="Groq (System Key)",
+                latency_ms=latency_ms,
+                status="error",
+                error_message=str(e),
+            )
+
     async def benchmark_frontier_models(
         self,
         prompt: str,
         models: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
         api_key: Optional[str] = None,
+        groq_key: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 1024,
         timeout: float = 40.0,
@@ -265,6 +372,7 @@ class OpenRouterClient:
                 prompt=prompt,
                 system_prompt=system_prompt,
                 api_key=api_key,
+                groq_key=groq_key,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,
