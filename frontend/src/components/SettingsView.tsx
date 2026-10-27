@@ -4,6 +4,7 @@ import {
   getOpenRouterKey,
   getGroqKey,
   saveAllApiKeys,
+  saveKeysToVault,
   revokeAndWipeUserKeys,
 } from '../lib/keyStore';
 import { GoogleIcon, CheckIcon, TrashIcon } from './Icons';
@@ -30,8 +31,12 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
   const [blockCloudMetadata, setBlockCloudMetadata] = useState(true);
   const [filterDestructiveArgs, setFilterDestructiveArgs] = useState(true);
 
-  function handleSaveKeys() {
-    saveAllApiKeys({ openRouterKey, groqKey });
+  async function handleSaveKeys() {
+    if (currentUser) {
+      await saveKeysToVault(currentUser.id, { openRouterKey, groqKey });
+    } else {
+      saveAllApiKeys({ openRouterKey, groqKey });
+    }
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
   }

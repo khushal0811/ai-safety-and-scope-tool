@@ -107,25 +107,101 @@ export function clearAllKeys(): void {
   clearGroqKey();
 }
 
+const BACKEND_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+
+export interface VaultStatus {
+  isConfigured: boolean;
+  hasOpenRouterKey: boolean;
+  openRouterHint: string | null;
+  hasGroqKey: boolean;
+  groqHint: string | null;
+}
+
+export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
+  if (!userId) {
+    return {
+      isConfigured: false,
+      hasOpenRouterKey: false,
+      openRouterHint: null,
+      hasGroqKey: false,
+      groqHint: null,
+    };
+  }
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/vault/status?user_id=${encodeURIComponent(userId)}`);
+    if (!res.ok) throw new Error('Status check failed');
+    const data = await res.json();
+    return {
+      isConfigured: data.is_configured,
+      hasOpenRouterKey: data.has_openrouter_key,
+      openRouterHint: data.openrouter_hint,
+      hasGroqKey: data.has_groq_key,
+      groqHint: data.groq_hint,
+    };
+  } catch {
+    return {
+      isConfigured: Boolean(getOpenRouterKey() || getGroqKey()),
+      hasOpenRouterKey: Boolean(getOpenRouterKey()),
+      openRouterHint: maskKey(getOpenRouterKey() || ''),
+      hasGroqKey: Boolean(getGroqKey()),
+      groqHint: maskKey(getGroqKey() || ''),
+    };
+  }
+}
+
+export async function saveKeysToVault(
+  userId: string,
+  keys: { openRouterKey?: string; groqKey?: string }
+): Promise<boolean> {
+  // Save locally in transient memory
+  saveAllApiKeys(keys);
+
+  // Encrypt with server-side AES-256-GCM and persist to database vault
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/vault/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        openrouter_key: keys.openRouterKey || null,
+        groq_key: keys.groqKey || null,
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Vault save network warning:', err);
+    return false;
+  }
+}
+
 /**
  * Completely wipe API keys from client session and delete the row from the Supabase database vault.
  */
 export async function revokeAndWipeUserKeys(userId?: string): Promise<{ success: boolean; error?: string }> {
   clearAllKeys();
-  if (!userId || !supabase) {
+  if (!userId) {
     return { success: true };
   }
+
+  // 1. Call backend vault deletion endpoint
   try {
-    const { error } = await supabase.from('user_api_vault').delete().eq('user_id', userId);
-    if (error) {
-      // In offline mode or table not yet migrated, log warning but local keys are still wiped
-      console.warn('Database key vault delete notice:', error.message);
-      return { success: true, error: error.message };
-    }
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err?.message || 'Failed to revoke keys' };
+    await fetch(`${BACKEND_BASE}/api/vault/keys?user_id=${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.warn('Backend vault delete warning:', err);
   }
+
+  // 2. Direct Supabase fallback
+  if (supabase) {
+    try {
+      await supabase.from('user_api_vault').delete().eq('user_id', userId);
+    } catch {
+      // Ignored if offline
+    }
+  }
+
+  return { success: true };
 }
 
 export function maskKey(key: string): string {

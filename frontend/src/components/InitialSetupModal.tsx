@@ -4,6 +4,7 @@ import {
   getOpenRouterKey,
   getGroqKey,
   saveAllApiKeys,
+  saveKeysToVault,
 } from '../lib/keyStore';
 import { SparkIcon, ShieldIcon, CheckIcon, KeyIcon } from './Icons';
 import { KeyProtectionNotice } from './KeyProtectionNotice';
@@ -30,10 +31,14 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
     }
   }
 
-  function handleSaveAndContinue() {
+  async function handleSaveAndContinue() {
     markCompleted();
     if (choice === 'custom') {
-      saveAllApiKeys({ openRouterKey, groqKey });
+      if (user) {
+        await saveKeysToVault(user.id, { openRouterKey, groqKey });
+      } else {
+        saveAllApiKeys({ openRouterKey, groqKey });
+      }
     }
     onClose();
   }
