@@ -131,14 +131,6 @@ export function BenchmarkStudioView({
     });
   }
 
-  function selectAllModels() {
-    setSelectedModelIds(new Set(availableModels.map((m) => m.id)));
-  }
-
-  function selectOpenSourceOnly() {
-    setSelectedModelIds(new Set(['meta-llama/llama-3.1-70b-instruct']));
-  }
-
   // Run benchmark evaluation
   async function handleRunBenchmark() {
     if (!prompt.trim() || running) return;
@@ -447,15 +439,6 @@ export function BenchmarkStudioView({
             <div style={{ marginBottom: '20px' }}>
               <div className="benchmark-section-label">
                 <span className="benchmark-section-label__title">3. Target Frontier LLMs</span>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button type="button" className="inline-link-btn font-xs" onClick={selectAllModels}>
-                    Select All
-                  </button>
-                  <span style={{ color: 'var(--border-strong)' }}>•</span>
-                  <button type="button" className="inline-link-btn font-xs" onClick={selectOpenSourceOnly}>
-                    Llama 3.3 Only
-                  </button>
-                </div>
               </div>
 
               {/* Banner if OpenRouter key is not set */}
