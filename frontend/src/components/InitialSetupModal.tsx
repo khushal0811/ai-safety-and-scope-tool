@@ -10,7 +10,7 @@ import {
 import { SparkIcon, ShieldIcon, CheckIcon, KeyIcon } from './Icons';
 
 interface Props {
-  user: UserProfile;
+  user: UserProfile | null;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -20,13 +20,13 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
   const [openRouterKey, setOpenRouterKey] = useState(getOpenRouterKey() || '');
   const [groqKey, setGroqKey] = useState(getGroqKey() || '');
   const [storageMode, setStorageMode] = useState<KeyStorageMode>(getStorageMode());
-  const [showGroqOverride, setShowGroqOverride] = useState(false);
 
   if (!isOpen) return null;
 
   function markCompleted() {
     try {
-      localStorage.setItem(`sst.initial_setup_completed_${user.id}`, 'true');
+      const key = user ? `sst.initial_setup_completed_${user.id}` : 'sst.initial_setup_completed_guest';
+      localStorage.setItem(key, 'true');
     } catch {
       // Ignored if storage full/blocked
     }
@@ -52,18 +52,18 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="initial-setup-title"
-        style={{ maxWidth: 560, padding: 0 }}
+        style={{ maxWidth: 580, padding: 0 }}
       >
-        <div className="modal__head" style={{ padding: '20px 24px 16px' }}>
+        <div className="modal__head" style={{ padding: '22px 24px 16px' }}>
           <div>
             <div className="hero__eyebrow" style={{ marginBottom: 4 }}>
-              // WELCOME, {user.name.toUpperCase()}
+              // INITIAL CONFIGURATION {user ? `· WELCOME, ${user.name.toUpperCase()}` : '· INFERENCE SETUP'}
             </div>
             <h2 className="card__title row" id="initial-setup-title" style={{ fontSize: 18, gap: 10 }}>
               <SparkIcon style={{ color: 'var(--accent)' }} /> Choose Your Inference Setup
             </h2>
             <p className="card__desc" style={{ marginTop: 4, fontSize: 13 }}>
-              Select how SST should evaluate security recommendations and run model benchmarks.
+              Select how SST should evaluate pentest commands and run frontier model benchmarks.
             </p>
           </div>
         </div>
@@ -91,16 +91,16 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
                   onChange={() => setChoice('system')}
                   style={{ accentColor: 'var(--accent)' }}
                 />
-                <strong style={{ fontSize: 14 }}>Option 1: Built-in System Provider</strong>
+                <strong style={{ fontSize: 14 }}>Option 1: Use System Key (Default Groq)</strong>
               </div>
               <span className="tag tag--ok">● Recommended · Free</span>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, paddingLeft: 24, lineHeight: 1.5 }}>
-              Use SST's backend server infrastructure (Groq Llama 3.3). Zero setup needed — RoE document extraction, scope analysis, and safe command rewriting work immediately without any personal API key.
+              Use SST's pre-configured backend infrastructure (Groq Llama 3.3). Zero setup needed — RoE extraction, scope analysis, and safe command remediation work immediately without any personal API key.
             </p>
           </div>
 
-          {/* Option 2: Bring Your Own OpenRouter Key */}
+          {/* Option 2: Enter Custom API Keys */}
           <div
             onClick={() => setChoice('custom')}
             style={{
@@ -122,12 +122,12 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
                   onChange={() => setChoice('custom')}
                   style={{ accentColor: 'var(--accent)' }}
                 />
-                <strong style={{ fontSize: 14 }}>Option 2: Bring Your Own OpenRouter Key</strong>
+                <strong style={{ fontSize: 14 }}>Option 2: Enter Your Own API Key (BYOK)</strong>
               </div>
               <span className="tag">Frontier Benchmarking</span>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, paddingLeft: 24, lineHeight: 1.5 }}>
-              Compare frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1) in real-time. Keys stay strictly in your browser transient memory and are never saved on the server.
+              Supply your own OpenRouter key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro) or enter a custom Groq key. Keys stay strictly in browser memory and are never saved on any server.
             </p>
 
             {choice === 'custom' && (
@@ -138,18 +138,37 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
                 <div className="field" style={{ margin: 0 }}>
                   <label className="field__label">
                     <span>OpenRouter API Key</span>
-                    <span className="mono font-xs text-muted">sk-or-v1-...</span>
+                    <span className="mono font-xs text-muted">sk-or-v1-... (Frontier Models)</span>
                   </label>
                   <input
                     type="password"
                     className="input mono"
-                    placeholder="Paste sk-or-v1-..."
+                    placeholder="Paste sk-or-v1-... for GPT-4o, Claude 3.5, Gemini"
                     value={openRouterKey}
                     onChange={(e) => setOpenRouterKey(e.target.value)}
                     autoComplete="off"
                     spellCheck={false}
                     autoFocus
                   />
+                </div>
+
+                <div className="field" style={{ margin: 0 }}>
+                  <label className="field__label">
+                    <span>Custom Groq API Key</span>
+                    <span className="mono font-xs text-muted">gsk_... (Optional Override)</span>
+                  </label>
+                  <input
+                    type="password"
+                    className="input mono"
+                    placeholder="Paste gsk_... (optional custom quota override)"
+                    value={groqKey}
+                    onChange={(e) => setGroqKey(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <span className="font-xs muted" style={{ marginTop: 3 }}>
+                    Leave blank to use the backend's shared Groq key for Llama 3.3.
+                  </span>
                 </div>
 
                 <div className="field" style={{ margin: 0 }}>
@@ -177,52 +196,33 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
                         onChange={() => setStorageMode('memory')}
                       />
                       <span>
-                        <strong>In-Memory</strong>
-                        <span className="muted font-xs">Cleared on reload</span>
+                        <strong>In-Memory Only</strong>
+                        <span className="muted font-xs">Cleared on page reload</span>
                       </span>
                     </label>
                   </div>
                 </div>
-
-                <details style={{ fontSize: 12 }}>
-                  <summary
-                    style={{ cursor: 'pointer', color: 'var(--text-muted)' }}
-                    onClick={() => setShowGroqOverride(!showGroqOverride)}
-                  >
-                    ▸ Optional: Custom Groq Key Override
-                  </summary>
-                  <div style={{ marginTop: 8 }}>
-                    <input
-                      type="password"
-                      className="input mono"
-                      placeholder="gsk_... (optional custom quota override)"
-                      value={groqKey}
-                      onChange={(e) => setGroqKey(e.target.value)}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  </div>
-                </details>
               </div>
             )}
           </div>
 
-          {/* Reassurance Notice */}
+          {/* Reassurance Notice that initial settings can be changed later */}
           <div
             className="note"
             style={{
-              padding: '10px 14px',
+              padding: '12px 14px',
               fontSize: 12.5,
-              background: 'var(--surface-sunken)',
-              border: '1px solid var(--border)',
+              background: 'rgba(98, 114, 240, 0.08)',
+              border: '1px solid rgba(98, 114, 240, 0.25)',
+              borderRadius: 'var(--radius)',
               display: 'flex',
               alignItems: 'center',
               gap: 10,
             }}
           >
-            <ShieldIcon width={16} height={16} style={{ flexShrink: 0, color: 'var(--accent)' }} />
-            <span>
-              <strong>Note:</strong> You can change this selection, add or delete API keys, and update verification engine rules anytime on the <strong>Settings</strong> page.
+            <ShieldIcon width={18} height={18} style={{ flexShrink: 0, color: 'var(--accent)' }} />
+            <span style={{ lineHeight: 1.45 }}>
+              <strong>Initial Settings Note:</strong> These initial preferences can be changed anytime in the <strong>Settings</strong> page, where you can add, remove, or update your API keys whenever you want.
             </span>
           </div>
         </div>
@@ -234,7 +234,7 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
           <button
             className="btn btn--primary"
             onClick={handleSaveAndContinue}
-            style={{ minWidth: 180 }}
+            style={{ minWidth: 200 }}
           >
             {choice === 'system' ? (
               <>

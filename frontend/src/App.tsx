@@ -15,6 +15,7 @@ import { PastAuditsView } from './components/PastAuditsView';
 import { SettingsView } from './components/SettingsView';
 import { AuthLandingPage } from './components/AuthLandingPage';
 import { AuthModal } from './components/AuthModal';
+import { InitialSetupModal } from './components/InitialSetupModal';
 import { ShieldIcon } from './components/Icons';
 
 type Theme = 'light' | 'dark';
@@ -35,6 +36,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(getStoredUser);
   const [guestMode, setGuestMode] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [initialSetupOpen, setInitialSetupOpen] = useState(false);
 
   // Past Audits history state (Strict Privacy: empty for guests)
   const [audits, setAudits] = useState<PastAudit[]>(() => (user ? getPastAudits(user.id) : []));
@@ -63,10 +65,32 @@ export default function App() {
     const unsub = initSupabaseAuthListener((newUser) => {
       if (newUser) {
         setUser(newUser);
+        try {
+          const completed = localStorage.getItem(`sst.initial_setup_completed_${newUser.id}`);
+          if (!completed) {
+            setInitialSetupOpen(true);
+          }
+        } catch {
+          // ignore
+        }
       }
     });
     return unsub;
   }, []);
+
+  // Check if active user needs initial setup configuration overlay
+  useEffect(() => {
+    if (user) {
+      try {
+        const completed = localStorage.getItem(`sst.initial_setup_completed_${user.id}`);
+        if (!completed) {
+          setInitialSetupOpen(true);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [user?.id]);
 
   // Synchronize past audits with Supabase PostgreSQL cloud database (Strictly isolated by user_id)
   useEffect(() => {
@@ -80,6 +104,14 @@ export default function App() {
   function handleLogin(u: UserProfile) {
     setUser(u);
     saveUser(u);
+    try {
+      const completed = localStorage.getItem(`sst.initial_setup_completed_${u.id}`);
+      if (!completed) {
+        setInitialSetupOpen(true);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   function handleLogout() {
@@ -336,6 +368,7 @@ export default function App() {
           onOpenLogin={() => setAuthModalOpen(true)}
           onLogout={handleLogout}
           onClearHistory={handleClearHistory}
+          onOpenInitialSetup={() => setInitialSetupOpen(true)}
         />
       )}
 
@@ -354,6 +387,15 @@ export default function App() {
           onLogin={handleLogin}
           onLogout={handleLogout}
           onClose={() => setAuthModalOpen(false)}
+        />
+      )}
+
+      {/* Initial Onboarding Setup Modal Overlay */}
+      {initialSetupOpen && (
+        <InitialSetupModal
+          user={user}
+          isOpen={initialSetupOpen}
+          onClose={() => setInitialSetupOpen(false)}
         />
       )}
     </div>
