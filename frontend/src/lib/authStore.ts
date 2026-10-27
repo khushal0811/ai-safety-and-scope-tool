@@ -24,8 +24,12 @@ export function saveUser(user: UserProfile | null) {
 }
 
 export function createGoogleUser(email = 'khushal.arora@example.com', name = 'Khushal Arora', id?: string): UserProfile {
+  const generatedId = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : '00000000-0000-4000-8000-' + Math.random().toString(16).slice(2, 14).padStart(12, '0');
+
   return {
-    id: id || 'usr_' + Math.random().toString(36).substring(2, 10),
+    id: id || generatedId,
     name,
     email,
     avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
@@ -36,8 +40,12 @@ export function createGoogleUser(email = 'khushal.arora@example.com', name = 'Kh
 }
 
 export function createEmailUser(email: string, name: string, isVerified = false, id?: string): UserProfile {
+  const generatedId = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : '00000000-0000-4000-8000-' + Math.random().toString(16).slice(2, 14).padStart(12, '0');
+
   return {
-    id: id || 'usr_' + Math.random().toString(36).substring(2, 10),
+    id: id || generatedId,
     name: name || email.split('@')[0],
     email,
     avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
