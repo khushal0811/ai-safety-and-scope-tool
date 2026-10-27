@@ -104,73 +104,103 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
           </div>
         </div>
 
-        {/* Section 2: LLM API Keys Vault */}
+        {/* Section 2: LLM Provider & Inference Options */}
         <div className="card">
           <div className="card__header">
             <span className="step-index">02</span>
             <div>
-              <h3 className="card__title">LLM Provider API Keys</h3>
+              <h3 className="card__title">LLM Provider &amp; Inference Modes</h3>
               <p className="card__desc">
-                Optional keys for real-time model queries via OpenRouter (Llama 3.3, Claude, GPT-4o).
+                Use SST's built-in backend system key by default, or bring your own OpenRouter key for frontier benchmarking.
               </p>
             </div>
           </div>
           <div className="card__body">
-            <div className="field">
-              <label className="field__label">
+            {/* Option 1: Built-in System Key (Default) */}
+            <div
+              style={{
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+                padding: '16px 18px',
+                marginBottom: 16,
+                background: 'var(--surface-sunken)',
+              }}
+            >
+              <div className="row between" style={{ marginBottom: 6 }}>
                 <span className="row" style={{ gap: 8 }}>
-                  <span>OpenRouter API Key</span>
+                  <strong style={{ fontSize: 13.5 }}>Option 1: Built-in System Provider (Default)</strong>
+                  <span className="tag tag--ok">● Active &amp; Ready</span>
+                </span>
+                <span className="mono font-xs text-muted">Backend Managed · Groq Llama 3.3</span>
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, lineHeight: 1.5 }}>
+                Zero setup required. Powered by SST's server-side Groq infrastructure for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
+              </p>
+            </div>
+
+            {/* Option 2: Personal OpenRouter Key (BYOK) */}
+            <div
+              style={{
+                border: openRouterKey ? '1px solid var(--accent)' : '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+                padding: '16px 18px',
+                marginBottom: 16,
+                background: 'var(--surface-sunken)',
+              }}
+            >
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <span className="row" style={{ gap: 8 }}>
+                  <strong style={{ fontSize: 13.5 }}>Option 2: Personal OpenRouter Key (BYOK)</strong>
                   {getOpenRouterKey() ? (
-                    <span className="tag tag--ok">Active</span>
+                    <span className="tag tag--ok">● Active (User Key)</span>
                   ) : (
-                    <span className="tag">Optional</span>
+                    <span className="tag">Optional · Frontier Models</span>
                   )}
                 </span>
                 <span className="mono font-xs text-muted">sk-or-v1-...</span>
-              </label>
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
+                Bring your own OpenRouter API key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1) in real-time. Keys stay in this browser session and are never logged or stored.
+              </p>
               <input
                 type="password"
                 className="input mono"
-                placeholder="sk-or-v1-..."
+                placeholder="Paste OpenRouter API key (sk-or-v1-...)"
                 value={openRouterKey}
                 onChange={(e) => setOpenRouterKey(e.target.value)}
                 autoComplete="off"
                 spellCheck={false}
               />
-              <p className="font-xs muted" style={{ marginTop: 4 }}>
-                Powers real-time benchmarking across frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1).
-              </p>
             </div>
+
+            {/* Advanced: Optional Custom Groq Key Override */}
+            <details style={{ marginBottom: 18, fontSize: 13 }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', userSelect: 'none', padding: '4px 0' }}>
+                ▸ Advanced: Custom Groq Key Override (Optional)
+              </summary>
+              <div style={{ marginTop: 10, padding: 12, border: '1px dashed var(--border)', borderRadius: 'var(--radius)', background: 'var(--surface-sunken)' }}>
+                <label className="field__label" style={{ marginBottom: 6 }}>
+                  <span>Custom Groq API Key</span>
+                  <span className="mono font-xs text-muted">gsk_...</span>
+                </label>
+                <input
+                  type="password"
+                  className="input mono"
+                  placeholder="Paste custom Groq key if overriding backend system quota"
+                  value={groqKey}
+                  onChange={(e) => setGroqKey(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="font-xs muted" style={{ marginTop: 4 }}>
+                  Only needed if you wish to use your own private Groq API tier instead of SST's shared server quota.
+                </p>
+              </div>
+            </details>
 
             <div className="field">
               <label className="field__label">
-                <span className="row" style={{ gap: 8 }}>
-                  <span>Groq API Key</span>
-                  {getGroqKey() ? (
-                    <span className="tag tag--ok">Active</span>
-                  ) : (
-                    <span className="tag">Optional</span>
-                  )}
-                </span>
-                <span className="mono font-xs text-muted">gsk_...</span>
-              </label>
-              <input
-                type="password"
-                className="input mono"
-                placeholder="gsk_..."
-                value={groqKey}
-                onChange={(e) => setGroqKey(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <p className="font-xs muted" style={{ marginTop: 4 }}>
-                Powers ultra-low latency Llama-3.3 inference for RoE document extraction and command rewriting.
-              </p>
-            </div>
-
-            <div className="field">
-              <label className="field__label">
-                <span>Key Storage Mode</span>
+                <span>Key Storage Isolation</span>
                 <span className="mono font-xs text-muted">Client-side isolation</span>
               </label>
               <div className="radio-row">

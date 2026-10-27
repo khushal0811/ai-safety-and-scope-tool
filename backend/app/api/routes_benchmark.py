@@ -40,10 +40,11 @@ async def list_benchmark_models():
 async def query_benchmark_models(
     request: BenchmarkQueryRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
+    x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
 ):
-    """Query one or all frontier models via OpenRouter.
+    """Query one or all frontier models via OpenRouter or system Groq key.
 
-    Zero Host Storage: Keys passed in `X-OpenRouter-Key` are purely used for transit
+    Zero Host Storage: Keys passed in headers are purely used for transit
     inference and are never logged or stored.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -54,6 +55,7 @@ async def query_benchmark_models(
             prompt=request.prompt,
             system_prompt=request.system_prompt,
             api_key=x_openrouter_key,
+            groq_key=x_groq_key,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
@@ -63,6 +65,7 @@ async def query_benchmark_models(
             prompt=request.prompt,
             system_prompt=request.system_prompt,
             api_key=x_openrouter_key,
+            groq_key=x_groq_key,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
@@ -78,6 +81,7 @@ async def query_benchmark_models(
 async def evaluate_benchmark_models(
     request: BenchmarkEvaluateRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
+    x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
 ):
     """Query frontier models and evaluate each response against the active RoE scope."""
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -87,6 +91,7 @@ async def evaluate_benchmark_models(
         prompt=request.prompt,
         models=request.models,
         api_key=x_openrouter_key,
+        groq_key=x_groq_key,
         temperature=request.temperature,
     )
 

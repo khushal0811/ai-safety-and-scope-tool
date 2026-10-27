@@ -61,14 +61,33 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="modal__body">
-          <p className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
-            Bring your own OpenRouter and Groq keys to power frontier model benchmarking and instant extraction. Keys stay in this browser and are never logged or stored by SST.
-          </p>
+          {/* Option 1: System Key */}
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: 'var(--radius)',
+              background: 'var(--surface-sunken)',
+              border: '1px solid var(--border)',
+              marginBottom: 14,
+            }}
+          >
+            <div className="row between" style={{ marginBottom: 4 }}>
+              <strong style={{ fontSize: 13 }}>Option 1: Built-in System Key</strong>
+              <span className="tag tag--ok">● Ready</span>
+            </div>
+            <p className="font-xs muted" style={{ margin: 0, lineHeight: 1.4 }}>
+              SST provides a backend-managed Groq key by default. Basic audits, RoE parsing, and remediation work without entering any key.
+            </p>
+          </div>
 
+          {/* Option 2: Personal OpenRouter Key */}
           <div className="field">
             <label className="field__label" htmlFor="openrouter-key-input">
-              <span>OpenRouter API Key</span>
-              {storedOpenRouter ? <span className="mono font-xs tag tag--ok">saved: {maskKey(storedOpenRouter)}</span> : <span className="mono font-xs text-muted">sk-or-v1-...</span>}
+              <span className="row" style={{ gap: 6 }}>
+                <span>Option 2: OpenRouter Key (BYOK)</span>
+                {storedOpenRouter ? <span className="mono font-xs tag tag--ok">saved: {maskKey(storedOpenRouter)}</span> : null}
+              </span>
+              <span className="mono font-xs text-muted">sk-or-v1-...</span>
             </label>
             <input
               id="openrouter-key-input"
@@ -76,28 +95,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               type="password"
               autoComplete="off"
               spellCheck={false}
-              placeholder={storedOpenRouter ? '••••••••••••••••' : 'sk-or-v1-...'}
+              placeholder={storedOpenRouter ? '••••••••••••••••' : 'Paste sk-or-v1-... to benchmark frontier models'}
               value={draftOpenRouter}
               onChange={(e) => setDraftOpenRouter(e.target.value)}
             />
+            <p className="font-xs muted" style={{ marginTop: 4 }}>
+              Unlocks real-time benchmarking across GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, and Llama 3.1.
+            </p>
           </div>
 
-          <div className="field">
-            <label className="field__label" htmlFor="groq-key-input">
-              <span>Groq API Key</span>
-              {storedGroq ? <span className="mono font-xs tag tag--ok">saved: {maskKey(storedGroq)}</span> : <span className="mono font-xs text-muted">gsk_...</span>}
-            </label>
-            <input
-              id="groq-key-input"
-              className="input mono"
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder={storedGroq ? '••••••••••••••••' : 'gsk_...'}
-              value={draftGroq}
-              onChange={(e) => setDraftGroq(e.target.value)}
-            />
-          </div>
+          <details style={{ marginBottom: 14, fontSize: 12 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>
+              ▸ Optional: Custom Groq Key Override
+            </summary>
+            <div style={{ marginTop: 8 }}>
+              <input
+                id="groq-key-input"
+                className="input mono"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={storedGroq ? '••••••••••••••••' : 'gsk_... (override backend system key)'}
+                value={draftGroq}
+                onChange={(e) => setDraftGroq(e.target.value)}
+              />
+            </div>
+          </details>
 
           <p className="section-label">Storage Isolation</p>
           <div className="radio-row">
