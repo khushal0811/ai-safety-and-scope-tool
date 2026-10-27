@@ -107,3 +107,59 @@ def test_vault_api_save_invalid_uuid():
     """Verify POST /api/vault/keys rejects invalid UUID."""
     res = client.post("/api/vault/keys", json={"user_id": "not-a-uuid", "openrouter_key": "sk-or-..."})
     assert res.status_code == 400
+
+
+def test_vault_api_verify_empty_returns_400():
+    """Verify POST /api/vault/verify-key rejects requests with no keys."""
+    res = client.post("/api/vault/verify-key", json={})
+    assert res.status_code == 400
+
+
+def test_vault_api_verify_key_mock_success(monkeypatch):
+    """Verify POST /api/vault/verify-key handles 200 OK from OpenRouter."""
+    import httpx
+
+    class MockResponse:
+        status_code = 200
+        text = '{"data":{"label":"Test Key","limit":100,"usage":5}}'
+
+        def json(self):
+            return {"data": {"label": "Test Key", "limit": 100, "usage": 5}}
+
+    async def mock_get(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    res = client.post("/api/vault/verify-key", json={"openrouter_key": "sk-or-v1-valid-test-key"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert len(data["results"]) == 1
+    assert data["results"][0]["valid"] is True
+    assert data["results"][0]["provider"] == "OpenRouter"
+
+
+def test_vault_api_verify_key_mock_unauthorized(monkeypatch):
+    """Verify POST /api/vault/verify-key handles 401 Unauthorized from OpenRouter."""
+    import httpx
+
+    class MockResponse:
+        status_code = 401
+        text = '{"error":{"message":"Invalid key"}}'
+
+        def json(self):
+            return {"error": {"message": "Invalid key"}}
+
+    async def mock_get(*args, **kwargs):
+        return MockResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    res = client.post("/api/vault/verify-key", json={"openrouter_key": "sk-or-v1-bad-key"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is False
+    assert len(data["results"]) == 1
+    assert data["results"][0]["valid"] is False
+    assert data["results"][0]["status_code"] == 401

@@ -46,7 +46,7 @@ class LLMClient:
         # Include OpenRouter referer/title headers if targeting OpenRouter
         if "openrouter.ai" in self.base_url:
             headers["HTTP-Referer"] = "https://github.com/khushal0811/ai-safety-and-scope-tool"
-            headers["X-Title"] = "Vallum — AI Safety & Scope Boundary Engine"
+            headers["X-Title"] = "Vallum - AI Safety & Scope Boundary Engine"
 
         payload = {
             "model": self.model,

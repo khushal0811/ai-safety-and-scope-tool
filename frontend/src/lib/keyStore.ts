@@ -208,3 +208,58 @@ export function maskKey(key: string): string {
   if (!key) return '';
   return key.length <= 10 ? '••••••' : `${key.slice(0, 6)}…${key.slice(-4)}`;
 }
+
+export interface KeyVerificationResult {
+  provider: string;
+  valid: boolean;
+  statusCode: number;
+  message: string;
+  latencyMs: number;
+  details?: Record<string, any>;
+}
+
+export async function testApiKeys(keys: {
+  openRouterKey?: string;
+  groqKey?: string;
+  userId?: string;
+}): Promise<{ success: boolean; results: KeyVerificationResult[]; error?: string }> {
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/vault/verify-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        openrouter_key: keys.openRouterKey?.trim() || null,
+        groq_key: keys.groqKey?.trim() || null,
+        user_id: keys.userId || null,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        results: [],
+        error: err.detail || `Validation failed with status ${res.status}`,
+      };
+    }
+
+    const data = await res.json();
+    return {
+      success: data.success,
+      results: (data.results || []).map((r: any) => ({
+        provider: r.provider,
+        valid: r.valid,
+        statusCode: r.status_code,
+        message: r.message,
+        latencyMs: r.latency_ms,
+        details: r.details,
+      })),
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      results: [],
+      error: err?.message || 'Failed to connect to verification service.',
+    };
+  }
+}

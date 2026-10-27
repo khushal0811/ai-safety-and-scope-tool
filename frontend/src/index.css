@@ -1198,4 +1198,27 @@ button { font: inherit; color: inherit; }
   line-height: 1.4;
 }
 
+.key-test-banner {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.key-test-banner--success {
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-bd);
+  color: var(--ok-fg);
+}
+
+.key-test-banner--error {
+  background: var(--bad-bg);
+  border: 1px solid var(--bad-bd);
+  color: var(--bad-fg);
+}
+
 
