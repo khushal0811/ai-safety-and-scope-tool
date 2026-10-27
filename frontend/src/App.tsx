@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AuditResult } from './types/audit';
+import type { AuditResult, RoeScope } from './types/audit';
 import type { PastAudit } from './types/history';
 import type { UserProfile } from './types/user';
 import { ROE_PRESETS } from './data/presets';
@@ -43,6 +43,7 @@ export default function App() {
   const [roeMode, setRoeMode] = useState<RoeMode>('preset');
   const [presetId, setPresetId] = useState(ROE_PRESETS[0].roe_id);
   const [customRoe, setCustomRoe] = useState('');
+  const [customScope, setCustomScope] = useState<RoeScope | null>(null);
 
   const [modelId, setModelId] = useState(MODELS[0].id);
   const [prompt, setPrompt] = useState('');
@@ -74,7 +75,7 @@ export default function App() {
     setAudits([]);
   }
 
-  const activeScope = roeMode === 'preset' ? ROE_PRESETS.find((p) => p.roe_id === presetId) ?? null : null;
+  const activeScope = roeMode === 'preset' ? ROE_PRESETS.find((p) => p.roe_id === presetId) ?? null : customScope;
   const examples = useMemo(() => (activeScope ? buildExamples(activeScope) : buildExamples(ROE_PRESETS[0])), [activeScope]);
 
   // Keep a loaded example in sync with the selected preset's addresses.
@@ -94,7 +95,9 @@ export default function App() {
   }
 
   const blockedReason = !activeScope
-    ? 'Custom RoE parsing ships in Phase 3 — select a preset to run an audit.'
+    ? roeMode === 'custom'
+      ? 'Upload a document or paste RoE text and click "Extract Scope" to define boundaries.'
+      : 'Select a preset scope to continue.'
     : !modelOutput.trim()
       ? 'Load an example or paste a model response to audit.'
       : null;
@@ -246,6 +249,7 @@ export default function App() {
               customText={customRoe}
               onCustomTextChange={setCustomRoe}
               activeScope={activeScope}
+              onCustomScopeParsed={setCustomScope}
               onContinue={() => setStep(2)}
             />
           )}

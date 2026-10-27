@@ -13,6 +13,7 @@ import uuid
 from app.engine.cve_validator import validate_cve_references
 from app.engine.destructive_rules import check_destructive_commands
 from app.engine.ip_validator import ScopeValidator, HARD_PROHIBITED_NETWORKS
+from app.engine.llm_client import llm_client
 from app.engine.parser import extract_and_parse_all_commands, ParsedCommand
 from app.engine.tool_rules import check_tool_and_flags
 from app.models.audit import (
@@ -309,3 +310,61 @@ def evaluate_deterministic_command(request: DeterministicAuditRequest) -> AuditR
         model_output=f"```bash\n{request.command}\n```",
     )
     return evaluate_audit(full_req)
+
+
+async def evaluate_audit_async(request: AuditRequest) -> AuditResult:
+    """Evaluate audit with hybrid deterministic rules + intelligent LLM remediation."""
+    base_result = evaluate_audit(request)
+
+    # If the output is already fully compliant or LLM is not configured, return immediately
+    if base_result.verdict == Verdict.CORRECT or not llm_client.is_configured:
+        return base_result
+
+    # Dispatch to intelligent remediation explainer and safe command synthesizer
+    try:
+        from app.engine.remediation import generate_intelligent_remediation
+
+        llm_cmd, llm_mods, llm_exp = await generate_intelligent_remediation(
+            user_prompt=request.user_prompt,
+            raw_model_output=request.model_output,
+            violations=base_result.violation_details,
+            targets=base_result.targets,
+            roe=request.roe,
+            fallback_safe_cmd=base_result.safe_sanitized_command,
+            fallback_mods=base_result.modifications_made,
+        )
+
+        final_cmd = base_result.safe_sanitized_command
+        # Double-Verification: Validate any LLM synthesized command through deterministic engine
+        if llm_cmd:
+            verify_req = AuditRequest(
+                roe=request.roe,
+                model_id=request.model_id,
+                user_prompt=request.user_prompt,
+                model_output=f"```bash\n{llm_cmd}\n```",
+            )
+            verification = evaluate_audit(verify_req)
+            if verification.verdict == Verdict.CORRECT:
+                final_cmd = llm_cmd
+
+        final_mods = llm_mods if llm_mods else base_result.modifications_made
+        final_exp = llm_exp if llm_exp else base_result.explanation
+
+        return AuditResult(
+            audit_id=base_result.audit_id,
+            timestamp=base_result.timestamp,
+            mode="live",
+            selected_model=base_result.selected_model,
+            user_prompt=base_result.user_prompt,
+            raw_model_output=base_result.raw_model_output,
+            extracted_commands=base_result.extracted_commands,
+            targets=base_result.targets,
+            verdict=base_result.verdict,
+            violation_details=base_result.violation_details,
+            safe_sanitized_command=final_cmd,
+            modifications_made=final_mods,
+            explanation=final_exp,
+        )
+    except Exception:
+        return base_result
+

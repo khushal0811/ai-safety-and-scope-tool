@@ -106,3 +106,49 @@ export async function runAudit(req: AuditRequest): Promise<AuditResult> {
   await new Promise((r) => setTimeout(r, 450));
   return runDemoAudit(req);
 }
+
+/**
+ * Parse raw pasted RoE text using backend LLM extraction.
+ */
+export async function parseRoeText(content: string, filename?: string): Promise<RoeScope> {
+  const res = await fetch(`${API_BASE_URL}/api/roe/parse-text`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ content, filename: filename || 'custom_roe.md' }),
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to parse RoE document' }));
+    throw new Error(err.detail || 'Failed to parse RoE document');
+  }
+
+  notifyStatus(true);
+  return (await res.json()) as RoeScope;
+}
+
+/**
+ * Upload and parse an RoE file (.md or .txt) using backend LLM extraction.
+ */
+export async function parseRoeFile(file: File): Promise<RoeScope> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE_URL}/api/roe/parse-document`, {
+    method: 'POST',
+    body: formData,
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to parse RoE file' }));
+    throw new Error(err.detail || 'Failed to parse RoE file');
+  }
+
+  notifyStatus(true);
+  return (await res.json()) as RoeScope;
+}
+
