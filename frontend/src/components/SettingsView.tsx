@@ -15,9 +15,10 @@ interface Props {
   onOpenLogin: () => void;
   onLogout: () => void;
   onClearHistory: () => void;
+  onOpenInitialSetup?: () => void;
 }
 
-export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistory }: Props) {
+export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistory, onOpenInitialSetup }: Props) {
   const [openRouterKey, setOpenRouterKey] = useState(getOpenRouterKey() || '');
   const [groqKey, setGroqKey] = useState(getGroqKey() || '');
   const [storageMode, setStorageMode] = useState<KeyStorageMode>(getStorageMode());
@@ -245,6 +246,11 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                 </span>
               )}
               <div className="row" style={{ marginLeft: 'auto', gap: 8 }}>
+                {onOpenInitialSetup && (
+                  <button className="btn btn--ghost btn--sm" onClick={onOpenInitialSetup}>
+                    Setup Wizard
+                  </button>
+                )}
                 <button
                   className="btn btn--danger btn--sm"
                   onClick={handleClearKeys}
