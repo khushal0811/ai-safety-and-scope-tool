@@ -170,6 +170,30 @@ export function BenchmarkStudioView({
     setTimeout(() => setCopiedId(null), 2000);
   }
 
+  // Helper to cleanly render safe sanitized command lines without breaking terminal copy-paste
+  function renderSafeCommandLines(commandStr: string) {
+    const lines = commandStr.split('\n');
+    return lines.map((line, lineIdx) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return <div key={lineIdx} style={{ height: 6 }} />;
+      }
+      if (trimmed.startsWith('#')) {
+        return (
+          <div key={lineIdx} style={{ color: 'var(--text-subtle)', fontStyle: 'italic', paddingLeft: 2 }}>
+            {line}
+          </div>
+        );
+      }
+      return (
+        <div key={lineIdx} style={{ color: 'var(--ok-fg)', display: 'flex', alignItems: 'flex-start' }}>
+          <span style={{ color: 'var(--text-subtle)', userSelect: 'none', marginRight: 8, flexShrink: 0 }}>$</span>
+          <span style={{ flex: 1, wordBreak: 'break-all' }}>{line}</span>
+        </div>
+      );
+    });
+  }
+
   // History filtering & deletion
   const filteredHistory = useMemo(() => {
     const q = historySearch.toLowerCase().trim();
@@ -610,7 +634,9 @@ export function BenchmarkStudioView({
                     <div className="benchmark-score-card__top">
                       <span className="metric-label">Scope Violation Rate</span>
                       <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--bad-fg)' }}>
-                        {currentResult.summary.unsafe_count}/{currentResult.summary.total_models}
+                        {(currentResult.summary.scope_violation_count !== undefined
+                          ? currentResult.summary.scope_violation_count
+                          : Math.round((currentResult.summary.scope_violation_rate / 100) * currentResult.summary.total_models))}/{currentResult.summary.total_models}
                       </span>
                     </div>
                     <div className="benchmark-score-card__value">
@@ -797,24 +823,53 @@ export function BenchmarkStudioView({
                               </div>
                             </div>
 
-                            {/* Violations breakdown if Unsafe/Incorrect */}
-                            {audit.violation_details.length > 0 && (
-                              <div style={{ marginBottom: 12 }}>
-                                <span className="metric-label" style={{ fontSize: 10.5, color: 'var(--bad-fg)', display: 'block', marginBottom: 4 }}>
-                                  Scope Violations Detected ({audit.violation_details.length})
-                                </span>
-                                <div>
-                                  {audit.violation_details.map((v, vIdx) => (
-                                    <div key={vIdx} className="benchmark-violation-chip" style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                                      <AlertIcon width={12} height={12} style={{ color: 'var(--bad-fg)', marginTop: 2, flexShrink: 0 }} />
+                            {/* Violations breakdown partitioned into Scope vs Policy */}
+                            {audit.violation_details.length > 0 && (() => {
+                              const scopeViolations = audit.violation_details.filter(v => (v.category as string).toLowerCase() === 'scope');
+                              const policyViolations = audit.violation_details.filter(v => (v.category as string).toLowerCase() !== 'scope');
+
+                              return (
+                                <div style={{ marginBottom: 12 }}>
+                                  {/* Scope Violations */}
+                                  {scopeViolations.length > 0 && (
+                                    <div style={{ marginBottom: policyViolations.length > 0 ? 8 : 0 }}>
+                                      <span className="metric-label" style={{ fontSize: 10.5, color: 'var(--bad-fg)', display: 'block', marginBottom: 4 }}>
+                                        Scope Violations Detected ({scopeViolations.length})
+                                      </span>
                                       <div>
-                                        <strong>{v.rule}:</strong> {v.detail}
+                                        {scopeViolations.map((v, vIdx) => (
+                                          <div key={`scope-${vIdx}`} className="benchmark-violation-chip" style={{ display: 'flex', alignItems: 'flex-start', gap: 6, borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+                                            <AlertIcon width={12} height={12} style={{ color: 'var(--bad-fg)', marginTop: 2, flexShrink: 0 }} />
+                                            <div>
+                                              <strong style={{ color: 'var(--bad-fg)' }}>{v.rule}:</strong> {v.detail}
+                                            </div>
+                                          </div>
+                                        ))}
                                       </div>
                                     </div>
-                                  ))}
+                                  )}
+
+                                  {/* Policy Deviations */}
+                                  {policyViolations.length > 0 && (
+                                    <div>
+                                      <span className="metric-label" style={{ fontSize: 10.5, color: '#f59e0b', display: 'block', marginBottom: 4 }}>
+                                        Policy &amp; Tool Deviations ({policyViolations.length})
+                                      </span>
+                                      <div>
+                                        {policyViolations.map((v, vIdx) => (
+                                          <div key={`policy-${vIdx}`} className="benchmark-violation-chip" style={{ display: 'flex', alignItems: 'flex-start', gap: 6, borderColor: 'rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.05)' }}>
+                                            <AlertIcon width={12} height={12} style={{ color: '#f59e0b', marginTop: 2, flexShrink: 0 }} />
+                                            <div>
+                                              <strong style={{ color: '#f59e0b' }}>{v.rule}:</strong> {v.detail}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                            )}
+                              );
+                            })()}
 
                             {/* Self-Sanitized Safe Remediation */}
                             {audit.safe_sanitized_command && (
@@ -840,7 +895,7 @@ export function BenchmarkStudioView({
                                   </button>
                                 </div>
                                 <div className="benchmark-safe-cmd-block">
-                                  $ {audit.safe_sanitized_command}
+                                  {renderSafeCommandLines(audit.safe_sanitized_command)}
                                 </div>
 
                                 {/* Expandable Side-by-Side Git Diff Drawer */}
@@ -1262,7 +1317,7 @@ export function BenchmarkStudioView({
                                     Self-Sanitized Safe Command
                                   </span>
                                   <div className="benchmark-safe-cmd-block">
-                                    $ {audit.safe_sanitized_command}
+                                    {renderSafeCommandLines(audit.safe_sanitized_command)}
                                   </div>
                                 </div>
                               )}

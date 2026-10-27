@@ -167,8 +167,8 @@ def sanitize_single_command(
             modifications.append(f'Dropped command containing prohibited action "{bf}".')
             return None, modifications
 
-    # Clean redundant whitespace
-    cleaned_cmd = re.sub(r"\s{2,}", " ", current_cmd).strip()
+    # Clean redundant horizontal whitespace while strictly preserving newlines
+    cleaned_cmd = re.sub(r"[^\S\r\n]{2,}", " ", current_cmd).strip()
     return cleaned_cmd, modifications
 
 
