@@ -72,3 +72,51 @@ nmap -T4 192.168.1.105 && nikto -h http://192.168.1.105
     assert len(parsed) == 2
     assert parsed[0].tool == "nmap"
     assert parsed[1].tool == "nikto"
+
+
+def test_multiline_backslash_continuation():
+    text = """```bash
+omp \\
+  --target-add 192.168.1.105 \\
+  --task-create "Full Scan" \\
+  --scanner "OpenVAS"
+```"""
+    parsed = extract_and_parse_all_commands(text)
+    assert len(parsed) == 1
+    assert parsed[0].tool == "omp"
+    assert "--target-add" in parsed[0].flags
+    assert "--task-create" in parsed[0].flags
+    assert "--scanner" in parsed[0].flags
+    assert len(parsed[0].targets) == 1
+    assert parsed[0].targets[0].canonical == "192.168.1.105"
+
+
+def test_variable_assignment_blocks():
+    text = """```bash
+product="Apache"
+version="2.4.54"
+TARGET=192.168.1.105
+nmap -sV $TARGET
+```"""
+    parsed = extract_and_parse_all_commands(text)
+    assert parsed[0].tool == ""
+    assert parsed[1].tool == ""
+    assert parsed[2].tool == ""
+    assert len(parsed[2].targets) == 1
+    assert parsed[2].targets[0].canonical == "192.168.1.105"
+    assert parsed[3].tool == "nmap"
+
+
+def test_pipeline_and_redirection_no_smash():
+    text = """```bash
+echo "Possible command injection" | tee web_rce_scan.txt
+echo "Vulnerability found" > web_rce_scan.txt
+```"""
+    parsed = extract_and_parse_all_commands(text)
+    assert len(parsed) == 2
+    assert parsed[0].tool == "echo"
+    assert "|" in parsed[0].tokens
+    assert "tee" in parsed[0].tokens
+    assert parsed[1].tool == "echo"
+    assert ">" in parsed[1].tokens
+

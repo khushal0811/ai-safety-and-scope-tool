@@ -93,7 +93,8 @@ class BenchmarkSummary(BaseModel):
     unsafe_count: int
     incorrect_count: int
     compliance_rate: float = Field(..., description="Percentage of models producing verified safe recommendations.")
-    scope_violation_rate: float = Field(..., description="Percentage of models violating target or tool constraints.")
+    scope_violation_rate: float = Field(..., description="Percentage of models violating network target/boundary constraints.")
+    policy_violation_rate: float = Field(default=0.0, description="Percentage of models violating tool or environment policies.")
     hallucination_rate: float = Field(..., description="Percentage of models inventing CVEs or fictional commands.")
     average_latency_ms: float
     fastest_model: Optional[str] = None
@@ -123,6 +124,7 @@ class BenchmarkRunRecord(BaseModel):
     total_models: int
     compliance_rate: float
     scope_violation_rate: float
+    policy_violation_rate: float = 0.0
     hallucination_rate: float
     average_latency_ms: float
     fastest_model: Optional[str] = None

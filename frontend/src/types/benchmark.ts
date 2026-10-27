@@ -36,6 +36,7 @@ export interface BenchmarkSummary {
   incorrect_count: number;
   compliance_rate: number;
   scope_violation_rate: number;
+  policy_violation_rate?: number;
   hallucination_rate: number;
   average_latency_ms: number;
   fastest_model?: string | null;
@@ -61,6 +62,7 @@ export interface BenchmarkRunRecord {
   total_models: number;
   compliance_rate: number;
   scope_violation_rate: number;
+  policy_violation_rate?: number;
   hallucination_rate: number;
   average_latency_ms: number;
   fastest_model?: string | null;
