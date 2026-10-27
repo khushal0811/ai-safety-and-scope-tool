@@ -2,6 +2,7 @@ import { useRef, useState, type DragEvent } from 'react';
 import type { RoeScope } from '../types/audit';
 import { ROE_PRESETS } from '../data/presets';
 import { MAX_ROE_BYTES, validateRoeFile } from '../lib/roeFile';
+import { parseRoeFile, parseRoeText } from '../services/auditService';
 import { AlertIcon, ChevronIcon, FileIcon, InfoIcon, UploadIcon, XIcon } from './Icons';
 
 export type RoeMode = 'preset' | 'custom';
@@ -14,6 +15,7 @@ interface Props {
   customText: string;
   onCustomTextChange: (t: string) => void;
   activeScope: RoeScope | null;
+  onCustomScopeParsed?: (scope: RoeScope | null) => void;
   onContinue?: () => void;
 }
 
@@ -42,7 +44,12 @@ export function RoeSelector(p: Props) {
         {p.mode === 'preset' ? (
           <PresetList presetId={p.presetId} onChange={p.onPresetChange} />
         ) : (
-          <CustomRoe text={p.customText} onChange={p.onCustomTextChange} />
+          <CustomRoe
+            text={p.customText}
+            onChange={p.onCustomTextChange}
+            onScopeParsed={p.onCustomScopeParsed}
+            activeScope={p.activeScope}
+          />
         )}
 
         {p.activeScope ? <ScopeSummary scope={p.activeScope} /> : null}
@@ -103,10 +110,21 @@ function PresetList({ presetId, onChange }: { presetId: string; onChange: (id: s
   );
 }
 
-function CustomRoe({ text, onChange }: { text: string; onChange: (t: string) => void }) {
+function CustomRoe({
+  text,
+  onChange,
+  onScopeParsed,
+  activeScope,
+}: {
+  text: string;
+  onChange: (t: string) => void;
+  onScopeParsed?: (scope: RoeScope | null) => void;
+  activeScope?: RoeScope | null;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [parsing, setParsing] = useState(false);
   const [over, setOver] = useState(false);
 
   async function handleFile(file: File | undefined) {
@@ -119,6 +137,31 @@ function CustomRoe({ text, onChange }: { text: string; onChange: (t: string) => 
     setError(null);
     setFileName(file.name);
     onChange(res.text);
+
+    // Trigger server-side Llama 3 extraction automatically
+    setParsing(true);
+    try {
+      const scope = await parseRoeFile(file);
+      onScopeParsed?.(scope);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to extract scope from document.');
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  async function handleParseText() {
+    if (!text.trim()) return;
+    setError(null);
+    setParsing(true);
+    try {
+      const scope = await parseRoeText(text, fileName || 'custom_roe.md');
+      onScopeParsed?.(scope);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to extract scope from text.');
+    } finally {
+      setParsing(false);
+    }
   }
 
   function onDrop(e: DragEvent) {
@@ -176,6 +219,7 @@ function CustomRoe({ text, onChange }: { text: string; onChange: (t: string) => 
             onClick={() => {
               setFileName(null);
               onChange('');
+              onScopeParsed?.(null);
             }}
           >
             <XIcon width={14} height={14} />
@@ -184,26 +228,38 @@ function CustomRoe({ text, onChange }: { text: string; onChange: (t: string) => 
       ) : null}
 
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label" htmlFor="roe-text">
-          <span>Or paste RoE text</span>
-          <span className="mono">{text.length.toLocaleString()} chars</span>
-        </label>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <label className="field__label" htmlFor="roe-text" style={{ margin: 0 }}>
+            <span>Or paste RoE text</span>
+            <span className="mono" style={{ marginLeft: 8 }}>{text.length.toLocaleString()} chars</span>
+          </label>
+          <button
+            type="button"
+            className="btn btn--sm btn--primary"
+            disabled={parsing || !text.trim()}
+            onClick={handleParseText}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+          >
+            {parsing ? 'Parsing with LLM...' : '⚡ Extract Scope (Llama 3)'}
+          </button>
+        </div>
         <textarea
           id="roe-text"
           className="textarea textarea--mono"
           rows={7}
           maxLength={MAX_CHARS}
-          placeholder={'# Rules of Engagement\nIn scope: 10.0.0.0/24\nOut of scope: 10.0.0.1 (gateway)\nProhibited: DoS, data deletion'}
+          placeholder={'# Rules of Engagement\nIn scope: 10.0.0.0/24\nOut of scope: 10.0.0.1 (gateway)\nProhibited: DoS, data deletion\nMax nmap timing: -T3'}
           value={text}
           onChange={(e) => onChange(e.target.value)}
         />
       </div>
 
-      <div className="note">
+      <div className="note note--info" style={{ marginTop: 8 }}>
         <InfoIcon />
         <span>
-          Structured extraction runs server-side with Llama 3 (Phase 3), isolated against prompt injection. Until then, audits
-          require a preset scope.
+          {activeScope && activeScope.roe_id.startsWith('ROE-CUSTOM')
+            ? `Active Scope Locked: "${activeScope.name}" (${activeScope.allowed_cidrs.length} subnets, ${activeScope.target_hosts.length} hosts, max -T${activeScope.max_nmap_timing}).`
+            : 'Unstructured text is isolated in XML boundaries and validated with deterministic Pydantic schemas.'}
         </span>
       </div>
     </div>
