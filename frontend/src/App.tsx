@@ -4,9 +4,10 @@ import type { PastAudit } from './types/history';
 import type { UserProfile } from './types/user';
 import { ROE_PRESETS } from './data/presets';
 import { buildExamples, MODELS, type PromptExample } from './data/models';
-import { runAudit } from './services/auditService';
+import { runAudit, queryLiveModel } from './services/auditService';
 import { getStoredUser, saveUser, initSupabaseAuthListener } from './lib/authStore';
 import { getPastAudits, savePastAudit, clearPastAudits, syncPastAuditsFromCloud } from './lib/historyStore';
+import { getOpenRouterKey, fetchVaultStatus } from './lib/keyStore';
 import { NavBar, type AppPage } from './components/NavBar';
 import { RoeSelector, type RoeMode } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
@@ -52,6 +53,11 @@ export default function App() {
   const [modelOutput, setModelOutput] = useState('');
   const [activeExample, setActiveExample] = useState<string | null>(null);
 
+  // Live Model Generation & Key Access Gate
+  const [hasOpenRouterKey, setHasOpenRouterKey] = useState<boolean>(() => Boolean(getOpenRouterKey()));
+  const [queryingModel, setQueryingModel] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
+
   const [result, setResult] = useState<AuditResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -59,6 +65,37 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('sst.theme', theme);
   }, [theme]);
+
+  // Check OpenRouter key connectivity from local session or cloud database vault
+  useEffect(() => {
+    let active = true;
+    if (getOpenRouterKey()) {
+      setHasOpenRouterKey(true);
+      return;
+    }
+    if (user?.id) {
+      fetchVaultStatus(user.id)
+        .then((st) => {
+          if (active) {
+            setHasOpenRouterKey(Boolean(st.hasOpenRouterKey || getOpenRouterKey()));
+          }
+        })
+        .catch(() => {});
+    } else {
+      setHasOpenRouterKey(Boolean(getOpenRouterKey()));
+    }
+    return () => {
+      active = false;
+    };
+  }, [user?.id, page]);
+
+  // Fallback to free system model (Llama 3.3) if selected model requires an unconfigured OpenRouter key
+  useEffect(() => {
+    const activeModel = MODELS.find((m) => m.id === modelId);
+    if (activeModel?.requiresOpenRouter && !hasOpenRouterKey) {
+      setModelId('meta-llama/llama-3.1-70b-instruct');
+    }
+  }, [hasOpenRouterKey, modelId]);
 
   // Listen for Supabase session changes
   useEffect(() => {
@@ -136,14 +173,32 @@ export default function App() {
     const ex = examples.find((e) => e.id === activeExample);
     if (ex) {
       setPrompt(ex.prompt);
-      setModelOutput(ex.simulatedOutput);
     }
   }, [examples, activeExample]);
 
   function loadExample(ex: PromptExample) {
     setActiveExample(ex.id);
     setPrompt(ex.prompt);
-    setModelOutput(ex.simulatedOutput);
+    setModelOutput('');
+    setQueryError(null);
+  }
+
+  async function handleQueryLiveModel() {
+    if (!prompt.trim()) return;
+    setQueryingModel(true);
+    setQueryError(null);
+    try {
+      const res = await queryLiveModel(prompt, modelId, user?.id);
+      if (res.error) {
+        setQueryError(res.error);
+      } else {
+        setModelOutput(res.text);
+      }
+    } catch (err: any) {
+      setQueryError(err?.message || 'Failed to query live model');
+    } finally {
+      setQueryingModel(false);
+    }
   }
 
   const blockedReason = !activeScope
@@ -151,7 +206,7 @@ export default function App() {
       ? 'Upload a document or paste RoE text and click "Extract Scope" to define boundaries.'
       : 'Select a preset scope to continue.'
     : !modelOutput.trim()
-      ? 'Load an example or paste a model response to audit.'
+      ? 'Click "Ask Model Live ⚡" to query the model or paste commands into the box to audit.'
       : null;
 
   async function handleRun() {
@@ -312,11 +367,15 @@ export default function App() {
           {step === 2 && (
             <PromptComposer
               modelId={modelId}
-              onModelChange={setModelId}
+              onModelChange={(newId) => {
+                setModelId(newId);
+                setQueryError(null);
+              }}
               prompt={prompt}
               onPromptChange={(v) => {
                 setPrompt(v);
                 setActiveExample(null);
+                setQueryError(null);
               }}
               modelOutput={modelOutput}
               onModelOutputChange={(v) => {
@@ -326,6 +385,11 @@ export default function App() {
               examples={examples}
               activeExample={activeExample}
               onExample={loadExample}
+              hasOpenRouterKey={hasOpenRouterKey}
+              onNavigateToSettings={() => setPage('settings')}
+              onQueryLiveModel={handleQueryLiveModel}
+              queryingModel={queryingModel}
+              queryError={queryError}
               canRun={!blockedReason}
               blockedReason={blockedReason}
               loading={loading}

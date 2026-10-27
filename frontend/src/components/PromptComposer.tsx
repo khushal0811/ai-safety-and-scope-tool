@@ -1,5 +1,5 @@
 import { MODELS, type PromptExample } from '../data/models';
-import { SparkIcon } from './Icons';
+import { SparkIcon, KeyIcon, AlertIcon } from './Icons';
 
 interface Props {
   modelId: string;
@@ -11,6 +11,11 @@ interface Props {
   examples: PromptExample[];
   activeExample: string | null;
   onExample: (ex: PromptExample) => void;
+  hasOpenRouterKey: boolean;
+  onNavigateToSettings: () => void;
+  onQueryLiveModel: () => void;
+  queryingModel: boolean;
+  queryError: string | null;
   canRun: boolean;
   blockedReason: string | null;
   loading: boolean;
@@ -19,6 +24,8 @@ interface Props {
 }
 
 export function PromptComposer(p: Props) {
+  const selectedModel = MODELS.find((m) => m.id === p.modelId) || MODELS[0];
+
   return (
     <section className="card card--hero" aria-labelledby="step2-title">
       <div className="card__header">
@@ -30,14 +37,54 @@ export function PromptComposer(p: Props) {
       </div>
       <div className="card__body">
         <div className="field">
-          <label className="field__label" htmlFor="model-select">Target model</label>
-          <select id="model-select" className="select" value={p.modelId} onChange={(e) => p.onModelChange(e.target.value)}>
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} — {m.vendor}
-              </option>
-            ))}
+          <div className="row between" style={{ marginBottom: 6 }}>
+            <label className="field__label" htmlFor="model-select" style={{ margin: 0 }}>
+              Target model
+            </label>
+            {p.hasOpenRouterKey ? (
+              <span className="tag tag--ok" style={{ fontSize: 11 }}>
+                ● OpenRouter Connected
+              </span>
+            ) : (
+              <span className="tag" style={{ fontSize: 11 }}>
+                Built-in System Tier (Free)
+              </span>
+            )}
+          </div>
+          <select
+            id="model-select"
+            className="select"
+            value={p.modelId}
+            onChange={(e) => p.onModelChange(e.target.value)}
+          >
+            {MODELS.map((m) => {
+              const isLocked = m.requiresOpenRouter && !p.hasOpenRouterKey;
+              return (
+                <option key={m.id} value={m.id} disabled={isLocked}>
+                  {isLocked ? `🔒 ${m.label} — ${m.vendor} (Requires OpenRouter Key)` : `${m.label} — ${m.vendor}`}
+                </option>
+              );
+            })}
           </select>
+
+          {!p.hasOpenRouterKey && (
+            <div className="model-key-banner">
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <KeyIcon width={16} height={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5 }}>
+                  To access more models, configure your OpenRouter API key in the{' '}
+                  <button
+                    type="button"
+                    className="inline-link-btn"
+                    onClick={p.onNavigateToSettings}
+                  >
+                    settings page
+                  </button>
+                  .
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <p className="section-label">Examples</p>
@@ -45,6 +92,7 @@ export function PromptComposer(p: Props) {
           {p.examples.map((ex) => (
             <button
               key={ex.id}
+              type="button"
               id={`example-${ex.id}`}
               className={`chip ${p.activeExample === ex.id ? 'chip--active' : ''}`}
               onClick={() => p.onExample(ex)}
@@ -55,7 +103,9 @@ export function PromptComposer(p: Props) {
         </div>
 
         <div className="field">
-          <label className="field__label" htmlFor="prompt-input">Pentest prompt</label>
+          <label className="field__label" htmlFor="prompt-input">
+            <span>Pentest prompt</span>
+          </label>
           <textarea
             id="prompt-input"
             className="textarea"
@@ -65,19 +115,68 @@ export function PromptComposer(p: Props) {
             value={p.prompt}
             onChange={(e) => p.onPromptChange(e.target.value)}
           />
+          <div className="row between" style={{ marginTop: 8, gap: 10, flexWrap: 'wrap' }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Ask the selected model live, or paste command outputs manually below.
+            </span>
+            <button
+              type="button"
+              id="query-model-btn"
+              className="btn btn--sm btn--primary row"
+              style={{ gap: 6 }}
+              disabled={!p.prompt.trim() || p.queryingModel || p.loading}
+              onClick={p.onQueryLiveModel}
+              title={`Query ${selectedModel.label} with this prompt`}
+            >
+              {p.queryingModel ? (
+                <>
+                  <span className="spinner" style={{ width: 13, height: 13 }} /> Querying {selectedModel.label}…
+                </>
+              ) : (
+                <>
+                  <SparkIcon width={14} height={14} /> Ask Model Live ⚡
+                </>
+              )}
+            </button>
+          </div>
         </div>
+
+        {p.queryError && (
+          <div className="field-error-banner row" style={{ gap: 8, marginBottom: 12 }}>
+            <AlertIcon width={16} height={16} style={{ color: 'var(--unsafe)', flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              {p.queryError}
+              {p.queryError.toLowerCase().includes('openrouter') && !p.hasOpenRouterKey && (
+                <button
+                  type="button"
+                  className="inline-link-btn"
+                  style={{ marginLeft: 6 }}
+                  onClick={p.onNavigateToSettings}
+                >
+                  Configure in Settings →
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="field">
           <label className="field__label" htmlFor="model-output">
             <span>Model response</span>
-            <span className="tag">demo · simulated</span>
+            <span className="tag">
+              {p.queryingModel
+                ? 'querying...'
+                : p.modelOutput
+                ? 'live / custom command'
+                : 'awaiting query or paste'}
+            </span>
           </label>
           <textarea
             id="model-output"
             className="textarea textarea--mono"
             rows={6}
             maxLength={20000}
-            placeholder="Paste any AI-generated pentest response here to audit it."
+            placeholder="Run 'Ask Model Live ⚡' above or paste raw AI pentest commands here to audit them against your RoE."
             value={p.modelOutput}
             onChange={(e) => p.onModelOutputChange(e.target.value)}
           />
@@ -85,7 +184,7 @@ export function PromptComposer(p: Props) {
 
         <div className="card__actions">
           {p.onBack ? (
-            <button className="btn btn--lg" onClick={p.onBack} disabled={p.loading}>
+            <button className="btn btn--lg" onClick={p.onBack} disabled={p.loading || p.queryingModel}>
               ← Change Scope
             </button>
           ) : null}
@@ -93,7 +192,7 @@ export function PromptComposer(p: Props) {
             id="run-audit"
             className="btn btn--primary btn--lg"
             style={{ flex: 1 }}
-            disabled={!p.canRun || p.loading}
+            disabled={!p.canRun || p.loading || p.queryingModel}
             onClick={p.onRun}
           >
             {p.loading ? (
