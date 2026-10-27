@@ -7,6 +7,9 @@ from app.db.supabase_client import (
     fetch_audit_history,
     delete_audit_logs,
     fetch_audit_metrics,
+    save_benchmark_run,
+    fetch_benchmark_history,
+    delete_benchmark_runs,
     fetch_roe_presets,
     save_custom_roe,
     fetch_custom_roes,
@@ -19,7 +22,11 @@ __all__ = [
     "fetch_audit_history",
     "delete_audit_logs",
     "fetch_audit_metrics",
+    "save_benchmark_run",
+    "fetch_benchmark_history",
+    "delete_benchmark_runs",
     "fetch_roe_presets",
     "save_custom_roe",
     "fetch_custom_roes",
 ]
+

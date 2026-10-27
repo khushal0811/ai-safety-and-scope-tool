@@ -13,6 +13,7 @@ import { RoeSelector, type RoeMode } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
 import { AuditResultView } from './components/AuditResultView';
 import { PastAuditsView } from './components/PastAuditsView';
+import { BenchmarkStudioView } from './components/BenchmarkStudioView';
 import { SettingsView } from './components/SettingsView';
 import { AuthLandingPage } from './components/AuthLandingPage';
 import { AuthModal } from './components/AuthModal';
@@ -431,7 +432,21 @@ export default function App() {
         />
       )}
 
-      {/* PAGE 3: DEDICATED SETTINGS PAGE */}
+      {/* PAGE 3: BENCHMARK STUDIO */}
+      {page === 'benchmark' && (
+        <BenchmarkStudioView
+          activeRoe={activeScope || ROE_PRESETS[0]}
+          allRoes={ROE_PRESETS}
+          onSelectRoe={(newRoe) => {
+            setPresetId(newRoe.roe_id);
+            setRoeMode('preset');
+          }}
+          currentUser={user}
+          onNavigateSettings={() => setPage('settings')}
+        />
+      )}
+
+      {/* PAGE 4: DEDICATED SETTINGS PAGE */}
       {page === 'settings' && (
         <SettingsView
           currentUser={user}

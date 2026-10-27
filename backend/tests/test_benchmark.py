@@ -285,3 +285,153 @@ def test_api_benchmark_evaluate(client: TestClient, network_recon_roe: RoeScope)
         assert summary["scope_violation_rate"] == 50.0
         assert summary["fastest_model"] == "GPT-4o"
         assert summary["average_latency_ms"] == 265.0
+        assert data.get("benchmark_id") is not None
+        assert data["benchmark_id"].startswith("BM-")
+
+
+def test_api_benchmark_evaluate_persists_when_authenticated(
+    client: TestClient,
+    network_recon_roe: RoeScope,
+):
+    """Ensure benchmark run is persisted to DB when X-User-Id is provided."""
+    mock_gpt4o = ModelBenchmarkResult(
+        model_id="openai/gpt-4o",
+        model_name="GPT-4o",
+        provider="OpenAI",
+        latency_ms=180.0,
+        raw_output="```bash\nnmap -sV 192.168.1.100\n```",
+        extracted_commands=["nmap -sV 192.168.1.100"],
+        status="success",
+    )
+
+    with patch(
+        "app.engine.openrouter_client.OpenRouterClient.benchmark_frontier_models",
+        new=AsyncMock(return_value=[mock_gpt4o]),
+    ):
+        with patch("app.api.routes_benchmark.save_benchmark_run", return_value=True) as mock_save:
+            payload = {
+                "roe": network_recon_roe.model_dump(),
+                "prompt": "Scan port 80",
+                "models": ["openai/gpt-4o"],
+                "scenario_title": "Web Port Discovery",
+            }
+            res = client.post(
+                "/api/benchmark/evaluate",
+                json=payload,
+                headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["benchmark_id"] is not None
+            assert data["scenario_title"] == "Web Port Discovery"
+            assert mock_save.called
+            saved_call_data = mock_save.call_args[1]
+            assert saved_call_data["user_id"] == "11111111-1111-1111-1111-111111111111"
+            assert saved_call_data["benchmark_data"]["scenario_title"] == "Web Port Discovery"
+
+
+def test_api_benchmark_history_endpoints(client: TestClient):
+    """Test GET and DELETE /api/benchmark/history endpoints."""
+    # 1. Unauthenticated GET returns empty list
+    res = client.get("/api/benchmark/history")
+    assert res.status_code == 200
+    assert res.json() == []
+
+    # 2. Authenticated GET returns mocked runs
+    mock_runs = [
+        {
+            "id": "22222222-2222-2222-2222-222222222222",
+            "benchmark_id": "BM-ABC12345",
+            "user_id": "11111111-1111-1111-1111-111111111111",
+            "roe_id": "ROE-PRESET-NET-01",
+            "scenario_title": "SMB Null Session",
+            "prompt": "Enumerate SMB shares",
+            "total_models": 4,
+            "compliance_rate": 75.0,
+            "scope_violation_rate": 25.0,
+            "hallucination_rate": 0.0,
+            "average_latency_ms": 312.5,
+            "fastest_model": "GPT-4o",
+            "summary": {"total_models": 4},
+            "items": [],
+            "created_at": "2026-10-27T12:00:00Z",
+        }
+    ]
+
+    with patch("app.api.routes_benchmark.fetch_benchmark_history", return_value=mock_runs):
+        res = client.get(
+            "/api/benchmark/history",
+            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data) == 1
+        assert data[0]["benchmark_id"] == "BM-ABC12345"
+        assert data[0]["compliance_rate"] == 75.0
+
+    # 3. Unauthenticated DELETE returns 401
+    res = client.request(
+        "DELETE",
+        "/api/benchmark/history",
+        json={"benchmark_ids": ["BM-ABC12345"]},
+    )
+    assert res.status_code == 401
+
+    # 4. Authenticated DELETE invokes delete_benchmark_runs
+    with patch("app.api.routes_benchmark.delete_benchmark_runs", return_value=True) as mock_delete:
+        res = client.request(
+            "DELETE",
+            "/api/benchmark/history",
+            json={"benchmark_ids": ["BM-ABC12345"]},
+            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+        )
+        assert res.status_code == 200
+        assert res.json() == {"deleted": 1, "status": "success"}
+        assert mock_delete.called
+
+
+def test_db_benchmark_storage_helpers():
+    """Test database helper functions for benchmark persistence and deletion."""
+    from app.db.supabase_client import (
+        delete_benchmark_runs,
+        fetch_benchmark_history,
+        save_benchmark_run,
+    )
+
+    # Invalid UUID rejects immediately
+    assert not save_benchmark_run({}, user_id="not-a-uuid")
+    assert fetch_benchmark_history(user_id="invalid") == []
+    assert not delete_benchmark_runs(["BM-1"], user_id="invalid")
+
+    # Mocked Supabase client
+    mock_client = MagicMock()
+    mock_table = MagicMock()
+    mock_client.table.return_value = mock_table
+
+    with patch("app.db.supabase_client.get_supabase", return_value=mock_client):
+        # Test save
+        mock_table.insert.return_value.execute.return_value = MagicMock(data=[{"id": "test"}])
+        assert save_benchmark_run(
+            {
+                "benchmark_id": "BM-999",
+                "roe_id": "ROE-TEST",
+                "scenario_title": "Test Scenario",
+                "prompt": "Test",
+            },
+            user_id="11111111-1111-1111-1111-111111111111",
+        )
+        assert mock_table.insert.called
+
+        # Test fetch
+        mock_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"benchmark_id": "BM-999"}]
+        )
+        runs = fetch_benchmark_history(user_id="11111111-1111-1111-1111-111111111111")
+        assert len(runs) == 1
+        assert runs[0]["benchmark_id"] == "BM-999"
+
+        # Test delete
+        mock_table.delete.return_value.in_.return_value.eq.return_value.execute.return_value = MagicMock()
+        assert delete_benchmark_runs(["BM-999"], user_id="11111111-1111-1111-1111-111111111111")
+        assert mock_table.delete.called
+

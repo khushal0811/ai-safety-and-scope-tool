@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { checkBackendHealth, isLiveMode, subscribeLiveStatus } from '../services/auditService';
 import type { UserProfile } from '../types/user';
-import { HistoryIcon, MoonIcon, SettingsIcon, SunIcon, UserIcon, VallumIcon } from './Icons';
+import { BenchmarkIcon, HistoryIcon, MoonIcon, SettingsIcon, SunIcon, UserIcon, VallumIcon } from './Icons';
 
-export type AppPage = 'studio' | 'history' | 'settings';
+export type AppPage = 'studio' | 'history' | 'benchmark' | 'settings';
 
 interface Props {
   activePage: AppPage;
@@ -59,6 +59,13 @@ export function NavBar({
             <HistoryIcon width={13} height={13} />
             Past Audits
             {auditCount > 0 && <span className="nav-tab__count">{auditCount}</span>}
+          </button>
+          <button
+            className={`nav-tab ${activePage === 'benchmark' ? 'nav-tab--active' : ''}`}
+            onClick={() => onNavigate('benchmark')}
+          >
+            <BenchmarkIcon width={13} height={13} />
+            Benchmark Studio
           </button>
           <button
             className={`nav-tab ${activePage === 'settings' ? 'nav-tab--active' : ''}`}
