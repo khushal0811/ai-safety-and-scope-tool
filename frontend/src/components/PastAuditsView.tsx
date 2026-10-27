@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { PastAudit } from '../types/history';
 import type { UserProfile } from '../types/user';
 import {
@@ -17,7 +17,7 @@ import {
 interface Props {
   audits: PastAudit[];
   currentUser: UserProfile | null;
-  onClearHistory: () => void;
+  onDeleteAudits: (auditIds: string[]) => Promise<void> | void;
   onLoadAuditIntoStudio: (audit: PastAudit) => void;
   onOpenLogin: () => void;
   onSyncCloud?: () => Promise<void> | void;
@@ -26,7 +26,7 @@ interface Props {
 export function PastAuditsView({
   audits,
   currentUser,
-  onClearHistory,
+  onDeleteAudits,
   onLoadAuditIntoStudio,
   onOpenLogin,
   onSyncCloud,
@@ -35,6 +35,8 @@ export function PastAuditsView({
   const [search, setSearch] = useState('');
   const [selectedAudit, setSelectedAudit] = useState<PastAudit | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   async function handleCloudSync() {
     if (!onSyncCloud) return;
@@ -62,6 +64,63 @@ export function PastAuditsView({
     });
   }, [audits, filterVerdict, search]);
 
+  const allFilteredIds = useMemo(() => filteredAudits.map((a) => a.id), [filteredAudits]);
+  const isAllSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedIds.has(id));
+
+  function toggleSelectAll() {
+    if (isAllSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        allFilteredIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        allFilteredIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  }
+
+  function toggleSelectOne(id: string, e?: React.MouseEvent | React.ChangeEvent) {
+    e?.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function handleDelete(ids: string[]) {
+    if (ids.length === 0) return;
+    const confirmMsg =
+      ids.length === 1
+        ? 'Permanently delete this audit log from the database? This cannot be undone.'
+        : `Permanently delete ${ids.length} selected audit logs from the database? This cannot be undone.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeleting(true);
+    try {
+      await onDeleteAudits(ids);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (selectedAudit && ids.includes(selectedAudit.id)) {
+        setSelectedAudit(null);
+      }
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const metrics = useMemo(() => {
     const total = audits.length;
     const unsafeCount = audits.filter((a) => a.result.verdict === 'Unsafe').length;
@@ -76,10 +135,11 @@ export function PastAuditsView({
   }, [audits]);
 
   function exportJSON() {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(audits, null, 2));
+    const toExport = selectedIds.size > 0 ? audits.filter((a) => selectedIds.has(a.id)) : audits;
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(toExport, null, 2));
     const dl = document.createElement('a');
     dl.setAttribute('href', dataStr);
-    dl.setAttribute('download', `sst_audit_history_${new Date().toISOString().slice(0, 10)}.json`);
+    dl.setAttribute('download', `vallum_audit_history_${new Date().toISOString().slice(0, 10)}.json`);
     dl.click();
   }
 
@@ -146,7 +206,7 @@ export function PastAuditsView({
         </div>
       </div>
 
-      {/* Toolbar: Search, Filters, Export */}
+      {/* Toolbar: Search, Filters, Bulk Delete, Export */}
       <div className="history-toolbar">
         <div className="history-search">
           <SearchIcon width={14} height={14} style={{ color: 'var(--text-subtle)' }} />
@@ -180,12 +240,41 @@ export function PastAuditsView({
           })}
         </div>
 
-        <div className="history-actions">
+        <div className="history-actions" style={{ alignItems: 'center' }}>
+          {selectedIds.size > 0 && currentUser && (
+            <>
+              <button
+                type="button"
+                id="delete-selected-btn"
+                className="btn btn--sm btn--danger row"
+                style={{ gap: 6 }}
+                onClick={() => handleDelete(Array.from(selectedIds))}
+                disabled={deleting}
+                title="Permanently delete selected audits from database"
+              >
+                {deleting ? (
+                  <span className="spinner" style={{ width: 12, height: 12 }} />
+                ) : (
+                  <TrashIcon width={13} height={13} />
+                )}
+                Delete Selected ({selectedIds.size})
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm btn--ghost"
+                onClick={() => setSelectedIds(new Set())}
+                title="Clear selected audits"
+              >
+                Deselect
+              </button>
+            </>
+          )}
+
           {onSyncCloud && (
             <button
               className="btn btn--sm"
               onClick={handleCloudSync}
-              disabled={syncing}
+              disabled={syncing || deleting}
               title="Synchronize audit history with Supabase PostgreSQL cloud database"
             >
               <RefreshIcon width={13} height={13} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
@@ -195,11 +284,6 @@ export function PastAuditsView({
           <button className="btn btn--sm" onClick={exportJSON} title="Download audits as JSON">
             <DownloadIcon width={13} height={13} /> Export JSON
           </button>
-          {audits.length > 0 && (
-            <button className="btn btn--sm btn--danger" onClick={onClearHistory} title="Clear audit history">
-              <TrashIcon width={13} height={13} /> Clear
-            </button>
-          )}
         </div>
       </div>
 
@@ -229,19 +313,31 @@ export function PastAuditsView({
             <table className="table">
               <thead>
                 <tr>
+                  {currentUser && (
+                    <th style={{ width: 38, paddingLeft: 14 }}>
+                      <input
+                        type="checkbox"
+                        checked={isAllSelected}
+                        onChange={toggleSelectAll}
+                        aria-label="Select all audits"
+                        style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
+                      />
+                    </th>
+                  )}
                   <th>Verdict</th>
                   <th>RoE Scope</th>
                   <th>Model</th>
                   <th>Proposed Command</th>
                   <th>Violations</th>
                   <th>Timestamp</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
+                  <th style={{ textAlign: 'right', paddingRight: 14 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredAudits.map((item) => {
                   const v = item.result.verdict;
                   const violations = item.result.violation_details || [];
+                  const isSelected = selectedIds.has(item.id);
                   const dateStr = new Date(item.timestamp).toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
@@ -252,10 +348,21 @@ export function PastAuditsView({
                   return (
                     <tr
                       key={item.id}
-                      className="history-row"
+                      className={`history-row ${isSelected ? 'history-row--selected' : ''}`}
                       onClick={() => setSelectedAudit(item)}
                       style={{ cursor: 'pointer' }}
                     >
+                      {currentUser && (
+                        <td style={{ width: 38, paddingLeft: 14 }} onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => toggleSelectOne(item.id, e)}
+                            aria-label={`Select audit ${item.id}`}
+                            style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
+                          />
+                        </td>
+                      )}
                       <td>
                         <span
                           className={`verdict__badge verdict__badge--sm ${
@@ -296,16 +403,33 @@ export function PastAuditsView({
                           {dateStr}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button
-                          className="btn btn--sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedAudit(item);
-                          }}
-                        >
-                          View Details <ChevronIcon width={12} height={12} />
-                        </button>
+                      <td style={{ textAlign: 'right', paddingRight: 14 }}>
+                        <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
+                          <button
+                            className="btn btn--sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedAudit(item);
+                            }}
+                          >
+                            View Details <ChevronIcon width={12} height={12} />
+                          </button>
+                          {currentUser && (
+                            <button
+                              className="btn btn--sm btn--ghost btn--icon"
+                              style={{ color: 'var(--unsafe)', padding: '4px 6px' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete([item.id]);
+                              }}
+                              disabled={deleting}
+                              title="Permanently delete this audit from database"
+                              aria-label="Delete audit"
+                            >
+                              <TrashIcon width={13} height={13} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -403,7 +527,20 @@ export function PastAuditsView({
               <span className="mono font-xs text-muted">
                 Audit time: {selectedAudit.executionTimeMs}ms · Deterministic static engine
               </span>
-              <div className="row">
+              <div className="row" style={{ gap: 8 }}>
+                {currentUser && (
+                  <button
+                    type="button"
+                    className="btn btn--danger btn--sm row"
+                    style={{ gap: 6 }}
+                    disabled={deleting}
+                    onClick={() => handleDelete([selectedAudit.id])}
+                    title="Permanently delete this audit from the database"
+                  >
+                    <TrashIcon width={13} height={13} />
+                    Delete Permanently
+                  </button>
+                )}
                 <button className="btn" onClick={() => setSelectedAudit(null)}>
                   Close
                 </button>
