@@ -173,3 +173,65 @@ export async function parseRoeFile(file: File, userId?: string): Promise<RoeScop
   return (await res.json()) as RoeScope;
 }
 
+/**
+ * Query a selected model live via the backend engine.
+ * Supports Groq Llama 3.3 (free system tier) or OpenRouter models (if key provided).
+ */
+export async function queryLiveModel(
+  prompt: string,
+  modelId: string,
+  userId?: string
+): Promise<{ text: string; latencyMs: number; error?: string }> {
+  const headers = getApiHeaders();
+  if (userId) {
+    headers['X-User-Id'] = userId;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/benchmark/query`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        prompt,
+        model_id: modelId,
+        temperature: 0.2,
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        text: '',
+        latencyMs: 0,
+        error: errData.detail || `Query failed with HTTP status ${res.status}`,
+      };
+    }
+
+    const data = await res.json();
+    const result = data.results?.[0];
+    if (!result) {
+      return { text: '', latencyMs: 0, error: 'No model result returned' };
+    }
+
+    if (result.status === 'unauthorized') {
+      return {
+        text: '',
+        latencyMs: 0,
+        error: result.error_message || 'Model requires an OpenRouter API key. Configure your key in Settings.',
+      };
+    }
+
+    return {
+      text: result.raw_output || (result.extracted_commands?.join('\n') ?? ''),
+      latencyMs: result.latency_ms || 0,
+      error: result.error_message || undefined,
+    };
+  } catch (err: any) {
+    return {
+      text: '',
+      latencyMs: 0,
+      error: err?.message || 'Failed to connect to backend model query endpoint',
+    };
+  }
+}
+

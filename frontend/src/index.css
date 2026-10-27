@@ -1162,4 +1162,40 @@ button { font: inherit; color: inherit; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+/* Model Access & Key Gate Banner */
+.model-key-banner {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border-strong);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+}
+
+.inline-link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  display: inline;
+}
+
+.inline-link-btn:hover {
+  color: var(--accent-hover);
+}
+
+.field-error-banner {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--bad-bd);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
 
