@@ -5,8 +5,10 @@ import {
   AlertIcon,
   CheckIcon,
   ChevronIcon,
+  CloudIcon,
   DownloadIcon,
   HistoryIcon,
+  RefreshIcon,
   SearchIcon,
   TrashIcon,
   XIcon,
@@ -18,6 +20,7 @@ interface Props {
   onClearHistory: () => void;
   onLoadAuditIntoStudio: (audit: PastAudit) => void;
   onOpenLogin: () => void;
+  onSyncCloud?: () => Promise<void> | void;
 }
 
 export function PastAuditsView({
@@ -26,10 +29,22 @@ export function PastAuditsView({
   onClearHistory,
   onLoadAuditIntoStudio,
   onOpenLogin,
+  onSyncCloud,
 }: Props) {
   const [filterVerdict, setFilterVerdict] = useState<'All' | 'Correct' | 'Incorrect' | 'Unsafe'>('All');
   const [search, setSearch] = useState('');
   const [selectedAudit, setSelectedAudit] = useState<PastAudit | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  async function handleCloudSync() {
+    if (!onSyncCloud) return;
+    setSyncing(true);
+    try {
+      await onSyncCloud();
+    } finally {
+      setTimeout(() => setSyncing(false), 500);
+    }
+  }
 
   const filteredAudits = useMemo(() => {
     return audits.filter((a) => {
@@ -79,12 +94,22 @@ export function PastAuditsView({
         </p>
       </div>
 
-      {!currentUser && (
+      {currentUser ? (
+        <div className="scope-banner" style={{ marginBottom: 24, borderColor: 'var(--accent)' }}>
+          <div className="scope-banner__info">
+            <CloudIcon width={16} height={16} style={{ color: 'var(--healthy)' }} />
+            <span>
+              <strong>Supabase PostgreSQL Active:</strong> Audits are securely synchronized with Row Level Security (RLS) under <code className="mono">{currentUser.email}</code>.
+            </span>
+          </div>
+          <span className="tag tag--ok">● Cloud Sync Live</span>
+        </div>
+      ) : (
         <div className="scope-banner" style={{ marginBottom: 24 }}>
           <div className="scope-banner__info">
             <span className="ndot" />
             <span>
-              <strong>Guest Session Active:</strong> Logs are stored in browser memory. Sign in with Google to preserve audit records in PostgreSQL.
+              <strong>Guest Session Active:</strong> Logs are stored in local browser memory. Sign in with Google to preserve audit records in PostgreSQL.
             </span>
           </div>
           <button className="btn btn--sm btn--primary" onClick={onOpenLogin}>
@@ -156,6 +181,17 @@ export function PastAuditsView({
         </div>
 
         <div className="history-actions">
+          {onSyncCloud && (
+            <button
+              className="btn btn--sm"
+              onClick={handleCloudSync}
+              disabled={syncing}
+              title="Synchronize audit history with Supabase PostgreSQL cloud database"
+            >
+              <RefreshIcon width={13} height={13} style={{ animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
+              {syncing ? 'Syncing...' : 'Sync Cloud'}
+            </button>
+          )}
           <button className="btn btn--sm" onClick={exportJSON} title="Download audits as JSON">
             <DownloadIcon width={13} height={13} /> Export JSON
           </button>

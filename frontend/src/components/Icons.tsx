@@ -86,4 +86,11 @@ export const GoogleIcon = (p: SVGProps<SVGSVGElement>) => (
 export const MailIcon = (p: P) => (
   <svg {...base} {...p}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>
 );
+export const CloudIcon = (p: P) => (
+  <svg {...base} {...p}><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" /></svg>
+);
+export const RefreshIcon = (p: P) => (
+  <svg {...base} {...p}><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 11-.57-8.38l5.67-1.19" /></svg>
+);
+
 

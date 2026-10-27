@@ -82,3 +82,35 @@ def test_deterministic_audit_endpoint(client: TestClient):
     assert any("Prohibited Parameter" in v["rule"] for v in result["violation_details"])
     # The --os-shell flag should be stripped in the sanitized command
     assert "--os-shell" not in (result["safe_sanitized_command"] or "")
+
+
+def test_db_status_endpoint(client: TestClient):
+    response = client.get("/api/audit/db-status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "status" in data
+    assert data["database"] == "Supabase PostgreSQL"
+
+
+def test_audit_history_endpoint(client: TestClient):
+    response = client.get("/api/audit/history?limit=10")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+
+
+def test_audit_metrics_endpoint(client: TestClient):
+    response = client.get("/api/audit/metrics")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total" in data
+    assert "unsafe" in data
+    assert "pass_rate" in data
+
+
+def test_get_custom_roes_endpoint(client: TestClient):
+    response = client.get("/api/roe/custom")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+
