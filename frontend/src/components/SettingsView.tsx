@@ -7,7 +7,7 @@ import {
   saveKeysToVault,
   revokeAndWipeUserKeys,
 } from '../lib/keyStore';
-import { GoogleIcon, CheckIcon, TrashIcon } from './Icons';
+import { GoogleIcon, CheckIcon, TrashIcon, UserIcon } from './Icons';
 import { KeyProtectionNotice } from './KeyProtectionNotice';
 
 interface Props {
@@ -86,7 +86,13 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                 <div style={{ flex: 1 }}>
                   <div className="row" style={{ gap: 10 }}>
                     <h3 style={{ fontSize: 16 }}>{currentUser.name}</h3>
-                    <span className="tag tag--ok">● Google OAuth Active</span>
+                    <span className="tag tag--ok">
+                      {currentUser.provider === 'google'
+                        ? '● Google OAuth Active'
+                        : currentUser.provider === 'github'
+                        ? '● GitHub OAuth Active'
+                        : '● Email Account Active'}
+                    </span>
                   </div>
                   <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                     {currentUser.email}
@@ -230,10 +236,10 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                   <span className="mono font-xs text-muted">No Database For Guests</span>
                 </div>
                 <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
-                  Guest users only have one option: using VallumSST's backend system key. Because guest sessions do not have a private database to store and encrypt API keys, custom keys are disabled. Sign in with Google or Email to unlock custom keys.
+                  Guest users only have one option: using VallumSST's backend system key. Because guest sessions do not have a private database to store and encrypt API keys, custom keys are disabled. Sign in with Google, GitHub, or Email to unlock custom keys.
                 </p>
                 <button className="btn btn--primary btn--sm" onClick={onOpenLogin}>
-                  <GoogleIcon width={14} height={14} /> Sign In to Enable Custom Keys
+                  <UserIcon width={14} height={14} /> Sign In to Enable Custom Keys
                 </button>
               </div>
             )}

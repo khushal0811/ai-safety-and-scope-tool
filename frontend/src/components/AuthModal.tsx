@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { UserProfile } from '../types/user';
 import { createEmailUser } from '../lib/authStore';
-import { signInWithGoogle } from '../lib/supabaseClient';
-import { GoogleIcon, XIcon, ShieldIcon } from './Icons';
+import { signInWithGoogle, signInWithGithub } from '../lib/supabaseClient';
+import { GoogleIcon, GithubIcon, XIcon, ShieldIcon } from './Icons';
 
 interface Props {
   currentUser: UserProfile | null;
@@ -37,6 +37,26 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
     }
   }
 
+  async function handleGithubLogin() {
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: supaError } = await signInWithGithub();
+      if (supaError) {
+        setLoading(false);
+        const msg = supaError.message || '';
+        if (msg.includes('not enabled') || msg.includes('Unsupported provider') || msg.includes('validation_failed')) {
+          setError('GitHub OAuth is not enabled in your Supabase project (Authentication > Providers > GitHub).');
+        } else {
+          setError(msg);
+        }
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setError(err?.message || 'GitHub sign in failed');
+    }
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -62,7 +82,13 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
                 <h3>{currentUser.name}</h3>
                 <span className="mono text-muted">{currentUser.email}</span>
                 <div className="tag-row" style={{ marginTop: 8 }}>
-                  <span className="tag tag--ok">● Google OAuth Active</span>
+                  <span className="tag tag--ok">
+                    {currentUser.provider === 'google'
+                      ? '● Google OAuth Active'
+                      : currentUser.provider === 'github'
+                      ? '● GitHub OAuth Active'
+                      : '● Email Account Active'}
+                  </span>
                   <span className="tag">PostgreSQL Sync Enabled</span>
                 </div>
               </div>
@@ -83,7 +109,7 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
           ) : (
             <div>
               <p className="card__desc" style={{ marginBottom: 20 }}>
-                Sign in with your Google account to preserve your pentest audit history, sync Rules of Engagement, and access custom model profiles.
+                Sign in with your Google or GitHub account to preserve your pentest audit history, sync Rules of Engagement, and access custom model profiles.
               </p>
 
               {error && (
@@ -101,25 +127,43 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
                 </div>
               )}
 
-              {/* One-Click Google Login Button */}
-              <button
-                className="btn btn--block btn--google"
-                onClick={handleGoogleLogin}
-                disabled={loading}
-                style={{
-                  height: 44,
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 12,
-                  marginBottom: 18,
-                }}
-              >
-                <GoogleIcon width={18} height={18} />
-                {loading ? 'Connecting Google Account...' : 'Continue with Google'}
-              </button>
+              {/* OAuth Buttons: Google & GitHub */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
+                <button
+                  className="btn btn--block btn--google"
+                  onClick={handleGoogleLogin}
+                  disabled={loading}
+                  style={{
+                    height: 42,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <GoogleIcon width={16} height={16} />
+                  <span>Google</span>
+                </button>
+                <button
+                  className="btn btn--block btn--github"
+                  onClick={handleGithubLogin}
+                  disabled={loading}
+                  style={{
+                    height: 42,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <GithubIcon width={16} height={16} />
+                  <span>GitHub</span>
+                </button>
+              </div>
 
               <div className="divider-label">
                 <span>or enter details</span>
