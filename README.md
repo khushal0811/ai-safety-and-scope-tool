@@ -68,12 +68,10 @@ flowchart TD
 
 ---
 
----
-
 ## 🎨 UI/UX Design Philosophy & Multi-Page Architecture
 
-Crafted after Khushal Arora's tactile portfolio design system:
-- **Dark Desk & Warm Stone Canvas:** Deep charcoal background (`#222225`) in dark mode with refined card surfaces (`#2b2b2f`) and sunken panels (`#1a1a1c`), accompanied by a warm stone light mode (`#f0ede8`).
+SST follows an architectural, tactile dark-canvas design philosophy focused on high-contrast operational clarity:
+- **Tactile Dark Desk & Warm Stone Canvas:** Deep charcoal background (`#222225`) in dark mode with high-contrast card surfaces (`#2b2b2f`) and sunken panels (`#1a1a1c`), accompanied by a warm stone light mode (`#f0ede8`).
 - **Subtle Geometric Grid:** Crisp 24px hairline grid lines providing an architectural canvas feel.
 - **Modern Typography:** `Space Grotesk` for headlines and narrative typography, paired with `JetBrains Mono` for CLI syntax, tags, and audit telemetry.
 - **Tactile Accents:** Vibrant periwinkle/indigo accents (`#6272f0` dark / `#4a5ce0` light), subtle micro-elevations on hover, and pulsating engine health indicators.
