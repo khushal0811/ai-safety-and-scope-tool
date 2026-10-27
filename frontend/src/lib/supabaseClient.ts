@@ -74,6 +74,24 @@ export async function signInWithGoogle(): Promise<{ error: Error | null }> {
 }
 
 /**
+ * Sign in using GitHub OAuth
+ */
+export async function signInWithGithub(): Promise<{ error: Error | null }> {
+  if (!supabase) return { error: null };
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'github',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    return { error };
+  } catch (err: any) {
+    return { error: err };
+  }
+}
+
+/**
  * Sign in using email and password
  */
 export async function signInWithEmailPassword(

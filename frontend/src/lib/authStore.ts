@@ -39,6 +39,22 @@ export function createGoogleUser(email: string, name: string, id?: string): User
   };
 }
 
+export function createGithubUser(email: string, name: string, id?: string): UserProfile {
+  const generatedId = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : '00000000-0000-4000-8000-' + Math.random().toString(16).slice(2, 14).padStart(12, '0');
+
+  return {
+    id: id || generatedId,
+    name: name || email.split('@')[0],
+    email,
+    avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
+    provider: 'github',
+    isVerified: true,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export function createEmailUser(email: string, name: string, isVerified = false, id?: string): UserProfile {
   const generatedId = typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
@@ -65,14 +81,17 @@ export function initSupabaseAuthListener(onUserChanged: (user: UserProfile | nul
     if (session?.user) {
       const u = session.user;
       const email = u.email || 'user@pentest.local';
-      const name = (u.user_metadata?.full_name || u.user_metadata?.name || email.split('@')[0]) as string;
+      const name = (u.user_metadata?.full_name || u.user_metadata?.name || u.user_metadata?.user_name || email.split('@')[0]) as string;
       const avatarUrl = (u.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`) as string;
+      const rawProvider = u.app_metadata?.provider;
+      const provider: 'google' | 'github' | 'email' =
+        rawProvider === 'github' ? 'github' : rawProvider === 'google' ? 'google' : 'email';
       const profile: UserProfile = {
         id: u.id,
         email,
         name,
         avatarUrl,
-        provider: u.app_metadata?.provider === 'google' ? 'google' : 'email',
+        provider,
         isVerified: true,
         createdAt: u.created_at || new Date().toISOString(),
       };

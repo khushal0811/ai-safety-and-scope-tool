@@ -3,10 +3,11 @@ import type { UserProfile } from '../types/user';
 import { createEmailUser } from '../lib/authStore';
 import {
   signInWithGoogle,
+  signInWithGithub,
   signInWithEmailPassword,
   signUpWithEmailPassword,
 } from '../lib/supabaseClient';
-import { GoogleIcon, MailIcon, MoonIcon, ShieldIcon, SunIcon, CheckIcon, AlertIcon } from './Icons';
+import { GoogleIcon, GithubIcon, MailIcon, MoonIcon, ShieldIcon, SunIcon, CheckIcon, AlertIcon } from './Icons';
 
 interface Props {
   onAuthenticated: (user: UserProfile) => void;
@@ -53,6 +54,29 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
     } catch (err: any) {
       setLoading(false);
       setError(err?.message || 'Google Sign-In failed');
+    }
+  }
+
+  async function handleGithubLogin() {
+    setLoading(true);
+    setError(null);
+    try {
+      const { error: supaError } = await signInWithGithub();
+      if (supaError) {
+        setLoading(false);
+        const msg = supaError.message || '';
+        if (msg.includes('not enabled') || msg.includes('Unsupported provider') || msg.includes('validation_failed')) {
+          setError(
+            'GitHub OAuth is not enabled in your Supabase project yet. In your Supabase Dashboard, go to Authentication > Providers > GitHub and toggle it ON. In the meantime, you can sign in directly with your email below!'
+          );
+        } else {
+          setError(`GitHub Sign-In error: ${msg}`);
+        }
+      }
+      // On success, browser automatically redirects to github.com!
+    } catch (err: any) {
+      setLoading(false);
+      setError(err?.message || 'GitHub Sign-In failed');
     }
   }
 
@@ -280,17 +304,29 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
                   </button>
                 </div>
 
-                {/* Google OAuth Button */}
-                <button
-                  type="button"
-                  className="btn btn--block btn--google"
-                  onClick={handleGoogleLogin}
-                  disabled={loading}
-                  style={{ height: 44, fontWeight: 600, fontSize: 13.5, gap: 10 }}
-                >
-                  <GoogleIcon width={18} height={18} />
-                  {loading ? 'Connecting Google Account...' : 'Continue with Google'}
-                </button>
+                {/* OAuth Buttons: Google & GitHub */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn--block btn--google"
+                    onClick={handleGoogleLogin}
+                    disabled={loading}
+                    style={{ height: 42, fontWeight: 600, fontSize: 13, gap: 8 }}
+                  >
+                    <GoogleIcon width={16} height={16} />
+                    <span>Google</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--block btn--github"
+                    onClick={handleGithubLogin}
+                    disabled={loading}
+                    style={{ height: 42, fontWeight: 600, fontSize: 13, gap: 8 }}
+                  >
+                    <GithubIcon width={16} height={16} />
+                    <span>GitHub</span>
+                  </button>
+                </div>
 
                 <div className="divider-label">
                   <span>or with email</span>
@@ -340,6 +376,12 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
                       onChange={(e) => setPassword(e.target.value)}
                       required
                     />
+                    {mode === 'register' && (
+                      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-subtle)', fontSize: 11.5 }}>
+                        <ShieldIcon width={12} height={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                        <span>Protected: salted &amp; hashed with bcrypt. Never stored in plain text.</span>
+                      </div>
+                    )}
                   </div>
 
                   <button

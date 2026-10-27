@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { checkBackendHealth, isLiveMode, subscribeLiveStatus } from '../services/auditService';
 import type { UserProfile } from '../types/user';
-import { GoogleIcon, HistoryIcon, MoonIcon, SettingsIcon, ShieldIcon, SunIcon } from './Icons';
+import { HistoryIcon, MoonIcon, SettingsIcon, ShieldIcon, SunIcon, UserIcon } from './Icons';
 
 export type AppPage = 'studio' | 'history' | 'settings';
 
@@ -96,9 +96,9 @@ export function NavBar({
             <button
               className="btn btn--google-nav"
               onClick={onOpenAuth}
-              title="Sign in with your Google account"
+              title="Sign in with Google, GitHub, or Email"
             >
-              <GoogleIcon width={14} height={14} />
+              <UserIcon width={14} height={14} />
               <span>Sign In</span>
             </button>
           )}

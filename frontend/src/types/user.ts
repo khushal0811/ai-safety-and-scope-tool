@@ -3,7 +3,7 @@ export interface UserProfile {
   name: string;
   email: string;
   avatarUrl: string;
-  provider: 'google' | 'email';
+  provider: 'google' | 'github' | 'email';
   isVerified: boolean;
   createdAt: string;
 }
