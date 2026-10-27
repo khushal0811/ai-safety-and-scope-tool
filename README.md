@@ -1,4 +1,4 @@
-# VallumSST 🛡️🤖
+# Vallum 🛡️🤖
 > **Automated Empirical Auditing, Scope Verification, and Safe Command Remediation for AI-Assisted Penetration Testing**
 > *Named after the ancient Roman "Vallum" (fortified defensive boundary rampart) — strictly enforcing deterministic scope perimeter defenses.*
 
@@ -13,7 +13,7 @@
 
 ## 📌 Overview
 
-**VallumSST** is an automated auditing engine, intelligent remediation pipeline, and interactive dashboard designed to evaluate Large Language Models (LLMs) assisting in offensive cybersecurity workflows.
+**Vallum** is an automated auditing engine, intelligent remediation pipeline, and interactive dashboard designed to evaluate Large Language Models (LLMs) assisting in offensive cybersecurity workflows.
 
 While frontier models can propose penetration testing commands, they frequently:
 - Violate explicit **Rules of Engagement (RoE)** and CIDR scope boundaries.
@@ -21,7 +21,7 @@ While frontier models can propose penetration testing commands, they frequently:
 - Suggest destructive payloads (e.g., `DROP TABLE`, `rm -rf`, or unconstrained DoS floods).
 - Hallucinate non-existent CVEs or fictional CLI flags.
 
-VallumSST enforces a **hybrid verification pipeline** combining deterministic rule checking with intelligent LLM remediation to classify model outputs and automatically generate **Self-Sanitized Safe Commands**.
+Vallum enforces a **hybrid verification pipeline** combining deterministic rule checking with intelligent LLM remediation to classify model outputs and automatically generate **Self-Sanitized Safe Commands**.
 
 ---
 
@@ -29,7 +29,7 @@ VallumSST enforces a **hybrid verification pipeline** combining deterministic ru
 
 ```mermaid
 flowchart TD
-    A[User Opens SST Dashboard] --> B{Choose Scope Source}
+    A[User Opens Vallum Dashboard] --> B{Choose Scope Source}
     B -->|Privacy Preserving| C[Select Pre-Built RoE Preset\nNetwork / Web / AD / Cloud / Perimeter]
     B -->|Client Engagement| D[Upload RoE Document\n.md or .txt file]
     D --> E[Backend Llama 3 Parser\nExtracts Standardized JSON Scope]
@@ -37,7 +37,7 @@ flowchart TD
     E --> F
     F --> G[Select Model & Enter Pentest Prompt\nGPT-4o, Claude 3.5, Gemini 1.5, Llama 3]
     G --> H[Model Generates Exploitation / Recon Command]
-    H --> I[Hybrid SST Verification Engine]
+    H --> I[Hybrid Vallum Verification Engine]
     I --> J1[Deterministic Code Checks\nIP Normalization, CIDR Match, Destructive Regex, CVEs]
     I --> J2[Llama 3 Reasoning & Remediation\nViolation Analysis & Safe Rewriter]
     J1 & J2 --> K[Audit Verdict: Correct / Incorrect / Unsafe]
@@ -71,7 +71,7 @@ flowchart TD
 
 ## 🎨 UI/UX Design Philosophy & Multi-Page Architecture
 
-SST follows an architectural, tactile dark-canvas design philosophy focused on high-contrast operational clarity:
+Vallum follows an architectural, tactile dark-canvas design philosophy focused on high-contrast operational clarity:
 - **Tactile Dark Desk & Warm Stone Canvas:** Deep charcoal background (`#222225`) in dark mode with high-contrast card surfaces (`#2b2b2f`) and sunken panels (`#1a1a1c`), accompanied by a warm stone light mode (`#f0ede8`).
 - **Subtle Geometric Grid:** Crisp 24px hairline grid lines providing an architectural canvas feel.
 - **Modern Typography:** `Space Grotesk` for headlines and narrative typography, paired with `JetBrains Mono` for CLI syntax, tags, and audit telemetry.
@@ -101,7 +101,7 @@ SST follows an architectural, tactile dark-canvas design philosophy focused on h
 
 ## 🛡️ Security & Privacy Guarantees
 
-- **Zero Host Execution:** SST is strictly a static verification and auditing tool. It will **never** execute proposed pentest commands on the host machine or network.
+- **Zero Host Execution:** Vallum is strictly a static verification and auditing tool. It will **never** execute proposed pentest commands on the host machine or network.
 - **IP Obfuscation Normalization:** Addresses obfuscation evasion techniques (decimal, octal, hex, IPv6-mapped IPv4) using Python's `ipaddress` library before validation.
 - **Indirect Prompt Injection Defense:** Document parser wraps uploaded RoEs in strict system boundaries and validates outputs against strict Pydantic schemas.
 - **API Key Isolation:** User-entered keys remain strictly in browser `sessionStorage` or transient memory—never logged or saved to the database.

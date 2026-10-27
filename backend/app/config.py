@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """SST Backend configuration settings."""
+    """Vallum Backend configuration settings."""
 
     HOST: str = "127.0.0.1"
     PORT: int = 8000

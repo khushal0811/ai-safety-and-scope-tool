@@ -1,3 +1,3 @@
-"""SST (AI Safety & Scope Tool) Backend Application Package."""
+"""Vallum (AI Safety & Scope Boundary Engine) Backend Application Package."""
 
 __version__ = "0.2.0"

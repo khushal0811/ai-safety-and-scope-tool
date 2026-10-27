@@ -1,5 +1,5 @@
 /**
- * Shared contracts for SST.
+ * Shared contracts for Vallum.
  * Field names are snake_case on purpose: they mirror the FastAPI/Pydantic
  * schemas planned for Phase 2 so the demo engine can be swapped for the
  * real API without touching UI components.

@@ -102,4 +102,28 @@ export const GithubIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const VallumIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 150 150" fill="none" width="16" height="16" {...p}>
+    {/* Left Red Blocked Boundary */}
+    <path d="M 60,15 L 20,15 L 20,135 L 60,135" stroke="#ef4444" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="20" cy="75" r="10" fill="#ef4444" />
+    <circle cx="60" cy="15" r="8" fill="#ef4444" />
+    <circle cx="60" cy="135" r="8" fill="#ef4444" />
+
+    {/* Right Green Allowed Boundary */}
+    <path d="M 90,15 L 130,15 L 130,135 L 90,135" stroke="#10b981" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="130" cy="75" r="10" fill="#10b981" />
+    <circle cx="90" cy="15" r="8" fill="#10b981" />
+    <circle cx="90" cy="135" r="8" fill="#10b981" />
+
+    {/* Verification links */}
+    <line x1="42" y1="75" x2="60" y2="75" stroke="#ef4444" strokeWidth="5" strokeLinecap="round" />
+    <line x1="90" y1="75" x2="108" y2="75" stroke="#10b981" strokeWidth="5" strokeLinecap="round" />
+
+    {/* Center Target Core */}
+    <circle cx="75" cy="75" r="17" fill="var(--accent, #6272f0)" />
+    <circle cx="75" cy="75" r="7" fill="#ffffff" />
+  </svg>
+);
+
 

@@ -113,7 +113,7 @@ export async function runAudit(req: AuditRequest, userId?: string): Promise<Audi
       return data;
     }
   } catch (err) {
-    console.warn('[SST] Live backend audit request failed, falling back to demo engine:', err);
+    console.warn('[Vallum] Live backend audit request failed, falling back to demo engine:', err);
     notifyStatus(false);
   }
 
