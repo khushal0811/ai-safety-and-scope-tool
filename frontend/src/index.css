@@ -569,6 +569,126 @@ button { font: inherit; color: inherit; }
 .diff__add { background: var(--diff-add); border-radius: 3px; padding: 1px 3px; }
 .diff__del { background: var(--diff-del); text-decoration: line-through; opacity: 0.85; border-radius: 3px; padding: 1px 3px; }
 
+/* Side-by-Side (Split) Git Diff Viewer */
+.split-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface, #141416);
+}
+
+.split-diff__pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.split-diff__pane:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.split-diff__header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.split-diff__header--orig {
+  color: var(--bad-fg, #ef4444);
+}
+
+.split-diff__header--safe {
+  color: var(--ok-fg, #10b981);
+}
+
+.split-diff__body {
+  overflow-x: auto;
+  padding: 6px 0;
+}
+
+.split-diff__row {
+  display: flex;
+  line-height: 22px;
+  min-height: 22px;
+  padding: 0 8px;
+}
+
+.split-diff__row--del {
+  background: var(--diff-del);
+}
+
+.split-diff__row--add {
+  background: var(--diff-add);
+}
+
+.split-diff__row--empty {
+  background: rgba(120, 120, 120, 0.04);
+}
+
+.split-diff__gutter {
+  width: 32px;
+  flex-shrink: 0;
+  color: var(--text-subtle);
+  user-select: none;
+  text-align: right;
+  padding-right: 10px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.split-diff__content {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-all;
+  min-width: 0;
+}
+
+.diff-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.diff-mode-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  color: var(--text-subtle);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.diff-mode-btn--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .split-diff {
+    grid-template-columns: 1fr;
+  }
+  .split-diff__pane:first-child {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+
 .accordion { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .accordion summary {
   list-style: none; cursor: pointer; padding: 12px 14px; font-weight: 500; font-size: 13px;
