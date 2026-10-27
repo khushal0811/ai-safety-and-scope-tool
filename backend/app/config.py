@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
-    LLAMA_MODEL: str = "llama-3.3-70b-versatile"
+    LLAMA_MODEL: str = "openai/gpt-oss-120b"
     KEY_VAULT_MASTER_KEY: str = ""
 
     @property
