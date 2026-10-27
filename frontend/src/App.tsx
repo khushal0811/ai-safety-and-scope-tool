@@ -6,7 +6,7 @@ import { ROE_PRESETS } from './data/presets';
 import { buildExamples, MODELS, type PromptExample } from './data/models';
 import { runAudit, queryLiveModel } from './services/auditService';
 import { getStoredUser, saveUser, initSupabaseAuthListener } from './lib/authStore';
-import { getPastAudits, savePastAudit, clearPastAudits, syncPastAuditsFromCloud } from './lib/historyStore';
+import { getPastAudits, savePastAudit, deletePastAudits, clearPastAudits, syncPastAuditsFromCloud } from './lib/historyStore';
 import { getOpenRouterKey, fetchVaultStatus } from './lib/keyStore';
 import { NavBar, type AppPage } from './components/NavBar';
 import { RoeSelector, type RoeMode } from './components/RoeSelector';
@@ -162,6 +162,12 @@ export default function App() {
   function handleClearHistory() {
     clearPastAudits(user?.id);
     setAudits([]);
+  }
+
+  async function handleDeleteAudits(auditIds: string[]) {
+    if (!user) return;
+    const updated = await deletePastAudits(auditIds, user.id);
+    setAudits(updated);
   }
 
   const activeScope = roeMode === 'preset' ? ROE_PRESETS.find((p) => p.roe_id === presetId) ?? null : customScope;
@@ -415,7 +421,7 @@ export default function App() {
         <PastAuditsView
           audits={audits}
           currentUser={user}
-          onClearHistory={handleClearHistory}
+          onDeleteAudits={handleDeleteAudits}
           onLoadAuditIntoStudio={handleLoadAuditIntoStudio}
           onOpenLogin={() => setAuthModalOpen(true)}
           onSyncCloud={async () => {

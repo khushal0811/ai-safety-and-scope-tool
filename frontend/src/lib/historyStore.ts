@@ -97,6 +97,57 @@ export function clearPastAudits(userId?: string): void {
 }
 
 /**
+ * Permanently delete selected audits from the cloud database and local cache.
+ */
+export async function deletePastAudits(auditIds: string[], userId?: string): Promise<PastAudit[]> {
+  if (!userId || auditIds.length === 0) {
+    return [];
+  }
+
+  // 1. Delete from Backend FastAPI endpoint
+  try {
+    await fetch(`${API_BASE}/api/audit/history`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audit_ids: auditIds,
+        user_id: userId,
+      }),
+    });
+  } catch (err) {
+    console.warn('[HistoryStore] FastAPI delete failed:', err);
+  }
+
+  // 2. Direct Supabase delete as immediate guarantee
+  if (supabase) {
+    try {
+      await supabase
+        .from('audit_logs')
+        .delete()
+        .eq('user_id', userId)
+        .in('audit_id', auditIds);
+    } catch (err) {
+      console.warn('[HistoryStore] Direct Supabase delete failed:', err);
+    }
+  }
+
+  // 3. Update local cache / storage
+  const key = getUserStorageKey(userId);
+  const current = getPastAudits(userId);
+  const toDeleteSet = new Set(auditIds);
+  const updated = current.filter((a) => !toDeleteSet.has(a.id));
+  if (key) {
+    try {
+      localStorage.setItem(key, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+  }
+
+  return updated;
+}
+
+/**
  * Synchronize audit history with Supabase PostgreSQL cloud database.
  * STRICT PRIVACY RULE: Returns [] immediately if not authenticated as a registered user.
  */

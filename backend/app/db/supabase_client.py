@@ -120,6 +120,23 @@ def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[
         return []
 
 
+def delete_audit_logs(audit_ids: List[str], user_id: str) -> bool:
+    """Permanently delete one or more audit logs from PostgreSQL table audit_logs."""
+    if not is_valid_uuid(user_id) or not audit_ids:
+        return False
+
+    client = get_supabase()
+    if not client:
+        return False
+
+    try:
+        client.table("audit_logs").delete().in_("audit_id", audit_ids).eq("user_id", user_id).execute()
+        return True
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to delete audit logs: {e}")
+        return False
+
+
 def fetch_audit_metrics(user_id: Optional[str] = None) -> Dict[str, Any]:
     """Calculate aggregated telemetry metrics for authenticated user only."""
     if not is_valid_uuid(user_id):

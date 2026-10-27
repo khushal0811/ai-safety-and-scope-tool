@@ -4,7 +4,9 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Query
+from pydantic import BaseModel, Field
 from app.db import (
+    delete_audit_logs,
     fetch_audit_history,
     fetch_audit_metrics,
     is_database_connected,
@@ -16,6 +18,20 @@ from app.models.audit import AuditRequest, AuditResult, DeterministicAuditReques
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/audit", tags=["Scope & Safety Audit"])
+
+
+class DeleteAuditsPayload(BaseModel):
+    """Payload to permanently delete one or more audit logs."""
+
+    audit_ids: List[str] = Field(..., description="List of audit UUIDs/IDs to permanently delete")
+    user_id: str = Field(..., description="Owner Supabase user UUID")
+
+
+@router.delete("/history")
+async def delete_audit_history(payload: DeleteAuditsPayload) -> Dict[str, Any]:
+    """Permanently delete specified audit records from Supabase PostgreSQL audit_logs table."""
+    success = delete_audit_logs(audit_ids=payload.audit_ids, user_id=payload.user_id)
+    return {"success": success, "deleted_count": len(payload.audit_ids)}
 
 
 @router.post("", response_model=AuditResult)

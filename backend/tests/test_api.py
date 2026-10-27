@@ -114,3 +114,15 @@ def test_get_custom_roes_endpoint(client: TestClient):
     data = response.json()
     assert isinstance(data, list)
 
+
+def test_delete_audit_history_endpoint(client: TestClient):
+    response = client.request(
+        "DELETE",
+        "/api/audit/history",
+        json={"audit_ids": ["aud-12345"], "user_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "deleted_count" in data
+    assert data["deleted_count"] == 1
+
