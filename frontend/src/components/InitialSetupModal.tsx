@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { UserProfile } from '../types/user';
 import {
+  fetchVaultStatus,
   getOpenRouterKey,
+  hasVaultOpenRouterKey,
   saveAllApiKeys,
   saveKeysToVault,
 } from '../lib/keyStore';
@@ -20,8 +22,6 @@ export function InitialSetupModal({ user, isOpen, onClose, onKeySaved }: Props) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isOpen) return null;
-
   function markCompleted() {
     try {
       const key = user ? `sst.initial_setup_completed_${user.id}` : 'sst.initial_setup_completed_guest';
@@ -30,6 +30,35 @@ export function InitialSetupModal({ user, isOpen, onClose, onKeySaved }: Props) 
       // Ignored if storage full/blocked
     }
   }
+
+  function handleSkipBypass() {
+    markCompleted();
+    onClose();
+  }
+
+  // If the user already has a key stored in the database vault, automatically skip and close the popup
+  useEffect(() => {
+    if (!isOpen) return;
+    if (getOpenRouterKey() || hasVaultOpenRouterKey()) {
+      markCompleted();
+      onKeySaved?.();
+      onClose();
+      return;
+    }
+    if (user?.id) {
+      fetchVaultStatus(user.id)
+        .then((st) => {
+          if (st.hasOpenRouterKey) {
+            markCompleted();
+            onKeySaved?.();
+            onClose();
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, user?.id]);
+
+  if (!isOpen) return null;
 
   async function handleSaveAndContinue() {
     const trimmed = openRouterKey.trim();
@@ -157,7 +186,15 @@ export function InitialSetupModal({ user, isOpen, onClose, onKeySaved }: Props) 
           </div>
         </div>
 
-        <div className="modal__foot" style={{ padding: '16px 24px', background: 'var(--surface-sunken)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <div className="modal__foot" style={{ padding: '16px 24px', background: 'var(--surface-sunken)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={handleSkipBypass}
+            disabled={saving}
+          >
+            Skip / Bypass for Now
+          </button>
           <button
             className="btn btn--primary"
             onClick={handleSaveAndContinue}

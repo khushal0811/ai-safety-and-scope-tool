@@ -417,7 +417,21 @@ def save_user_vault_keys(
             payload["encrypted_groq_key"] = None
             payload["key_hint_groq"] = None
 
-    client.table("user_api_vault").upsert(payload, on_conflict="user_id").execute()
+    try:
+        client.table("user_api_vault").upsert(payload, on_conflict="user_id").execute()
+    except Exception as e:
+        logger.warning(f"[Supabase] user_api_vault table upsert fallback to auth.admin app_metadata: {e}")
+
+    # Also persist encrypted vault payload in Supabase Auth user app_metadata so it works
+    # even when the optional user_api_vault table migration has not been applied.
+    try:
+        client.auth.admin.update_user_by_id(
+            user_id,
+            {"app_metadata": {"vallum_vault": payload}},
+        )
+    except Exception as e:
+        logger.warning(f"[Supabase] Failed to sync vault to auth.admin app_metadata for {user_id}: {e}")
+
     return {
         "success": True,
         "has_openrouter_key": bool(payload.get("encrypted_openrouter_key")),
@@ -425,6 +439,38 @@ def save_user_vault_keys(
         "has_groq_key": bool(payload.get("encrypted_groq_key")),
         "groq_hint": payload.get("key_hint_groq"),
     }
+
+
+def _get_vault_row_for_user(client: Any, user_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch encrypted vault record from user_api_vault table or auth.users app_metadata fallback."""
+    try:
+        res = (
+            client.table("user_api_vault")
+            .select("key_hint_openrouter, key_hint_groq, encrypted_openrouter_key, encrypted_groq_key")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if rows:
+            return rows[0]
+    except Exception:
+        pass
+
+    try:
+        user_res = client.auth.admin.get_user_by_id(user_id)
+        user_obj = getattr(user_res, "user", None)
+        if user_obj:
+            app_meta = getattr(user_obj, "app_metadata", None) or {}
+            vault_data = app_meta.get("vallum_vault")
+            if isinstance(vault_data, dict) and (
+                vault_data.get("encrypted_openrouter_key") or vault_data.get("encrypted_groq_key")
+            ):
+                return vault_data
+    except Exception as e:
+        logger.warning(f"[Supabase] Fallback auth.admin vault lookup failed for {user_id}: {e}")
+
+    return None
 
 
 def get_user_vault_keys(user_id: str) -> Dict[str, Optional[str]]:
@@ -442,12 +488,10 @@ def get_user_vault_keys(user_id: str) -> Dict[str, Optional[str]]:
     try:
         from app.engine.crypto_vault import decrypt_api_key
 
-        res = client.table("user_api_vault").select("encrypted_openrouter_key, encrypted_groq_key").eq("user_id", user_id).limit(1).execute()
-        rows = res.data or []
-        if not rows:
+        row = _get_vault_row_for_user(client, user_id)
+        if not row:
             return {"openrouter_key": None, "groq_key": None}
 
-        row = rows[0]
         enc_or = row.get("encrypted_openrouter_key")
         enc_groq = row.get("encrypted_groq_key")
 
@@ -472,12 +516,23 @@ def revoke_user_vault_keys(user_id: str) -> bool:
     if not client:
         return False
 
+    deleted = False
     try:
         client.table("user_api_vault").delete().eq("user_id", user_id).execute()
-        return True
+        deleted = True
     except Exception as e:
-        logger.error(f"[Supabase] Failed to revoke vault keys for user {user_id}: {e}")
-        return False
+        logger.warning(f"[Supabase] user_api_vault table delete warning for {user_id}: {e}")
+
+    try:
+        client.auth.admin.update_user_by_id(
+            user_id,
+            {"app_metadata": {"vallum_vault": None}},
+        )
+        deleted = True
+    except Exception as e:
+        logger.warning(f"[Supabase] Failed to clear auth.admin vallum_vault for {user_id}: {e}")
+
+    return deleted
 
 
 def get_user_vault_status(user_id: str) -> Dict[str, Any]:
@@ -502,9 +557,8 @@ def get_user_vault_status(user_id: str) -> Dict[str, Any]:
         }
 
     try:
-        res = client.table("user_api_vault").select("key_hint_openrouter, key_hint_groq, encrypted_openrouter_key, encrypted_groq_key").eq("user_id", user_id).limit(1).execute()
-        rows = res.data or []
-        if not rows:
+        row = _get_vault_row_for_user(client, user_id)
+        if not row:
             return {
                 "is_configured": False,
                 "has_openrouter_key": False,
@@ -513,7 +567,6 @@ def get_user_vault_status(user_id: str) -> Dict[str, Any]:
                 "groq_hint": None,
             }
 
-        row = rows[0]
         has_or = bool(row.get("encrypted_openrouter_key"))
         has_groq = bool(row.get("encrypted_groq_key"))
         return {

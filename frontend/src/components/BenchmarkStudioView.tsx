@@ -14,7 +14,7 @@ import {
   evaluateBenchmark,
   getBenchmarkModels,
 } from '../services/benchmarkService';
-import { getOpenRouterKey } from '../lib/keyStore';
+import { getOpenRouterKey, hasVaultOpenRouterKey } from '../lib/keyStore';
 import {
   AlertIcon,
   BenchmarkIcon,
@@ -50,7 +50,7 @@ export function BenchmarkStudioView({
   pastBenchmarkCount = 0,
 }: Props) {
   // Check if OpenRouter key exists in vault/session
-  const hasOpenRouterKey = Boolean(getOpenRouterKey()?.trim());
+  const hasOpenRouterKey = Boolean(getOpenRouterKey()?.trim() || hasVaultOpenRouterKey());
 
   // Available models from backend
   const [availableModels, setAvailableModels] = useState<FrontierModelInfo[]>([]);
