@@ -3,6 +3,7 @@ import type { UserProfile } from '../types/user';
 import {
   getOpenRouterKey,
   getGroqKey,
+  hasVaultOpenRouterKey,
   saveAllApiKeys,
   saveKeysToVault,
   revokeAndWipeUserKeys,
@@ -20,9 +21,10 @@ interface Props {
   onLogout: () => void;
   onClearHistory: () => void;
   onOpenInitialSetup?: () => void;
+  onKeysUpdated?: () => void;
 }
 
-export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistory, onOpenInitialSetup }: Props) {
+export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistory, onOpenInitialSetup, onKeysUpdated }: Props) {
   const [openRouterKey, setOpenRouterKey] = useState(getOpenRouterKey() || '');
   const [groqKey, setGroqKey] = useState(getGroqKey() || '');
   const [savedNotice, setSavedNotice] = useState(false);
@@ -40,7 +42,12 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
 
   useEffect(() => {
     if (currentUser?.id) {
-      fetchVaultStatus(currentUser.id).then(setVaultStatus).catch(() => {});
+      fetchVaultStatus(currentUser.id).then((st) => {
+        setVaultStatus(st);
+        if (st.hasOpenRouterKey) {
+          onKeysUpdated?.();
+        }
+      }).catch(() => {});
     }
   }, [currentUser?.id]);
 
@@ -57,6 +64,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
     } else {
       saveAllApiKeys({ openRouterKey, groqKey });
     }
+    onKeysUpdated?.();
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
   }
@@ -69,6 +77,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
       setOpenRouterKey('');
       setGroqKey('');
       setVaultStatus(null);
+      onKeysUpdated?.();
       setRevokedNotice(true);
       setTimeout(() => setRevokedNotice(false), 3000);
     } finally {
@@ -180,7 +189,9 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
             {/* Primary: Personal OpenRouter Key (Mandatory BYOK) */}
             <div
               style={{
-                border: (openRouterKey || getOpenRouterKey()) ? '1px solid var(--accent)' : '1px solid var(--border)',
+                border: (openRouterKey || getOpenRouterKey() || vaultStatus?.hasOpenRouterKey || hasVaultOpenRouterKey())
+                  ? '1px solid var(--accent)'
+                  : '1px solid var(--border)',
                 borderRadius: 'var(--radius)',
                 padding: '16px 18px',
                 marginBottom: 16,
@@ -190,8 +201,8 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
               <div className="row between" style={{ marginBottom: 8 }}>
                 <span className="row" style={{ gap: 8 }}>
                   <strong style={{ fontSize: 13.5 }}>OpenRouter API Key (Required for All Audits &amp; Benchmarks)</strong>
-                  {getOpenRouterKey() ? (
-                    <span className="tag tag--ok">● Active (User Key)</span>
+                  {(getOpenRouterKey() || vaultStatus?.hasOpenRouterKey || hasVaultOpenRouterKey()) ? (
+                    <span className="tag tag--ok">● Active (Configured)</span>
                   ) : (
                     <span className="tag tag--warn">⚠️ Required</span>
                   )}

@@ -18,7 +18,10 @@ let memoryGroqKey: string | null = null;
 
 export function hasVaultOpenRouterKey(): boolean {
   try {
-    return sessionStorage.getItem(VAULT_HAS_OR_KEY_NAME) === 'true';
+    return (
+      sessionStorage.getItem(VAULT_HAS_OR_KEY_NAME) === 'true' ||
+      localStorage.getItem(VAULT_HAS_OR_KEY_NAME) === 'true'
+    );
   } catch {
     return false;
   }
@@ -28,10 +31,16 @@ export function setVaultOpenRouterKeyStatus(hasKey: boolean, hint?: string | nul
   try {
     if (hasKey) {
       sessionStorage.setItem(VAULT_HAS_OR_KEY_NAME, 'true');
-      if (hint) sessionStorage.setItem(VAULT_OR_HINT_NAME, hint);
+      localStorage.setItem(VAULT_HAS_OR_KEY_NAME, 'true');
+      if (hint) {
+        sessionStorage.setItem(VAULT_OR_HINT_NAME, hint);
+        localStorage.setItem(VAULT_OR_HINT_NAME, hint);
+      }
     } else {
       sessionStorage.removeItem(VAULT_HAS_OR_KEY_NAME);
       sessionStorage.removeItem(VAULT_OR_HINT_NAME);
+      localStorage.removeItem(VAULT_HAS_OR_KEY_NAME);
+      localStorage.removeItem(VAULT_OR_HINT_NAME);
     }
   } catch {
     // ignore storage errors
@@ -39,17 +48,19 @@ export function setVaultOpenRouterKeyStatus(hasKey: boolean, hint?: string | nul
 }
 
 export function getStorageMode(): KeyStorageMode {
-  const mode = sessionStorage.getItem(MODE_NAME);
+  const mode = sessionStorage.getItem(MODE_NAME) || localStorage.getItem(MODE_NAME);
   return mode === 'memory' ? 'memory' : 'session';
 }
 
 export function setStorageMode(mode: KeyStorageMode): void {
   sessionStorage.setItem(MODE_NAME, mode);
+  localStorage.setItem(MODE_NAME, mode);
 }
 
 // --- OpenRouter Key ---
 export function getOpenRouterKey(): string | null {
-  return getStorageMode() === 'session' ? sessionStorage.getItem(OPENROUTER_KEY_NAME) : memoryOpenRouterKey;
+  if (getStorageMode() === 'memory') return memoryOpenRouterKey;
+  return sessionStorage.getItem(OPENROUTER_KEY_NAME) || localStorage.getItem(OPENROUTER_KEY_NAME) || memoryOpenRouterKey;
 }
 
 export function saveOpenRouterKey(key: string, mode?: KeyStorageMode): void {
@@ -58,6 +69,7 @@ export function saveOpenRouterKey(key: string, mode?: KeyStorageMode): void {
   clearOpenRouterKey();
   if (currentMode === 'session') {
     sessionStorage.setItem(OPENROUTER_KEY_NAME, key);
+    localStorage.setItem(OPENROUTER_KEY_NAME, key);
   } else {
     memoryOpenRouterKey = key;
   }
@@ -66,6 +78,7 @@ export function saveOpenRouterKey(key: string, mode?: KeyStorageMode): void {
 export function clearOpenRouterKey(): void {
   memoryOpenRouterKey = null;
   sessionStorage.removeItem(OPENROUTER_KEY_NAME);
+  localStorage.removeItem(OPENROUTER_KEY_NAME);
 }
 
 // Backward-compatible aliases for existing callers
@@ -75,7 +88,8 @@ export const clearApiKey = clearOpenRouterKey;
 
 // --- Groq Key ---
 export function getGroqKey(): string | null {
-  return getStorageMode() === 'session' ? sessionStorage.getItem(GROQ_KEY_NAME) : memoryGroqKey;
+  if (getStorageMode() === 'memory') return memoryGroqKey;
+  return sessionStorage.getItem(GROQ_KEY_NAME) || localStorage.getItem(GROQ_KEY_NAME) || memoryGroqKey;
 }
 
 export function saveGroqKey(key: string, mode?: KeyStorageMode): void {
@@ -84,6 +98,7 @@ export function saveGroqKey(key: string, mode?: KeyStorageMode): void {
   clearGroqKey();
   if (currentMode === 'session') {
     sessionStorage.setItem(GROQ_KEY_NAME, key);
+    localStorage.setItem(GROQ_KEY_NAME, key);
   } else {
     memoryGroqKey = key;
   }
@@ -92,6 +107,7 @@ export function saveGroqKey(key: string, mode?: KeyStorageMode): void {
 export function clearGroqKey(): void {
   memoryGroqKey = null;
   sessionStorage.removeItem(GROQ_KEY_NAME);
+  localStorage.removeItem(GROQ_KEY_NAME);
 }
 
 // --- Unified Methods ---
