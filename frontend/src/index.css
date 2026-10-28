@@ -271,10 +271,29 @@ button { font: inherit; color: inherit; }
 .nav__inner { display: flex; align-items: center; justify-content: space-between; height: 58px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; }
 .brand__mark {
-  width: 28px; height: 28px; border-radius: 4px;
-  display: grid; place-items: center;
-  background: var(--accent); color: var(--accent-contrast);
-  box-shadow: 0 0 10px var(--accent-glow);
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: #000000;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-theme='light'] .brand__mark,
+:root:not([data-theme='dark']) .brand__mark {
+  background: #0d0e11;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.brand:hover .brand__mark {
+  transform: scale(1.05);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
 }
 .brand__sub { color: var(--text-subtle); font-weight: 400; font-family: var(--font-mono); font-size: 12px; }
 .nav__actions { display: flex; align-items: center; gap: 8px; }
