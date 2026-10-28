@@ -40,7 +40,7 @@ def compute_hash_chain(
         audit_id = rec.get("audit_id") or f"AUDIT-REC-{idx + 1}"
         ts = rec.get("created_at") or rec.get("timestamp") or ""
         cmds = rec.get("extracted_commands") or []
-        cmd_str = cmds[0] if cmds else rec.get("raw_model_output") or ""
+        cmd_str = "; ".join(cmds) if cmds else rec.get("raw_model_output") or ""
         verdict = rec.get("verdict") or "Unsafe"
         sanitized = rec.get("safe_sanitized_command") or ""
         viols = json.dumps(rec.get("violation_details") or [], sort_keys=True)
@@ -79,6 +79,7 @@ def generate_compliance_report_markdown(
     unsafe_ops = sum(1 for r in chained_records if r.get("verdict") == "Unsafe")
     review_ops = sum(1 for r in chained_records if r.get("verdict") == "Incorrect")
     compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
+    interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
 
     lines: List[str] = []
     lines.append("# FORMAL RULES OF ENGAGEMENT COMPLIANCE & SAFETY ATTESTATION")
@@ -94,9 +95,16 @@ def generate_compliance_report_markdown(
     lines.append("## 1. Executive Statement of Attestation")
     lines.append("")
     lines.append(
-        f"This document certifies that all automated and operator-driven penetration testing activities "
-        f"conducted under engagement **\"{roe.name}\"** (ID: `{roe.roe_id}`) were continuously pre-screened "
-        f"and audited by the **Vallum AI Safety & Scope Boundary Engine** prior to any execution on the host system."
+        "> **Scope of This Attestation:** This report certifies that all commands *submitted to the "
+        "Vallum engine for review* were evaluated against the contracted scope boundaries below, and that "
+        "any flagged as unsafe were intercepted before being returned to the operator. It does not — and "
+        "cannot — certify that no commands were executed outside of Vallum's review process."
+    )
+    lines.append("")
+    lines.append(
+        f"This document records that all penetration testing commands and model recommendations submitted "
+        f"under engagement **\"{roe.name}\"** (ID: `{roe.roe_id}`) were pre-screened "
+        f"and audited by the **Vallum AI Safety & Scope Boundary Engine** prior to being returned to the operator."
     )
     lines.append("")
     lines.append(
@@ -136,7 +144,11 @@ def generate_compliance_report_markdown(
     lines.append(f"| **Fully Compliant (Correct)** | **{compliant_ops}** | Authorized within scope boundaries |")
     lines.append(f"| **Breaches Intercepted (Unsafe)** | **{unsafe_ops}** | Out-of-scope or destructive payloads halted |")
     lines.append(f"| **Warnings Reviewed (Incorrect)** | **{review_ops}** | Non-critical policy observations |")
-    lines.append(f"| **Interception & Neutralization Rate** | **100.0%** | Zero unauthorized packets released to target |")
+    lines.append(
+        f"| **Unsafe Commands Intercepted Pre-Execution** | **{interception_rate}%** | "
+        f"Of commands submitted to Vallum for review, this fraction were flagged Unsafe and blocked "
+        f"before being returned to the operator. |"
+    )
     lines.append(f"| **Autonomous Compliance Rate** | **{compliance_rate}%** | Baseline model accuracy within boundary |")
     lines.append("")
 
@@ -208,11 +220,11 @@ def generate_compliance_report_markdown(
     lines.append("│                 VALLUM CRYPTOGRAPHIC SCOPE ATTESTATION SEAL                 │")
     lines.append("├─────────────────────────────────────────────────────────────────────────────┤")
     lines.append(f"│  Attestation ID:       {report_id:<52} │")
-    lines.append(f"  Engagement ID:        {roe.roe_id:<52} │")
+    lines.append(f"│  Engagement ID:        {roe.roe_id:<52} │")
     lines.append(f"│  SHA-256 Chain Root:   {root_hash:<52} │")
     lines.append(f"│  Records Chained:      {total_ops:<52} │")
-    lines.append(f"│  Neutralization Rate:  100.0% GUARANTEED SCOPE ISOLATION                    │")
-    lines.append(f"│  Status:               CRYPTOGRAPHICALLY VALIDATED & CERTIFIED              │")
+    lines.append(f"│  Unsafe Intercepted:   {f'{interception_rate}% ({unsafe_ops}/{total_ops} reviewed commands)':<52} │")
+    lines.append(f"│  Status:               AUDIT TRAIL INTEGRITY: VERIFIED (TAMPER-EVIDENT)     │")
     lines.append("└─────────────────────────────────────────────────────────────────────────────┘")
     lines.append("```")
     lines.append("")
@@ -321,6 +333,7 @@ def generate_compliance_report_pdf(
     unsafe_ops = sum(1 for r in chained_records if r.get("verdict") == "Unsafe")
     review_ops = sum(1 for r in chained_records if r.get("verdict") == "Incorrect")
     compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
+    interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
 
     story = []
 
@@ -336,10 +349,11 @@ def generate_compliance_report_pdf(
 
     # Executive Certification Block
     cert_text = (
-        f"<b>OFFICIAL ATTESTATION:</b> This document certifies that all penetration testing commands and model "
-        f"recommendations executed under engagement <b>{roe.name}</b> (<code>{roe.roe_id}</code>) were monitored, "
-        f"parsed into Abstract Syntax Trees (ASTs), and cryptographically verified against contracted scope boundaries. "
-        f"Zero host executions occurred outside authorized targets. All unauthorized actions were intercepted and neutralized."
+        f"<b>SCOPE OF THIS ATTESTATION:</b> This report certifies that all commands submitted to the Vallum "
+        f"engine for review under engagement <b>{roe.name}</b> (<code>{roe.roe_id}</code>) were parsed into "
+        f"Abstract Syntax Trees (ASTs) and evaluated against the contracted scope boundaries below, and that "
+        f"any flagged as unsafe were intercepted before being returned to the operator. It does not — and "
+        f"cannot — certify that no commands were executed outside of Vallum's review process."
     )
     story.append(Paragraph(cert_text, body_style))
     story.append(Spacer(1, 10))
@@ -370,8 +384,8 @@ def generate_compliance_report_pdf(
     # Summary Metrics Table
     story.append(Paragraph("2. Engagement Compliance Metrics", h2_style))
     metrics_data = [
-        ["Total Audited", "Compliant (Pass)", "Blocked (Unsafe)", "Interception Rate", "Compliance Rate"],
-        [str(total_ops), str(compliant_ops), str(unsafe_ops), "100.0%", f"{compliance_rate}%"],
+        ["Total Audited", "Compliant (Pass)", "Blocked (Unsafe)", "Unsafe Intercepted", "Compliance Rate"],
+        [str(total_ops), str(compliant_ops), str(unsafe_ops), f"{interception_rate}%", f"{compliance_rate}%"],
     ]
     t_metrics = Table(metrics_data, colWidths=[100, 110, 110, 110, 100])
     t_metrics.setStyle(
@@ -456,7 +470,7 @@ def generate_compliance_report_pdf(
     seal_data = [
         [Paragraph("<b>VALLUM CRYPTOGRAPHIC SCOPE ATTESTATION SEAL</b>", ParagraphStyle("SealHead", fontName="Helvetica-Bold", fontSize=9, textColor=colors.white, alignment=1))],
         [Paragraph(f"<b>Root Hash:</b> <code>{root_hash}</code>", ParagraphStyle("SealBody", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#0f172a")))],
-        [Paragraph(f"<b>Chained Records:</b> {total_ops} &nbsp;|&nbsp; <b>Interception Rate:</b> 100.0% &nbsp;|&nbsp; <b>Status:</b> CERTIFIED COMPLIANT", ParagraphStyle("SealMeta", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#334155")))],
+        [Paragraph(f"<b>Chained Records:</b> {total_ops} &nbsp;|&nbsp; <b>Unsafe Intercepted:</b> {interception_rate}% &nbsp;|&nbsp; <b>Status:</b> AUDIT TRAIL INTEGRITY: VERIFIED (TAMPER-EVIDENT)", ParagraphStyle("SealMeta", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#334155")))],
     ]
     t_seal = Table(seal_data, colWidths=[530])
     t_seal.setStyle(

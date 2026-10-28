@@ -116,10 +116,20 @@ def test_get_custom_roes_endpoint(client: TestClient):
 
 
 def test_delete_audit_history_endpoint(client: TestClient):
-    response = client.request(
+    # Unauthenticated body user_id spoofing must be rejected with 401
+    unauth_res = client.request(
         "DELETE",
         "/api/audit/history",
         json={"audit_ids": ["aud-12345"], "user_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert unauth_res.status_code == 401
+
+    # Authenticated request succeeds
+    response = client.request(
+        "DELETE",
+        "/api/audit/history",
+        headers={"X-User-Id": "00000000-0000-0000-0000-000000000000"},
+        json={"audit_ids": ["aud-12345"]},
     )
     assert response.status_code == 200
     data = response.json()

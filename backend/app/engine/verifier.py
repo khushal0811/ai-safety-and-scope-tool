@@ -290,8 +290,15 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
                     )
                 )
 
-        # B. Destructive payload checks
-        cmd_destructive = check_destructive_commands(parsed.raw)
+        # B. Destructive payload checks (using AST tokens + pipeline stages)
+        cmd_destructive = check_destructive_commands(
+            parsed.raw,
+            tokens=parsed.tokens,
+        )
+        for stage in getattr(parsed, "pipeline_stages", []) or []:
+            for st_v in check_destructive_commands(stage.raw, tokens=stage.tokens):
+                if not any(existing.rule == st_v.rule for existing in cmd_destructive):
+                    cmd_destructive.append(st_v)
         all_violations.extend(cmd_destructive)
 
         # C. Tool & parameter checks

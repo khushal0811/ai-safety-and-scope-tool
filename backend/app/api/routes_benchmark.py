@@ -85,7 +85,6 @@ async def query_benchmark_models(
     request: BenchmarkQueryRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
     x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ):
     """Query one or all frontier models via OpenRouter or system Groq key.
@@ -95,12 +94,11 @@ async def query_benchmark_models(
     are never logged or stored.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
-    active_user_id = user_id or x_user_id
 
-    # If keys are not provided in headers, fetch decrypted keys from user's vault
-    if active_user_id and (not x_openrouter_key or not x_groq_key):
+    # Only ever pull vault keys for the verified caller's own account.
+    if user_id and (not x_openrouter_key or not x_groq_key):
         from app.db.supabase_client import get_user_vault_keys
-        vault_keys = get_user_vault_keys(active_user_id)
+        vault_keys = get_user_vault_keys(user_id)
         if not x_openrouter_key and vault_keys.get("openrouter_key"):
             x_openrouter_key = vault_keys["openrouter_key"]
         if not x_groq_key and vault_keys.get("groq_key"):
@@ -139,17 +137,15 @@ async def evaluate_benchmark_models(
     request: BenchmarkEvaluateRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
     x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ):
     """Query frontier models and evaluate each response against the active RoE scope."""
     timestamp = datetime.now(timezone.utc).isoformat()
-    active_user_id = user_id or x_user_id
 
-    # If keys are not provided in headers, fetch decrypted keys from user's vault
-    if active_user_id and (not x_openrouter_key or not x_groq_key):
+    # Only ever pull vault keys for the verified caller's own account.
+    if user_id and (not x_openrouter_key or not x_groq_key):
         from app.db.supabase_client import get_user_vault_keys
-        vault_keys = get_user_vault_keys(active_user_id)
+        vault_keys = get_user_vault_keys(user_id)
         if not x_openrouter_key and vault_keys.get("openrouter_key"):
             x_openrouter_key = vault_keys["openrouter_key"]
         if not x_groq_key and vault_keys.get("groq_key"):
@@ -318,7 +314,7 @@ async def evaluate_benchmark_models(
     )
 
     # Persist benchmark run to PostgreSQL if user is authenticated
-    if active_user_id:
+    if user_id:
         try:
             save_benchmark_run(
                 benchmark_data={
@@ -338,7 +334,7 @@ async def evaluate_benchmark_models(
                     "summary": summary.model_dump(),
                     "items": [item.model_dump() for item in items],
                 },
-                user_id=active_user_id,
+                user_id=user_id,
             )
         except Exception as e:
             logger.error(f"[Benchmark] Failed to persist benchmark run {benchmark_id}: {e}")
@@ -348,35 +344,26 @@ async def evaluate_benchmark_models(
 
 @benchmark_router.get("/history", response_model=List[BenchmarkRunRecord])
 async def get_benchmark_history(
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
     user_id: Optional[str] = Depends(get_authenticated_user_id),
     limit: int = 50,
 ):
     """Retrieve historical benchmark runs for the authenticated user."""
-    active_uid = user_id or x_user_id
-    if not active_uid:
+    if not user_id:
         return []
-    return fetch_benchmark_history(user_id=active_uid, limit=limit)
+    return fetch_benchmark_history(user_id=user_id, limit=limit)
 
 
 @benchmark_router.delete("/history")
 async def delete_benchmark_history(
     payload: BenchmarkDeleteRequest,
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
     auth_user_id: str = Depends(require_authenticated_user_id),
 ):
     """Permanently delete one or more benchmark runs from the database."""
-    active_uid = auth_user_id or x_user_id
-    if not active_uid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required to delete benchmark history.",
-        )
     if not payload.benchmark_ids:
         return {"deleted": 0, "status": "noop"}
 
-    success = delete_benchmark_runs(benchmark_ids=payload.benchmark_ids, user_id=active_uid)
+    success = delete_benchmark_runs(benchmark_ids=payload.benchmark_ids, user_id=auth_user_id)
     if not success:
-        logger.warning(f"[Benchmark] Failed to delete runs for user {active_uid}")
+        logger.warning(f"[Benchmark] Failed to delete runs for user {auth_user_id}")
     return {"deleted": len(payload.benchmark_ids), "status": "success"}
 

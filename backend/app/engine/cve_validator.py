@@ -51,18 +51,24 @@ def validate_cve_references(text: str) -> Tuple[List[Violation], List[str], Set[
                 f"Verified {cve_id}: {entry.get('title', 'Known vulnerability')} (CVSS {entry.get('cvss', 'N/A')})."
             )
         else:
+            db_meta = db.get("_metadata", {}) if isinstance(db, dict) else {}
+            updated_at = db_meta.get("updated_at", "2026-10-27") if isinstance(db_meta, dict) else "2026-10-27"
             violations.append(
                 Violation(
                     rule="Unverified or Hallucinated CVE Identifier",
                     category=ViolationCategory.ACCURACY,
                     severity=Severity.WARNING,
                     detail=(
-                        f"{cve_id} was referenced in the response but does not exist in the offline "
-                        "vulnerability registry. Ensure the model is not hallucinating non-existent exploits."
+                        f"{cve_id} was referenced but is not present in Vallum's offline CVE snapshot "
+                        f"(last updated: {updated_at}). This does not necessarily mean the "
+                        f"identifier is fabricated — it may simply postdate this offline bundle. Verify manually against "
+                        f"nvd.nist.gov before treating it as confirmed or as hallucinated."
                     ),
                     command=None,
                 )
             )
-            notes.append(f"Flagged {cve_id} as an unverified/hallucinated vulnerability identifier.")
+            notes.append(
+                f"Flagged {cve_id} as absent from Vallum's offline CVE snapshot (verify against nvd.nist.gov)."
+            )
 
     return violations, notes, detected_cves

