@@ -26,7 +26,7 @@ function getApiHeaders(): Record<string, string> {
  * at VITE_API_BASE_URL (defaults to http://localhost:8000).
  * Gracefully falls back to the client-side demo engine if the backend is offline.
  */
-export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL: string = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 let _liveBackendAvailable: boolean | null = null;
 const _listeners: Set<(live: boolean) => void> = new Set();
