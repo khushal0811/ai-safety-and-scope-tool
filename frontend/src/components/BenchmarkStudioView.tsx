@@ -621,11 +621,14 @@ export function BenchmarkStudioView({
                         500
                       );
                       const pct = Math.min(100, Math.max(12, (item.model.latency_ms / maxLatency) * 100));
+                      const isRefused = item.audit.verdict === 'Refused';
                       const verdictBg =
                         item.audit.verdict === 'Correct'
                           ? 'var(--ok-fg)'
                           : item.audit.verdict === 'Unsafe'
                           ? 'var(--bad-fg)'
+                          : isRefused
+                          ? '#a78bfa'
                           : 'var(--warn-fg)';
 
                       return (
@@ -646,11 +649,13 @@ export function BenchmarkStudioView({
                                 ? 'badge--success'
                                 : item.audit.verdict === 'Unsafe'
                                 ? 'badge--danger'
+                                : isRefused
+                                ? 'badge--refused'
                                 : 'badge--warning'
                             }`}
-                            style={{ width: 80, justifyContent: 'center' }}
+                            style={{ width: 88, justifyContent: 'center' }}
                           >
-                            {item.audit.verdict}
+                            {isRefused ? 'Refused' : item.audit.verdict}
                           </span>
                         </div>
                       );
@@ -669,12 +674,15 @@ export function BenchmarkStudioView({
                       const { model, audit } = item;
                       const isCorrect = audit.verdict === 'Correct';
                       const isUnsafe = audit.verdict === 'Unsafe';
+                      const isRefused = audit.verdict === 'Refused';
                       const isUnauthorized = model.status === 'unauthorized';
 
                       const borderClass = isCorrect
                         ? 'benchmark-model-res-card--correct'
                         : isUnsafe
                         ? 'benchmark-model-res-card--unsafe'
+                        : isRefused
+                        ? 'benchmark-model-res-card--refused'
                         : 'benchmark-model-res-card--incorrect';
 
                       return (
@@ -693,6 +701,14 @@ export function BenchmarkStudioView({
                                 </div>
                                 <span className="mono font-xs" style={{ color: 'var(--text-subtle)' }}>
                                   {model.latency_ms > 0 ? `${model.latency_ms.toFixed(0)}ms` : '—'} • {model.total_tokens || 0} tokens
+                                  {audit.trust_tier && (
+                                    <>
+                                      {' • '}
+                                      <span style={{ color: audit.trust_tier === 'hybrid' ? '#10b981' : 'var(--text-muted)' }}>
+                                        {audit.trust_tier === 'hybrid' ? '⚡ AI-Reviewed' : '🔒 Deterministic'}
+                                      </span>
+                                    </>
+                                  )}
                                 </span>
                               </div>
 
@@ -702,12 +718,14 @@ export function BenchmarkStudioView({
                                     ? 'badge--success'
                                     : isUnsafe
                                     ? 'badge--danger'
+                                    : isRefused
+                                    ? 'badge--refused'
                                     : isUnauthorized
                                     ? 'badge--warning'
                                     : 'badge--neutral'
                                 }`}
                               >
-                                {isUnauthorized ? 'Unauthorized' : audit.verdict}
+                                {isUnauthorized ? 'Unauthorized' : isRefused ? 'Declined / Skipped' : audit.verdict}
                               </span>
                             </div>
 

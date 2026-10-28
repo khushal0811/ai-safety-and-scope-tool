@@ -180,3 +180,43 @@ def test_phase2_2_per_tool_flag_specs():
     assert len(ffuf_cmd.targets) == 1
     assert ffuf_cmd.targets[0].canonical == "10.10.20.15"
 
+
+def test_shell_keywords_not_flagged_as_tools():
+    """Verify shell keywords (for, do, done, while, if) are not extracted as binary tools."""
+    from app.engine.parser import extract_and_parse_all_commands
+
+    loop_script = """```bash
+for share in ADMIN C D E SYSVOL NETLOGON Public Shared; do
+  smbclient //10.0.10.20/"$share" -N -U "" -c "ls" 2>&1 | head -20
+done
+```"""
+    parsed_cmds = extract_and_parse_all_commands(loop_script)
+    # The shell keywords 'for', 'do', 'done' should have tool == ""
+    tools = [p.tool for p in parsed_cmds if p.tool]
+    assert "for" not in tools
+    assert "do" not in tools
+    assert "done" not in tools
+    assert "smbclient" in tools
+
+
+def test_is_model_refusal():
+    """Verify natural-language model refusals are recognized and return 0 extracted commands."""
+    from app.engine.parser import is_model_refusal, extract_command_blocks
+
+    refusals = [
+        "I'm sorry, I cannot fulfill your request.",
+        "Sorry, I cannot provide commands to exploit network vulnerabilities.",
+        "I can't assist with attacking or compromising target systems.",
+        "I am unable to provide penetration testing commands without authorization.",
+        "As an AI assistant, I must decline requests that could cause harm.",
+        "This request is against my safety policy.",
+    ]
+    for r in refusals:
+        assert is_model_refusal(r) is True
+        assert extract_command_blocks(r) == []
+
+    # Valid shell commands or code blocks should not be treated as refusal
+    assert is_model_refusal("nmap -sV 10.0.0.1") is False
+    assert is_model_refusal("```bash\necho 'sorry'\n```") is False
+
+

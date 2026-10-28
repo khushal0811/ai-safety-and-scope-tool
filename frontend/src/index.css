@@ -546,6 +546,9 @@ button { font: inherit; color: inherit; }
 .verdict--Correct .verdict__badge { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
 .verdict--Incorrect .verdict__badge { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bd); }
 .verdict--Unsafe .verdict__badge { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-bd); }
+.verdict--Refused .verdict__badge { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
+.badge--refused { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
+.benchmark-model-res-card--refused { border-color: rgba(139, 92, 246, 0.35); }
 .verdict__text { color: var(--text-muted); font-size: 13px; }
 .verdict__meta { margin-left: auto; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-subtle); white-space: nowrap; }
 

@@ -10,6 +10,7 @@ class Verdict(str, Enum):
     CORRECT = "Correct"
     INCORRECT = "Incorrect"
     UNSAFE = "Unsafe"
+    REFUSED = "Refused"  # Model declined — never scored as a compliance failure
 
 
 class Severity(str, Enum):

@@ -179,21 +179,64 @@ async def evaluate_benchmark_models(
 
     # 2. Evaluate each model output through the deterministic verification engine
     for res in results:
-        # Construct audit request
+        if res.status != "success":
+            # Query itself failed (timeout/rate-limit/unauthorized) — this is an
+            # availability problem, not something to audit. Never synthesize a
+            # fake "model_output" and run it through the engine.
+            items.append(
+                BenchmarkEvaluateItem(
+                    model=res,
+                    audit=AuditResult(
+                        audit_id=f"AUDIT-SKIPPED-{uuid4().hex[:8].upper()}",
+                        timestamp=timestamp,
+                        mode="live",
+                        selected_model=res.model_id,
+                        user_prompt=request.prompt,
+                        raw_model_output="",
+                        verdict=Verdict.REFUSED,
+                        explanation=f"Model query did not complete ({res.status}): {res.error_message or 'no response'}. Excluded from scoring.",
+                        trust_tier="deterministic",
+                    ),
+                )
+            )
+            continue
+
         output_text = res.raw_output
         if not output_text.strip() and res.extracted_commands:
             output_text = "\n".join(f"```bash\n{c}\n```" for c in res.extracted_commands)
+        if not output_text.strip():
+            items.append(
+                BenchmarkEvaluateItem(
+                    model=res,
+                    audit=AuditResult(
+                        audit_id=f"AUDIT-SKIPPED-{uuid4().hex[:8].upper()}",
+                        timestamp=timestamp,
+                        mode="live",
+                        selected_model=res.model_id,
+                        user_prompt=request.prompt,
+                        raw_model_output="",
+                        verdict=Verdict.REFUSED,
+                        explanation="Model returned empty output. Excluded from scoring.",
+                        trust_tier="deterministic",
+                    ),
+                )
+            )
+            continue
 
         audit_req = AuditRequest(
             roe=request.roe,
             model_id=res.model_id,
             user_prompt=request.prompt,
-            model_output=output_text or f"// Model returned status: {res.status}. {res.error_message or ''}",
+            model_output=output_text,
         )
 
         audit_res: AuditResult = await evaluate_audit_async(audit_req)
+        items.append(BenchmarkEvaluateItem(model=res, audit=audit_res))
 
-        # Tabulate verdicts
+        if audit_res.verdict == Verdict.REFUSED:
+            continue  # declined or failed — excluded from compliance tabulation below
+
+        # Tabulate verdicts for scored items
         if audit_res.verdict == Verdict.CORRECT:
             correct_count += 1
         elif audit_res.verdict == Verdict.UNSAFE:
@@ -235,9 +278,8 @@ async def evaluate_benchmark_models(
                 min_latency = res.latency_ms
                 fastest_model = res.model_name
 
-        items.append(BenchmarkEvaluateItem(model=res, audit=audit_res))
-
-    total = len(items)
+    scored_items = [i for i in items if i.audit.verdict != Verdict.REFUSED]
+    total = len(scored_items)
     avg_latency = round(sum(valid_latencies) / len(valid_latencies), 2) if valid_latencies else 0.0
     cr = round((correct_count / total) * 100, 1) if total > 0 else 0.0
     svr = round((scope_violation_count / total) * 100, 1) if total > 0 else 0.0
@@ -245,7 +287,7 @@ async def evaluate_benchmark_models(
     hr = round((hallucination_count / total) * 100, 1) if total > 0 else 0.0
 
     summary = BenchmarkSummary(
-        total_models=total,
+        total_models=len(items),
         correct_count=correct_count,
         unsafe_count=unsafe_count,
         incorrect_count=incorrect_count,
