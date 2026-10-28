@@ -56,7 +56,7 @@ export function BenchmarkStudioView({
 
   // Selected models state: strictly only select models that the user has keys for by default
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(() => {
-    return new Set(['openai/gpt-4o', 'anthropic/claude-sonnet-4.6', 'google/gemini-3-pro-preview', 'anthropic/claude-haiku-latest']);
+    return new Set(['openai/gpt-4o', 'anthropic/claude-sonnet-4.6', 'google/gemini-3.8-flash', 'anthropic/claude-haiku-5.5']);
   });
 
   // Scenario & Prompt
@@ -382,8 +382,8 @@ export function BenchmarkStudioView({
                 {(availableModels.length > 0 ? availableModels : [
                   { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'OpenAI', tier: 'frontier', recommended: true, context_length: 128000, description: 'Flagship Multimodal' },
                   { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 1000000, description: 'Deep Reasoning & Pentest' },
-                  { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro', provider: 'Google', tier: 'frontier', recommended: true, context_length: 2000000, description: 'Next-Gen Multimodal Reasoning' },
-                  { id: 'anthropic/claude-haiku-latest', name: 'Claude Haiku', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 200000, description: 'Fast, Efficient Router' },
+                  { id: 'google/gemini-3.8-flash', name: 'Gemini 3.8 Flash', provider: 'Google', tier: 'frontier', recommended: true, context_length: 1000000, description: 'High-Speed Multimodal' },
+                  { id: 'anthropic/claude-haiku-5.5', name: 'Claude Haiku 5.5', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 200000, description: 'Fast, Efficient Pentest' },
                 ]).map((m) => {
                   const isSelected = selectedModelIds.has(m.id);
                   const isLocked = !hasOpenRouterKey;

@@ -3,8 +3,8 @@
 Target frontier models:
 - OpenAI GPT-4o (`openai/gpt-4o`)
 - Anthropic Claude Sonnet 4.6 (`anthropic/claude-sonnet-4.6`)
-- Google Gemini 3 Pro (`google/gemini-3-pro-preview`)
-- Anthropic Claude Haiku (`anthropic/claude-haiku-latest`)
+- Google Gemini 3.8 Flash (`google/gemini-3.8-flash`)
+- Anthropic Claude Haiku 5.5 (`anthropic/claude-haiku-5.5`)
 
 Strict Zero Host Execution: Model recommendations are purely parsed and evaluated
 against the active Rules of Engagement; no subprocess commands are ever executed.
@@ -45,21 +45,21 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
         tier="frontier",
         recommended=True,
     ),
-    "google/gemini-3-pro-preview": FrontierModelInfo(
-        id="google/gemini-3-pro-preview",
-        name="Gemini 3 Pro",
+    "google/gemini-3.8-flash": FrontierModelInfo(
+        id="google/gemini-3.8-flash",
+        name="Gemini 3.8 Flash",
         provider="Google",
-        context_length=2000000,
-        description="Next-generation Google frontier model with advanced multimodal reasoning and long-context analysis.",
+        context_length=1000000,
+        description="High-speed multimodal frontier model by Google with low latency and high reasoning fidelity.",
         tier="frontier",
         recommended=True,
     ),
-    "anthropic/claude-haiku-latest": FrontierModelInfo(
-        id="anthropic/claude-haiku-latest",
-        name="Claude Haiku",
+    "anthropic/claude-haiku-5.5": FrontierModelInfo(
+        id="anthropic/claude-haiku-5.5",
+        name="Claude Haiku 5.5",
         provider="Anthropic",
         context_length=200000,
-        description="Fast, cost-effective Anthropic frontier model dynamically routing to the latest Haiku release.",
+        description="Fast, highly efficient Anthropic frontier model with cutting-edge reasoning and tool capabilities.",
         tier="frontier",
         recommended=True,
     ),
@@ -74,18 +74,19 @@ MODEL_ALIASES: Dict[str, str] = {
     "sonnet-4.6": "anthropic/claude-sonnet-4.6",
     "sonnet": "anthropic/claude-sonnet-4.6",
     "anthropic/claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
-    "gemini-3-pro": "google/gemini-3-pro-preview",
-    "gemini-3-pro-preview": "google/gemini-3-pro-preview",
-    "google/gemini-3-pro": "google/gemini-3-pro-preview",
-    "google/gemini-3-pro-preview": "google/gemini-3-pro-preview",
-    "gemini-3": "google/gemini-3-pro-preview",
-    "claude-haiku": "anthropic/claude-haiku-latest",
-    "claude-haiku-latest": "anthropic/claude-haiku-latest",
-    "haiku": "anthropic/claude-haiku-latest",
-    "~anthropic/claude-haiku-latest": "anthropic/claude-haiku-latest",
-    "anthropic/claude-haiku-latest": "anthropic/claude-haiku-latest",
-    "anthropic/claude-3-haiku": "anthropic/claude-haiku-latest",
-    "anthropic/claude-3.5-haiku": "anthropic/claude-haiku-latest",
+    "gemini-3.8-flash": "google/gemini-3.8-flash",
+    "google/gemini-3.8-flash": "google/gemini-3.8-flash",
+    "gemini-flash": "google/gemini-3.8-flash",
+    "gemini": "google/gemini-3.8-flash",
+    "gemini-3-pro": "google/gemini-3.8-flash",
+    "google/gemini-3-pro-preview": "google/gemini-3.8-flash",
+    "claude-haiku-5.5": "anthropic/claude-haiku-5.5",
+    "anthropic/claude-haiku-5.5": "anthropic/claude-haiku-5.5",
+    "haiku-5.5": "anthropic/claude-haiku-5.5",
+    "claude-haiku": "anthropic/claude-haiku-5.5",
+    "haiku": "anthropic/claude-haiku-5.5",
+    "anthropic/claude-haiku-latest": "anthropic/claude-haiku-5.5",
+    "~anthropic/claude-haiku-latest": "anthropic/claude-haiku-5.5",
 }
 
 DEFAULT_SYSTEM_PROMPT = (
