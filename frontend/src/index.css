@@ -378,7 +378,15 @@ button { font: inherit; color: inherit; }
   border-radius: 4px; border: 1px solid var(--border-s);
   background: var(--surface); cursor: pointer; font-family: var(--font-sans); font-size: 13px; font-weight: 500;
   color: var(--text);
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.2s ease;
+}
+.btn--sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  gap: 6px;
 }
 .btn:hover {
   border-color: var(--accent);
@@ -398,6 +406,18 @@ button { font: inherit; color: inherit; }
   color: var(--accent-contrast);
   border-color: var(--accent-hover);
   box-shadow: 0 6px 20px var(--accent-glow);
+  transform: translateY(-1px);
+}
+.btn--danger {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--unsafe);
+  background: rgba(239, 68, 68, 0.06);
+}
+.btn--danger:hover {
+  border-color: var(--unsafe);
+  color: #fff;
+  background: var(--unsafe);
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.25);
   transform: translateY(-1px);
 }
 .btn--ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
@@ -749,7 +769,7 @@ button { font: inherit; color: inherit; }
 }
 .modal__head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .modal__body { padding: 18px 20px; }
-.modal__foot { display: flex; justify-content: space-between; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+.modal__foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--border); flex-wrap: wrap; }
 
 .radio-row { display: flex; gap: 8px; }
 .radio-card {
