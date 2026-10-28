@@ -10,12 +10,37 @@ export type KeyStorageMode = 'session' | 'memory';
 const OPENROUTER_KEY_NAME = 'sst.openrouter_key';
 const GROQ_KEY_NAME = 'sst.groq_key';
 const MODE_NAME = 'sst.key_storage_mode';
+const VAULT_HAS_OR_KEY_NAME = 'sst.vault_has_openrouter_key';
+const VAULT_OR_HINT_NAME = 'sst.vault_openrouter_hint';
 
 let memoryOpenRouterKey: string | null = null;
 let memoryGroqKey: string | null = null;
 
+export function hasVaultOpenRouterKey(): boolean {
+  try {
+    return sessionStorage.getItem(VAULT_HAS_OR_KEY_NAME) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setVaultOpenRouterKeyStatus(hasKey: boolean, hint?: string | null): void {
+  try {
+    if (hasKey) {
+      sessionStorage.setItem(VAULT_HAS_OR_KEY_NAME, 'true');
+      if (hint) sessionStorage.setItem(VAULT_OR_HINT_NAME, hint);
+    } else {
+      sessionStorage.removeItem(VAULT_HAS_OR_KEY_NAME);
+      sessionStorage.removeItem(VAULT_OR_HINT_NAME);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function getStorageMode(): KeyStorageMode {
-  return sessionStorage.getItem(MODE_NAME) === 'session' ? 'session' : 'memory';
+  const mode = sessionStorage.getItem(MODE_NAME);
+  return mode === 'memory' ? 'memory' : 'session';
 }
 
 export function setStorageMode(mode: KeyStorageMode): void {
@@ -105,6 +130,7 @@ export function saveAllApiKeys(keys: { openRouterKey?: string; groqKey?: string 
 export function clearAllKeys(): void {
   clearOpenRouterKey();
   clearGroqKey();
+  setVaultOpenRouterKeyStatus(false, null);
 }
 
 const BACKEND_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -127,6 +153,34 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
       groqHint: null,
     };
   }
+
+  // 1. Check Supabase Auth user metadata / app_metadata first (instant, works even during Render cold start)
+  let metaHasOr = false;
+  let metaOrHint: string | null = null;
+  let metaHasGroq = false;
+  let metaGroqHint: string | null = null;
+  if (supabase) {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const u = userData?.user;
+      if (u && u.id === userId) {
+        const appVault = (u.app_metadata as any)?.vallum_vault;
+        const userVault = (u.user_metadata as any)?.vallum_vault_status;
+        if (appVault?.encrypted_openrouter_key || userVault?.has_openrouter_key) {
+          metaHasOr = true;
+          metaOrHint = appVault?.key_hint_openrouter || userVault?.openrouter_hint || null;
+        }
+        if (appVault?.encrypted_groq_key || userVault?.has_groq_key) {
+          metaHasGroq = true;
+          metaGroqHint = appVault?.key_hint_groq || userVault?.groq_hint || null;
+        }
+      }
+    } catch {
+      // Ignore auth metadata lookup error
+    }
+  }
+
+  // 2. Check backend encrypted database vault status
   try {
     const authHeaders = await getAuthHeaders();
     const res = await fetch(`${BACKEND_BASE}/api/vault/status?user_id=${encodeURIComponent(userId)}`, {
@@ -134,20 +188,33 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
     });
     if (!res.ok) throw new Error('Status check failed');
     const data = await res.json();
+    const hasOr = Boolean(data.has_openrouter_key || metaHasOr || getOpenRouterKey());
+    const orHint = data.openrouter_hint || metaOrHint || (getOpenRouterKey() ? maskKey(getOpenRouterKey() || '') : null);
+    const hasGroq = Boolean(data.has_groq_key || metaHasGroq || getGroqKey());
+    const groqHint = data.groq_hint || metaGroqHint || (getGroqKey() ? maskKey(getGroqKey() || '') : null);
+
+    setVaultOpenRouterKeyStatus(hasOr, orHint);
     return {
-      isConfigured: data.is_configured,
-      hasOpenRouterKey: data.has_openrouter_key,
-      openRouterHint: data.openrouter_hint,
-      hasGroqKey: data.has_groq_key,
-      groqHint: data.groq_hint,
+      isConfigured: Boolean(hasOr || hasGroq),
+      hasOpenRouterKey: hasOr,
+      openRouterHint: orHint,
+      hasGroqKey: hasGroq,
+      groqHint,
     };
   } catch {
+    const hasOr = Boolean(metaHasOr || getOpenRouterKey() || hasVaultOpenRouterKey());
+    const orHint = metaOrHint || maskKey(getOpenRouterKey() || '') || null;
+    const hasGroq = Boolean(metaHasGroq || getGroqKey());
+    const groqHint = metaGroqHint || maskKey(getGroqKey() || '') || null;
+    if (hasOr) {
+      setVaultOpenRouterKeyStatus(true, orHint);
+    }
     return {
-      isConfigured: Boolean(getOpenRouterKey() || getGroqKey()),
-      hasOpenRouterKey: Boolean(getOpenRouterKey()),
-      openRouterHint: maskKey(getOpenRouterKey() || ''),
-      hasGroqKey: Boolean(getGroqKey()),
-      groqHint: maskKey(getGroqKey() || ''),
+      isConfigured: Boolean(hasOr || hasGroq),
+      hasOpenRouterKey: hasOr,
+      openRouterHint: orHint,
+      hasGroqKey: hasGroq,
+      groqHint,
     };
   }
 }
@@ -156,8 +223,29 @@ export async function saveKeysToVault(
   userId: string,
   keys: { openRouterKey?: string; groqKey?: string }
 ): Promise<boolean> {
-  // Save locally in transient memory
-  saveAllApiKeys(keys);
+  // Save locally in transient session memory
+  saveAllApiKeys(keys, 'session');
+  if (keys.openRouterKey?.trim()) {
+    setVaultOpenRouterKeyStatus(true, maskKey(keys.openRouterKey.trim()));
+  }
+
+  // Sync key presence status to Supabase user_metadata so future logins on any domain detect it immediately
+  if (supabase) {
+    try {
+      await supabase.auth.updateUser({
+        data: {
+          vallum_vault_status: {
+            has_openrouter_key: Boolean(keys.openRouterKey?.trim() || getOpenRouterKey()),
+            openrouter_hint: keys.openRouterKey?.trim() ? maskKey(keys.openRouterKey.trim()) : null,
+            has_groq_key: Boolean(keys.groqKey?.trim() || getGroqKey()),
+            groq_hint: keys.groqKey?.trim() ? maskKey(keys.groqKey.trim()) : null,
+          },
+        },
+      });
+    } catch {
+      // Ignore metadata sync warning
+    }
+  }
 
   // Encrypt with server-side AES-256-GCM and persist to database vault
   try {
@@ -185,6 +273,16 @@ export async function revokeAndWipeUserKeys(userId?: string): Promise<{ success:
   clearAllKeys();
   if (!userId) {
     return { success: true };
+  }
+
+  if (supabase) {
+    try {
+      await supabase.auth.updateUser({
+        data: { vallum_vault_status: null },
+      });
+    } catch {
+      // Ignored
+    }
   }
 
   // 1. Call backend vault deletion endpoint

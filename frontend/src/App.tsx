@@ -15,7 +15,7 @@ import {
   clearPastBenchmarks,
   syncPastBenchmarksFromCloud,
 } from './lib/benchmarkStore';
-import { getOpenRouterKey, fetchVaultStatus } from './lib/keyStore';
+import { getOpenRouterKey, hasVaultOpenRouterKey, fetchVaultStatus } from './lib/keyStore';
 import { NavBar, type AppPage } from './components/NavBar';
 import { RoeSelector, type RoeMode } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
@@ -69,7 +69,9 @@ export default function App() {
   const [activeExample, setActiveExample] = useState<string | null>(null);
 
   // Live Model Generation & Key Access Gate
-  const [hasOpenRouterKey, setHasOpenRouterKey] = useState<boolean>(() => Boolean(getOpenRouterKey()));
+  const [hasOpenRouterKey, setHasOpenRouterKey] = useState<boolean>(() =>
+    Boolean(getOpenRouterKey() || hasVaultOpenRouterKey())
+  );
   const [queryingModel, setQueryingModel] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
 
@@ -91,40 +93,71 @@ export default function App() {
   }, [theme]);
 
   // Check OpenRouter key connectivity from local session or cloud database vault
+  // Wait for database vault check before deciding whether to open or skip the setup modal
   useEffect(() => {
     let active = true;
-    if (getOpenRouterKey()) {
+    if (getOpenRouterKey() || hasVaultOpenRouterKey()) {
       setHasOpenRouterKey(true);
+      setInitialSetupOpen(false);
       return;
     }
     if (user?.id) {
       fetchVaultStatus(user.id)
         .then((st) => {
           if (active) {
-            const hasKey = Boolean(st.hasOpenRouterKey || getOpenRouterKey());
+            const hasKey = Boolean(st.hasOpenRouterKey || getOpenRouterKey() || hasVaultOpenRouterKey());
             setHasOpenRouterKey(hasKey);
-            if (!hasKey) {
-              setInitialSetupOpen(true);
+            if (hasKey) {
+              setInitialSetupOpen(false);
+              try {
+                localStorage.setItem(`sst.initial_setup_completed_${user.id}`, 'true');
+              } catch {
+                // ignore
+              }
+            } else {
+              let alreadyBypassed = false;
+              try {
+                alreadyBypassed = localStorage.getItem(`sst.initial_setup_completed_${user.id}`) === 'true';
+              } catch {
+                // ignore
+              }
+              if (!alreadyBypassed) {
+                setInitialSetupOpen(true);
+              }
             }
           }
         })
         .catch(() => {
-          if (active && !getOpenRouterKey()) {
+          if (active && !getOpenRouterKey() && !hasVaultOpenRouterKey()) {
             setHasOpenRouterKey(false);
-            setInitialSetupOpen(true);
+            let alreadyBypassed = false;
+            try {
+              alreadyBypassed = localStorage.getItem(`sst.initial_setup_completed_${user.id}`) === 'true';
+            } catch {
+              // ignore
+            }
+            if (!alreadyBypassed) {
+              setInitialSetupOpen(true);
+            }
           }
         });
-    } else {
+    } else if (guestMode) {
       const hasKey = Boolean(getOpenRouterKey());
       setHasOpenRouterKey(hasKey);
-      if (!hasKey) {
+      let guestBypassed = false;
+      try {
+        guestBypassed = localStorage.getItem('sst.initial_setup_completed_guest') === 'true';
+      } catch {
+        // ignore
+      }
+      if (!hasKey && !guestBypassed) {
         setInitialSetupOpen(true);
       }
     }
     return () => {
       active = false;
     };
-  }, [user?.id, page]);
+  }, [user?.id, guestMode, page]);
 
   // Keep selected model valid
   useEffect(() => {
@@ -139,32 +172,10 @@ export default function App() {
     const unsub = initSupabaseAuthListener((newUser) => {
       if (newUser) {
         setUser(newUser);
-        try {
-          const completed = localStorage.getItem(`sst.initial_setup_completed_${newUser.id}`);
-          if (!completed) {
-            setInitialSetupOpen(true);
-          }
-        } catch {
-          // ignore
-        }
       }
     });
     return unsub;
   }, []);
-
-  // Check if active user needs initial setup configuration overlay
-  useEffect(() => {
-    if (user) {
-      try {
-        const completed = localStorage.getItem(`sst.initial_setup_completed_${user.id}`);
-        if (!completed) {
-          setInitialSetupOpen(true);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }, [user?.id]);
 
   // Synchronize past audits & past benchmarks with Supabase PostgreSQL cloud database (Strictly isolated by user_id)
   useEffect(() => {
@@ -182,14 +193,6 @@ export default function App() {
     saveUser(u);
     setBenchmarks(getPastBenchmarks(u.id));
     syncPastBenchmarksFromCloud(u.id).then(setBenchmarks);
-    try {
-      const completed = localStorage.getItem(`sst.initial_setup_completed_${u.id}`);
-      if (!completed) {
-        setInitialSetupOpen(true);
-      }
-    } catch {
-      // ignore
-    }
   }
 
   function handleLogout() {
