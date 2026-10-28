@@ -481,7 +481,7 @@ export function PastAuditsView({
         <div className="modal-backdrop" onClick={() => setSelectedAudit(null)}>
           <div
             className="modal"
-            style={{ maxWidth: 680, maxHeight: '88vh', overflowY: 'auto' }}
+            style={{ maxWidth: 760, width: '100%', maxHeight: '88vh', overflowY: 'auto' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal__head">
@@ -559,16 +559,15 @@ export function PastAuditsView({
               )}
             </div>
 
-            <div className="modal__foot">
-              <span className="mono font-xs text-muted">
+            <div className="modal__foot" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+              <span className="mono font-xs text-muted" style={{ whiteSpace: 'nowrap' }}>
                 Audit time: {selectedAudit.executionTimeMs}ms · Deterministic static engine
               </span>
-              <div className="row" style={{ gap: 8 }}>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginLeft: 'auto' }}>
                 {currentUser && (
                   <button
                     type="button"
-                    className="btn btn--danger btn--sm row"
-                    style={{ gap: 6 }}
+                    className="btn btn--danger btn--sm"
                     disabled={deleting}
                     onClick={() => handleDelete([selectedAudit.id])}
                     title="Permanently delete this audit from the database"
@@ -579,8 +578,7 @@ export function PastAuditsView({
                 )}
                 <button
                   type="button"
-                  className="btn btn--sm row"
-                  style={{ gap: 6 }}
+                  className="btn btn--sm"
                   onClick={() => handleDownloadAttestation('pdf', selectedAudit.roeId)}
                   disabled={exportingReport !== null}
                   title={`Download signed RoE compliance attestation report for ${selectedAudit.roeName}`}
@@ -588,11 +586,11 @@ export function PastAuditsView({
                   <ShieldIcon width={13} height={13} />
                   {exportingReport === 'pdf' ? 'Generating...' : 'Scope Attestation (PDF)'}
                 </button>
-                <button className="btn" onClick={() => setSelectedAudit(null)}>
+                <button className="btn btn--sm" onClick={() => setSelectedAudit(null)}>
                   Close
                 </button>
                 <button
-                  className="btn btn--primary"
+                  className="btn btn--primary btn--sm"
                   onClick={() => {
                     onLoadAuditIntoStudio(selectedAudit);
                     setSelectedAudit(null);
