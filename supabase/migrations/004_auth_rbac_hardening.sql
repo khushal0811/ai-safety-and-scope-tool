@@ -70,12 +70,12 @@ ALTER TABLE public.profiles
 -- Normalize any existing profiles
 UPDATE public.profiles 
 SET role = 'penetration_tester'
-WHERE LOWER(email) != 'arorakhusuhal1108@gmail.com';
+WHERE LOWER(email) NOT IN ('arorakhushal1108@gmail.com', 'arorak1108@gmail.com', 'arorakhusuhal1108@gmail.com');
 
 -- Ensure Khushal Arora is the designated Admin
 UPDATE public.profiles 
 SET role = 'admin' 
-WHERE LOWER(email) = 'arorakhusuhal1108@gmail.com';
+WHERE LOWER(email) IN ('arorakhushal1108@gmail.com', 'arorak1108@gmail.com', 'arorakhusuhal1108@gmail.com');
 
 -- Add check constraint for valid roles
 ALTER TABLE public.profiles 
@@ -86,15 +86,15 @@ ALTER TABLE public.profiles
     CHECK (role IN ('admin', 'penetration_tester'));
 
 -- 3. IMMUTABLE SOLE-ADMIN POLICY TRIGGER
--- Rejects any role update to 'admin' for any email other than arorakhusuhal1108@gmail.com
+-- Rejects any role update to 'admin' for any email other than Khushal Arora's authorized addresses
 CREATE OR REPLACE FUNCTION public.enforce_sole_admin_policy()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF LOWER(NEW.email) = 'arorakhusuhal1108@gmail.com' THEN
+    IF LOWER(NEW.email) IN ('arorakhushal1108@gmail.com', 'arorak1108@gmail.com', 'arorakhusuhal1108@gmail.com') THEN
         NEW.role := 'admin';
     ELSE
         IF NEW.role = 'admin' THEN
-            RAISE EXCEPTION 'RBAC Security Violation: Only arorakhusuhal1108@gmail.com is authorized for the admin role.';
+            RAISE EXCEPTION 'RBAC Security Violation: Only Khushal Arora (arorakhushal1108@gmail.com) is authorized for the admin role.';
         END IF;
         NEW.role := 'penetration_tester';
     END IF;
@@ -114,7 +114,7 @@ RETURNS TRIGGER AS $$
 DECLARE
     assigned_role TEXT;
 BEGIN
-    IF LOWER(NEW.email) = 'arorakhusuhal1108@gmail.com' THEN
+    IF LOWER(NEW.email) IN ('arorakhushal1108@gmail.com', 'arorak1108@gmail.com', 'arorakhusuhal1108@gmail.com') THEN
         assigned_role := 'admin';
     ELSE
         assigned_role := 'penetration_tester';
@@ -138,3 +138,4 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+

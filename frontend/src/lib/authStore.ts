@@ -8,11 +8,15 @@ const STORAGE_KEY = 'sst.auth.user';
  * Invariant: Only this email can ever be assigned the 'admin' role.
  * All other authenticated users are assigned 'penetration_tester'.
  */
-export const SUPER_ADMIN_EMAIL = 'arorakhusuhal1108@gmail.com';
+export const ADMIN_EMAILS = new Set([
+  'arorakhushal1108@gmail.com',
+  'arorak1108@gmail.com',
+  'arorakhusuhal1108@gmail.com',
+]);
 
 export function resolveUserRole(email: string): UserRole {
   if (!email) return 'penetration_tester';
-  return email.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()
+  return ADMIN_EMAILS.has(email.trim().toLowerCase())
     ? 'admin'
     : 'penetration_tester';
 }
