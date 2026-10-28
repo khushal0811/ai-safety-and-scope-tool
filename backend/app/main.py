@@ -5,7 +5,7 @@ Zero Host Execution: Vallum is strictly a static analysis and verification engin
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import roe_router, audit_router, normalize_router, benchmark_router, vault_router
+from app.api import roe_router, audit_router, normalize_router, benchmark_router, vault_router, sandbox_router
 from app.config import settings
 from app.engine.cve_validator import load_cve_database
 
@@ -32,6 +32,7 @@ app.include_router(audit_router)
 app.include_router(normalize_router)
 app.include_router(benchmark_router)
 app.include_router(vault_router)
+app.include_router(sandbox_router)
 
 
 @app.get("/")

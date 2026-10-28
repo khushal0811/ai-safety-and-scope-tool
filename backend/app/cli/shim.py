@@ -343,6 +343,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         render_audit_report(result, source, quiet=args.quiet)
         if args.dry_run:
             print(f"{Colors.CYAN}[DRY-RUN] Command passed inspection. Execution skipped.{Colors.RESET}")
+            from app.engine.sandbox import IsolatedVirtualSandbox
+            scope = resolve_roe_locally(args.roe or DEFAULT_ROE_ID)
+            sb_res = IsolatedVirtualSandbox.dry_run(command, roe=scope)
+            render_sandbox_report(sb_res)
+            return sb_res.exit_code
         return 0
     else:
         render_audit_report(result, source, quiet=False)
@@ -510,6 +515,57 @@ def cmd_report(args: argparse.Namespace) -> int:
         return 1
 
 
+def render_sandbox_report(sb_res: Any) -> None:
+    """Print Dark Desk styled micro-sandbox dry-run report."""
+    print(f"\n{Colors.BOLD}{Colors.WHITE}┌─────────────────────────────────────────────────────────────────────────────┐{Colors.RESET}")
+    print(f"{Colors.BOLD}{Colors.WHITE}│              VALLUM EPHEMERAL MICRO-SANDBOX (DRY-RUN SIMULATOR)             │{Colors.RESET}")
+    print(f"{Colors.BOLD}{Colors.WHITE}├─────────────────────────────────────────────────────────────────────────────┤{Colors.RESET}")
+
+    if sb_res.syntax_valid:
+        status_badge = f"{Colors.GREEN}{Colors.BOLD}[✓] SYNTAX VALID (Exit Code {sb_res.exit_code}){Colors.RESET}"
+    else:
+        status_badge = f"{Colors.RED}{Colors.BOLD}[✗] SYNTAX ERROR (Exit Code {sb_res.exit_code}){Colors.RESET}"
+
+    print(f"│ Status:         {status_badge}")
+    print(f"│ Target Command: {Colors.CYAN}{sb_res.command}{Colors.RESET}")
+    print(f"│ Tool Detected:  {Colors.PURPLE}{sb_res.tool}{Colors.RESET}")
+    print(f"│ Network Egress: {Colors.YELLOW}{sb_res.isolation.network_egress} (0 packets released){Colors.RESET}")
+    print(f"│ Execution Mode: {Colors.WHITE}{sb_res.sandbox_tier}{Colors.RESET}")
+    print(f"{Colors.BOLD}{Colors.WHITE}├─────────────────────────────────────────────────────────────────────────────┤{Colors.RESET}")
+    print(f"│ {Colors.BOLD}Sandbox Diagnostics & Pre-Flight Findings:{Colors.RESET}")
+    for d in sb_res.diagnostics:
+        print(f"│   • {d}")
+    print(f"{Colors.BOLD}{Colors.WHITE}├─────────────────────────────────────────────────────────────────────────────┤{Colors.RESET}")
+    print(f"│ {Colors.BOLD}Simulated Terminal Output (stdout):{Colors.RESET}")
+    for line in sb_res.simulated_stdout.splitlines():
+        print(f"│   {Colors.DIM}{line}{Colors.RESET}")
+    if sb_res.simulated_stderr:
+        print(f"│ {Colors.RED}{Colors.BOLD}Simulated Error Stream (stderr):{Colors.RESET}")
+        for line in sb_res.simulated_stderr.splitlines():
+            print(f"│   {Colors.RED}{line}{Colors.RESET}")
+    print(f"{Colors.BOLD}{Colors.WHITE}└─────────────────────────────────────────────────────────────────────────────┘{Colors.RESET}\n")
+
+
+def cmd_sandbox(args: argparse.Namespace) -> int:
+    """Execute pre-flight syntax and parameter dry-run in the network-egress disabled micro-sandbox."""
+    from app.engine.sandbox import IsolatedVirtualSandbox
+
+    command = " ".join(args.command)
+    if not command.strip():
+        sys.stderr.write(f"{Colors.RED}[!] No command provided for sandbox dry-run.{Colors.RESET}\n")
+        return 1
+
+    scope = resolve_roe_locally(args.roe or DEFAULT_ROE_ID)
+    sb_res = IsolatedVirtualSandbox.dry_run(command, roe=scope, strict_syntax=not args.permissive)
+
+    if args.json:
+        print(sb_res.model_dump_json(indent=2))
+        return sb_res.exit_code
+
+    render_sandbox_report(sb_res)
+    return sb_res.exit_code
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -571,6 +627,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--format", choices=["markdown", "pdf", "json"], default="markdown", help="Report format")
     p_report.add_argument("-o", "--output", default=None, help="Output destination file path")
 
+    # 8. sandbox
+    p_sandbox = subparsers.add_parser("sandbox", help="Dry-run command in network-egress disabled ephemeral micro-sandbox")
+    p_sandbox.add_argument("command", nargs="+", help="CLI command to dry-run")
+    p_sandbox.add_argument("--roe", default=None, help="Preset ID or path to custom RoE file")
+    p_sandbox.add_argument("--json", action="store_true", help="Output raw JSON dry-run telemetry")
+    p_sandbox.add_argument("--permissive", action="store_true", help="Allow unrecognized non-critical flags")
+
     return parser
 
 
@@ -600,6 +663,8 @@ def main() -> int:
         return cmd_init(args)
     elif args.subcommand == "report":
         return cmd_report(args)
+    elif args.subcommand == "sandbox":
+        return cmd_sandbox(args)
     else:
         parser.print_help()
         return 0

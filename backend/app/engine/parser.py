@@ -144,7 +144,7 @@ TOOL_FLAG_SPECS: Dict[str, ToolFlagSpec] = {
         exclude_flags=set(),
         non_target_value_flags={
             "-p", "--dbms", "--threads", "-D", "-T", "-C", "--risk",
-            "--level", "-v", "--batch", "--tamper", "--data", "--cookie",
+            "--level", "-v", "--tamper", "--data", "--cookie",
             "--user-agent", "--headers", "--proxy", "--technique",
             "--os", "--method",
         },

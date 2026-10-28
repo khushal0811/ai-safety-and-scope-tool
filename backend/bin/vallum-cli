@@ -40,6 +40,12 @@ fi
 # 2. Host Execution Wrapper ('run' mode)
 if [ "$1" = "run" ]; then
     shift
+    for arg in "$@"; do
+        if [ "$arg" = "--dry-run" ]; then
+            exec "$PYTHON_BIN" -m app.cli run "$@"
+        fi
+    done
+
     if "$PYTHON_BIN" -m app.cli check "$@"; then
         CMD="$*"
         echo -e "\033[38;2;16;185;129m[+] Authorization verified. Executing on host...\033[0m\n"
