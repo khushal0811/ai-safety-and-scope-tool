@@ -36,7 +36,7 @@ export function KeyProtectionNotice({ compact = false }: Props) {
       >
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
           <ShieldIcon width={16} height={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-          <span style={{ fontSize: 13, color: 'var(--text-main)', fontWeight: 500 }}>
+          <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>
             Your API keys are private &amp; safe
           </span>
         </div>
@@ -61,8 +61,8 @@ export function KeyProtectionNotice({ compact = false }: Props) {
               gap: 6,
               padding: '4px 10px',
               borderRadius: 6,
-              background: isHovered ? 'rgba(98, 114, 240, 0.2)' : 'rgba(98, 114, 240, 0.1)',
-              border: '1px solid rgba(98, 114, 240, 0.3)',
+              background: isHovered ? 'var(--accent-glow)' : 'transparent',
+              border: '1px solid var(--border-s)',
               transition: 'all 0.15s ease',
               userSelect: 'none',
               fontWeight: 500,
@@ -90,53 +90,15 @@ export function KeyProtectionNotice({ compact = false }: Props) {
 
           {/* Floating Tooltip on hover/click */}
           {isHovered && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 'calc(100% + 10px)',
-                right: 0,
-                width: 340,
-                maxWidth: '90vw',
-                padding: '12px 14px',
-                background: 'var(--surface-elevated, #1c1c21)',
-                border: '1px solid var(--border-focus, rgba(98, 114, 240, 0.45))',
-                borderRadius: 'var(--radius, 8px)',
-                boxShadow: '0 12px 28px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(98, 114, 240, 0.2)',
-                fontSize: 12.5,
-                lineHeight: 1.55,
-                color: 'var(--text-main, #e4e4e7)',
-                zIndex: 1000,
-                pointerEvents: 'none',
-                textAlign: 'left',
-              }}
-            >
-              <div
-                style={{
-                  fontWeight: 600,
-                  color: 'var(--accent, #6272f0)',
-                  marginBottom: 6,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 13,
-                }}
-              >
-                <ShieldIcon width={14} height={14} /> How Your Keys Are Protected
+            <div className="key-protection-popover">
+              <div className="key-protection-popover__title">
+                <ShieldIcon width={14} height={14} />
+                <span>How Your Keys Are Protected</span>
               </div>
-              <div style={{ color: 'var(--text-subtle)' }}>{explanation}</div>
-              {/* Tooltip Downward Arrow */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  right: 28,
-                  width: 0,
-                  height: 0,
-                  borderLeft: '6px solid transparent',
-                  borderRight: '6px solid transparent',
-                  borderTop: '6px solid var(--border-focus, rgba(98, 114, 240, 0.45))',
-                }}
-              />
+              <div className="key-protection-popover__body">{explanation}</div>
+              {/* Tooltip Downward Arrow with Border */}
+              <div className="key-protection-popover__arrow" />
+              <div className="key-protection-popover__arrow-inner" />
             </div>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { checkBackendHealth, isLiveMode, subscribeLiveStatus } from '../services/auditService';
 import type { UserProfile } from '../types/user';
-import { BenchmarkIcon, HistoryIcon, MoonIcon, SettingsIcon, SunIcon, UserIcon, VallumIcon } from './Icons';
+import { BenchmarkIcon, HistoryIcon, MoonIcon, SettingsIcon, ShieldIcon, SunIcon, UserIcon, VallumIcon } from './Icons';
 
 export type AppPage = 'studio' | 'history' | 'benchmark' | 'past-benchmarks' | 'settings';
 
@@ -50,43 +50,41 @@ export function NavBar({
           <span className="brand__sub" style={{ display: 'none' }}>AI Safety &amp; Scope Boundary Engine</span>
         </div>
 
-        {/* Primary Page Navigation Tabs */}
+        {/* Primary Page Navigation Tabs (Decongested) */}
         <nav className="nav-page-tabs">
           <button
             className={`nav-tab ${activePage === 'studio' ? 'nav-tab--active' : ''}`}
             onClick={() => onNavigate('studio')}
+            title="Audit Studio — Inspect Pentest Commands"
           >
-            Audit Studio
+            <ShieldIcon width={13} height={13} />
+            <span>Audit</span>
           </button>
           <button
             className={`nav-tab ${activePage === 'history' ? 'nav-tab--active' : ''}`}
             onClick={() => onNavigate('history')}
+            title="Past Audits &amp; Compliance Attestations"
           >
             <HistoryIcon width={13} height={13} />
-            Past Audits
+            <span>Past Audits</span>
             {auditCount > 0 && <span className="nav-tab__count">{auditCount}</span>}
           </button>
           <button
             className={`nav-tab ${activePage === 'benchmark' ? 'nav-tab--active' : ''}`}
             onClick={() => onNavigate('benchmark')}
+            title="Benchmark Studio — Multi-Model Evaluation"
           >
             <BenchmarkIcon width={13} height={13} />
-            Benchmark Studio
+            <span>Benchmark</span>
           </button>
           <button
             className={`nav-tab ${activePage === 'past-benchmarks' ? 'nav-tab--active' : ''}`}
             onClick={() => onNavigate('past-benchmarks')}
+            title="Past Benchmark Runs &amp; Leaderboards"
           >
             <HistoryIcon width={13} height={13} />
-            Past Benchmarks
+            <span>Past Benchmarks</span>
             {benchmarkCount > 0 && <span className="nav-tab__count">{benchmarkCount}</span>}
-          </button>
-          <button
-            className={`nav-tab ${activePage === 'settings' ? 'nav-tab--active' : ''}`}
-            onClick={() => onNavigate('settings')}
-          >
-            <SettingsIcon width={13} height={13} />
-            Settings
           </button>
         </nav>
 
@@ -114,7 +112,7 @@ export function NavBar({
             </button>
           </div>
 
-          {/* Status pill */}
+          {/* Status pill (Compact) */}
           <span
             className="status-pill"
             title={live ? 'Connected to FastAPI backend engine (click to refresh status)' : 'Running client-side demo engine (click to probe backend)'}
@@ -122,7 +120,7 @@ export function NavBar({
             style={{ cursor: 'pointer' }}
           >
             <span className={`status-pill__dot ${live ? 'status-pill__dot--live' : ''}`} />
-            <span className="status-pill__text">{live ? 'Live Engine' : 'Demo Mode'}</span>
+            <span className="status-pill__text">{live ? 'Live' : 'Demo'}</span>
           </span>
 
           {/* User Auth Profile or Login button */}
@@ -131,7 +129,7 @@ export function NavBar({
               className="user-nav-pill"
               onClick={onOpenAuth}
               title={`Logged in as ${currentUser.email} (${currentUser.role === 'admin' ? 'Super Admin' : 'Penetration Tester'})`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
               <img src={currentUser.avatarUrl} alt={currentUser.name} className="user-nav-pill__avatar" />
               <span className="user-nav-pill__name">{currentUser.name.split(' ')[0]}</span>
@@ -173,6 +171,17 @@ export function NavBar({
               <span>Sign In</span>
             </button>
           )}
+
+          {/* Settings Action Button */}
+          <button
+            id="nav-settings-btn"
+            className={`btn btn--ghost btn--icon ${activePage === 'settings' ? 'btn--icon-active' : ''}`}
+            aria-label="Settings"
+            title="Settings &amp; API Keys Vault"
+            onClick={() => onNavigate('settings')}
+          >
+            <SettingsIcon width={15} height={15} />
+          </button>
 
           {/* Theme Toggle */}
           <button
