@@ -76,12 +76,19 @@ async def audit_command_deterministic(
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> AuditResult:
     """Perform instant deterministic inspection on a CLI command string."""
+    from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
+
+    effective_roe = request.roe
+    if effective_roe is None:
+        effective_roe = get_roe_preset_by_id(request.roe_id) or ROE_PRESETS[0]
+        request = request.model_copy(update={"roe": effective_roe})
+
     t0 = time.perf_counter()
     result = evaluate_deterministic_command(request)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
     data = result.model_dump(mode="json")
-    data["roe_id"] = getattr(request.roe, "roe_id", getattr(request.roe, "id", "UNKNOWN"))
+    data["roe_id"] = getattr(effective_roe, "roe_id", getattr(effective_roe, "id", "UNKNOWN"))
     background_tasks.add_task(save_audit_log, data, user_id, elapsed_ms)
 
     return result

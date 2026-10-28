@@ -115,7 +115,8 @@ class AuditRequest(BaseModel):
 class DeterministicAuditRequest(BaseModel):
     """Fast-path inspection for a raw command string."""
 
-    roe: RoeScope = Field(..., description="Active Rules of Engagement scope.")
+    roe: Optional[RoeScope] = Field(default=None, description="Active Rules of Engagement scope (defaults to active preset if omitted).")
+    roe_id: Optional[str] = Field(default=None, description="Preset RoE ID if roe scope object is omitted.")
     command: str = Field(..., description="CLI command string to evaluate.")
     model_id: str = Field(default="cli-direct", description="Identifier of the model or source.")
     user_prompt: str = Field(default="", description="Original user prompt if available.")

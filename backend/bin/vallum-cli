@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────
+# Vallum Real-Time Scope & Safety CLI Entrypoint (backend path)
+# Zero Host Execution in Python: Execution delegated to host shell.
+# ─────────────────────────────────────────────────────────────
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ -f "$SCRIPT_DIR/.venv/bin/python3" ]; then
+    PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python3"
+else
+    PYTHON_BIN="python3"
+fi
+
+export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+
+# 1. Daemon Start Handler in Shell
+if [ "$1" = "daemon" ] && [ "$2" = "start" ]; then
+    if "$PYTHON_BIN" -m app.cli daemon status > /dev/null 2>&1; then
+        echo -e "\033[38;2;16;185;129m[✓] Vallum Daemon is already running at http://127.0.0.1:8000\033[0m"
+        exit 0
+    fi
+    echo -e "\033[38;2;6;182;212m[+] Starting Vallum Daemon on 127.0.0.1:8000 in background...\033[0m"
+    cd "$SCRIPT_DIR"
+    nohup "$PYTHON_BIN" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/vallum-daemon.log 2>&1 &
+    DAEMON_PID=$!
+    sleep 1.2
+    if "$PYTHON_BIN" -m app.cli daemon status > /dev/null 2>&1; then
+        echo -e "\033[38;2;16;185;129m[✓] Vallum Daemon successfully started (PID: $DAEMON_PID)\033[0m"
+        exit 0
+    else
+        echo -e "\033[38;2;239;68;68m[✗] Daemon failed to start. Log output:\033[0m"
+        tail -n 10 /tmp/vallum-daemon.log
+        exit 1
+    fi
+fi
+
+# 2. Host Execution Wrapper ('run' mode)
+if [ "$1" = "run" ]; then
+    shift
+    if "$PYTHON_BIN" -m app.cli check "$@"; then
+        CMD="$*"
+        echo -e "\033[38;2;16;185;129m[+] Authorization verified. Executing on host...\033[0m\n"
+        eval "$CMD"
+        exit $?
+    else
+        echo -e "\033[38;2;239;68;68m[!] Host execution halted: Command rejected by Vallum.\033[0m" >&2
+        exit 1
+    fi
+fi
+
+exec "$PYTHON_BIN" -m app.cli "$@"

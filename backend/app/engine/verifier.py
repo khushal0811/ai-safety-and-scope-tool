@@ -375,8 +375,13 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
 
 def evaluate_deterministic_command(request: DeterministicAuditRequest) -> AuditResult:
     """Convenience helper to evaluate a single raw CLI command."""
+    roe = request.roe
+    if roe is None:
+        from app.data.presets import get_roe_preset_by_id, ROE_PRESETS
+        roe = get_roe_preset_by_id(request.roe_id) or ROE_PRESETS[0]
+
     full_req = AuditRequest(
-        roe=request.roe,
+        roe=roe,
         model_id=request.model_id,
         user_prompt=request.user_prompt,
         model_output=f"```bash\n{request.command}\n```",
