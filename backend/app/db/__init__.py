@@ -13,6 +13,8 @@ from app.db.supabase_client import (
     fetch_roe_presets,
     save_custom_roe,
     fetch_custom_roes,
+    is_valid_uuid,
+    verify_supabase_jwt,
 )
 
 __all__ = [
@@ -28,5 +30,7 @@ __all__ = [
     "fetch_roe_presets",
     "save_custom_roe",
     "fetch_custom_roes",
+    "is_valid_uuid",
+    "verify_supabase_jwt",
 ]
 

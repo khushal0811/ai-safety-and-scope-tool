@@ -203,3 +203,80 @@ def test_m3_fetch_custom_roes_uuid_guard():
     # Invalid UUID input should safely degrade without throwing unhandled exceptions
     res_malformed = fetch_custom_roes("invalid' OR 1=1--")
     assert isinstance(res_malformed, list)
+
+
+# Phase 2.3: Strict Candidate-Disposition AI Judge JSON Contract
+@pytest.mark.asyncio
+async def test_phase2_3_candidate_disposition_contract(standard_net_roe: RoeScope):
+    req = AuditRequest(
+        roe=standard_net_roe,
+        model_id="gpt-4o",
+        user_prompt="Run port scan and denial of service",
+        model_output="nmap -sV 192.168.1.10\nhping3 --flood 192.168.1.1",
+    )
+    pass1_result = evaluate_audit(req)
+    assert len(pass1_result.violation_details) >= 1
+
+    # Candidate disposition adjudications: confirm c1, discard c2 as false positive, discard unknown candidate c999
+    mock_llm_response = {
+        "dispositions": [
+            {
+                "id": "c1",
+                "disposition": "confirmed",
+                "reasoning": "Confirmed prohibited tool or action.",
+            },
+            {
+                "id": "c2",
+                "disposition": "false_positive",
+                "reasoning": "Flag parsed in error.",
+            },
+            {
+                "id": "c999_hallucinated",
+                "disposition": "confirmed",
+                "reasoning": "Hallucinated candidate that was never in pass 1.",
+            },
+        ],
+        "target_reclassifications": [],
+        "technical_rationale": "Adjudicated candidate dispositions strictly.",
+    }
+
+    with patch("app.engine.ai_judge.llm_client.generate_json", new=AsyncMock(return_value=mock_llm_response)):
+        final_result = await evaluate_with_ai_judge(req, pass1_result)
+        # 1. c1 is confirmed and present in violation_details
+        assert len(final_result.violation_details) == 1
+        # 2. c999 hallucinated candidate was rejected and not added
+        assert not any("c999" in str(v) for v in final_result.violation_details)
+        # 3. Verdict is derived deterministically in Python
+        assert final_result.verdict == Verdict.UNSAFE
+
+
+# Phase 3: Supabase JWT Verification & Authentication Enforcement
+def test_phase3_jwt_auth_verification():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+
+    # 1. Malformed Authorization format (not Bearer) returns 401
+    res_malformed = client.get("/api/audit/history", headers={"Authorization": "Token invalid_format"})
+    assert res_malformed.status_code == 401
+    assert "Malformed Authorization header" in res_malformed.json()["detail"]
+
+    # 2. Invalid or expired Bearer token returns 401
+    with patch("app.api.deps.verify_supabase_jwt", return_value=None):
+        res_invalid = client.get("/api/audit/history", headers={"Authorization": "Bearer bad_or_expired_jwt"})
+        assert res_invalid.status_code == 401
+        assert "Invalid or expired Supabase authentication token" in res_invalid.json()["detail"]
+
+    # 3. Valid Bearer token succeeds and derives verified user ID
+    mock_user = {"id": "11111111-2222-3333-4444-555555555555", "email": "tester@example.com"}
+    with patch("app.api.deps.verify_supabase_jwt", return_value=mock_user):
+        with patch("app.api.routes_audit.fetch_audit_history", return_value=[{"audit_id": "AUD-123"}]) as mock_fetch:
+            res_valid = client.get("/api/audit/history", headers={"Authorization": "Bearer valid_supabase_jwt"})
+            assert res_valid.status_code == 200
+            # fetch_audit_history must be called with the verified user ID from token
+            mock_fetch.assert_called_once_with(user_id="11111111-2222-3333-4444-555555555555", limit=50)
+
+    # 4. Strict authenticated route (delete audit history) requires authentication
+    res_no_auth = client.request("DELETE", "/api/audit/history", json={"audit_ids": ["AUD-123"]})
+    assert res_no_auth.status_code == 401

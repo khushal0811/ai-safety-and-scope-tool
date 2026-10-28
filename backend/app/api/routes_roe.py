@@ -2,8 +2,9 @@
 
 import logging
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
+from app.api.deps import get_authenticated_user_id
 from app.data.presets import ROE_PRESETS
 from app.db import fetch_custom_roes, fetch_roe_presets, save_custom_roe
 from app.engine.roe_parser import parse_unstructured_roe
@@ -59,7 +60,7 @@ async def get_roe_presets() -> List[RoeScope]:
 
 @router.get("/custom", response_model=List[Dict[str, Any]])
 async def get_custom_roes(
-    user_id: Optional[str] = Query(default=None, description="Optional Supabase Auth user ID"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> List[Dict[str, Any]]:
     """Retrieve custom scopes uploaded and saved to Supabase PostgreSQL."""
     return fetch_custom_roes(user_id=user_id)
@@ -68,7 +69,7 @@ async def get_custom_roes(
 @router.post("/parse-document", response_model=RoeScope)
 async def parse_roe_document(
     file: UploadFile = File(...),
-    user_id: Optional[str] = Query(default=None, description="Optional Supabase user UUID"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> RoeScope:
     """Upload and parse an unstructured .md or .txt RoE document using LLM extraction."""
     filename = file.filename or "uploaded_roe.md"
@@ -100,7 +101,7 @@ async def parse_roe_document(
 @router.post("/parse-text", response_model=RoeScope)
 async def parse_roe_text(
     request: ParseTextRequest,
-    user_id: Optional[str] = Query(default=None, description="Optional Supabase user UUID"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> RoeScope:
     """Parse raw pasted RoE text directly without multipart file upload."""
     try:

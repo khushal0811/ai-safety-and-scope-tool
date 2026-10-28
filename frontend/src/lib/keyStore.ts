@@ -82,7 +82,7 @@ export function getAllApiKeys(): ApiKeys {
   };
 }
 
-import { supabase } from './supabaseClient';
+import { supabase, getAuthHeaders } from './supabaseClient';
 
 export function saveAllApiKeys(keys: { openRouterKey?: string; groqKey?: string }, mode: KeyStorageMode = 'session'): void {
   setStorageMode(mode);
@@ -128,7 +128,10 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
     };
   }
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/vault/status?user_id=${encodeURIComponent(userId)}`);
+    const authHeaders = await getAuthHeaders();
+    const res = await fetch(`${BACKEND_BASE}/api/vault/status?user_id=${encodeURIComponent(userId)}`, {
+      headers: { ...authHeaders },
+    });
     if (!res.ok) throw new Error('Status check failed');
     const data = await res.json();
     return {
@@ -158,9 +161,10 @@ export async function saveKeysToVault(
 
   // Encrypt with server-side AES-256-GCM and persist to database vault
   try {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(`${BACKEND_BASE}/api/vault/keys`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
         user_id: userId,
         openrouter_key: keys.openRouterKey || null,
@@ -185,8 +189,10 @@ export async function revokeAndWipeUserKeys(userId?: string): Promise<{ success:
 
   // 1. Call backend vault deletion endpoint
   try {
+    const authHeaders = await getAuthHeaders();
     await fetch(`${BACKEND_BASE}/api/vault/keys?user_id=${encodeURIComponent(userId)}`, {
       method: 'DELETE',
+      headers: { ...authHeaders },
     });
   } catch (err) {
     console.warn('Backend vault delete warning:', err);
@@ -224,9 +230,10 @@ export async function testApiKeys(keys: {
   userId?: string;
 }): Promise<{ success: boolean; results: KeyVerificationResult[]; error?: string }> {
   try {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(`${BACKEND_BASE}/api/vault/verify-key`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
         openrouter_key: keys.openRouterKey?.trim() || null,
         groq_key: keys.groqKey?.trim() || null,

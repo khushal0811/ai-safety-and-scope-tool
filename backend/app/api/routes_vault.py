@@ -9,9 +9,10 @@ import time
 from typing import List, Optional
 import httpx
 
-from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel, Field
 
+from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
 from app.db.supabase_client import (
     get_user_vault_keys,
     get_user_vault_status,
@@ -54,7 +55,7 @@ class VerifyKeyResponse(BaseModel):
 class VaultKeysPayload(BaseModel):
     """Payload for saving encrypted user API keys."""
 
-    user_id: str = Field(..., description="Authenticated user UUID")
+    user_id: Optional[str] = Field(None, description="Authenticated user UUID")
     openrouter_key: Optional[str] = Field(None, description="OpenRouter API key (sk-or-v1-...)")
     groq_key: Optional[str] = Field(None, description="Custom Groq API key (gsk_...)")
 
@@ -71,12 +72,10 @@ class VaultStatusResponse(BaseModel):
 
 @router.get("/status", response_model=VaultStatusResponse)
 async def get_vault_status(
-    user_id: Optional[str] = Query(None, description="Authenticated user UUID"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ):
     """Check whether the user has encrypted keys configured in their vault."""
-    active_uid = user_id or x_user_id
-    if not active_uid or not is_valid_uuid(active_uid):
+    if not user_id or not is_valid_uuid(user_id):
         return VaultStatusResponse(
             is_configured=False,
             has_openrouter_key=False,
@@ -86,7 +85,7 @@ async def get_vault_status(
         )
 
     try:
-        status = get_user_vault_status(active_uid)
+        status = get_user_vault_status(user_id)
         return VaultStatusResponse(**status)
     except Exception as e:
         logger.error(f"[VaultAPI] Error getting vault status: {e}")
@@ -94,14 +93,18 @@ async def get_vault_status(
 
 
 @router.post("/keys")
-async def save_vault_keys(payload: VaultKeysPayload):
+async def save_vault_keys(
+    payload: VaultKeysPayload,
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
+):
     """Encrypt and store OpenRouter and/or Groq API keys in the database vault."""
-    if not is_valid_uuid(payload.user_id):
+    effective_uid = user_id or payload.user_id
+    if not effective_uid or not is_valid_uuid(effective_uid):
         raise HTTPException(status_code=400, detail="A valid user UUID is required.")
 
     try:
         res = save_user_vault_keys(
-            user_id=payload.user_id,
+            user_id=effective_uid,
             openrouter_key=payload.openrouter_key,
             groq_key=payload.groq_key,
         )
@@ -117,16 +120,16 @@ async def save_vault_keys(payload: VaultKeysPayload):
 
 @router.delete("/keys")
 async def revoke_vault_keys(
-    user_id: Optional[str] = Query(None, description="Authenticated user UUID"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
+    target_user_id: Optional[str] = Query(None, alias="user_id"),
 ):
     """Permanently revoke and delete the user's API vault record from the database."""
-    active_uid = user_id or x_user_id
-    if not active_uid or not is_valid_uuid(active_uid):
+    effective_uid = user_id or target_user_id
+    if not effective_uid or not is_valid_uuid(effective_uid):
         raise HTTPException(status_code=400, detail="A valid user UUID is required to revoke keys.")
 
     try:
-        success = revoke_user_vault_keys(active_uid)
+        success = revoke_user_vault_keys(user_id)
         return {
             "success": success,
             "message": "API keys permanently revoked and wiped from database vault.",

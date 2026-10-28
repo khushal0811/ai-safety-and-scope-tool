@@ -159,3 +159,59 @@ export async function getSupabaseSession(): Promise<Session | null> {
     return null;
   }
 }
+
+/**
+ * Asynchronously retrieve active Supabase JWT access token.
+ */
+export async function getAuthToken(): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Synchronous best-effort token retrieval from Supabase localStorage cache.
+ */
+export function getStoredAuthToken(): string | null {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          const parsed = JSON.parse(item);
+          if (parsed?.access_token) return parsed.access_token;
+        }
+      }
+    }
+  } catch {
+    // Ignore storage parse errors
+  }
+  return null;
+}
+
+/**
+ * Return authorization headers object with Bearer token if user is authenticated.
+ */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const token = (await getAuthToken()) || getStoredAuthToken();
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
+/**
+ * Synchronous auth headers helper
+ */
+export function getSyncAuthHeaders(): Record<string, string> {
+  const token = getStoredAuthToken();
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}

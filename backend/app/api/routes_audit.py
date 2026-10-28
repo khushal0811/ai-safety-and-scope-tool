@@ -3,13 +3,15 @@
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
 from app.db import (
     delete_audit_logs,
     fetch_audit_history,
     fetch_audit_metrics,
     is_database_connected,
+    is_valid_uuid,
     save_audit_log,
 )
 from app.engine.verifier import evaluate_audit_async, evaluate_deterministic_command
@@ -24,13 +26,23 @@ class DeleteAuditsPayload(BaseModel):
     """Payload to permanently delete one or more audit logs."""
 
     audit_ids: List[str] = Field(..., description="List of audit UUIDs/IDs to permanently delete")
-    user_id: str = Field(..., description="Owner Supabase user UUID")
+    user_id: Optional[str] = Field(None, description="Owner Supabase user UUID (optional if Authorization header provided)")
 
 
 @router.delete("/history")
-async def delete_audit_history(payload: DeleteAuditsPayload) -> Dict[str, Any]:
+async def delete_audit_history(
+    payload: DeleteAuditsPayload,
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
+) -> Dict[str, Any]:
     """Permanently delete specified audit records from Supabase PostgreSQL audit_logs table."""
-    success = delete_audit_logs(audit_ids=payload.audit_ids, user_id=payload.user_id)
+    effective_uid = user_id or payload.user_id
+    if not effective_uid or not is_valid_uuid(effective_uid):
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Please provide a valid Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    success = delete_audit_logs(audit_ids=payload.audit_ids, user_id=effective_uid)
     return {"success": success, "deleted_count": len(payload.audit_ids)}
 
 
@@ -39,7 +51,7 @@ async def delete_audit_history(payload: DeleteAuditsPayload) -> Dict[str, Any]:
 async def audit_model_output(
     request: AuditRequest,
     background_tasks: BackgroundTasks,
-    user_id: Optional[str] = Query(default=None, description="Optional Supabase Auth user ID"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> AuditResult:
     """Audit raw model output against active Rules of Engagement (RoE) with intelligent remediation.
     
@@ -61,7 +73,7 @@ async def audit_model_output(
 async def audit_command_deterministic(
     request: DeterministicAuditRequest,
     background_tasks: BackgroundTasks,
-    user_id: Optional[str] = Query(default=None, description="Optional Supabase Auth user ID"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> AuditResult:
     """Perform instant deterministic inspection on a CLI command string."""
     t0 = time.perf_counter()
@@ -77,7 +89,7 @@ async def audit_command_deterministic(
 
 @router.get("/history", response_model=List[Dict[str, Any]])
 async def get_audit_history(
-    user_id: Optional[str] = Query(default=None, description="Filter history by Supabase user UUID"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
     limit: int = Query(default=50, ge=1, le=200, description="Max audit entries to return"),
 ) -> List[Dict[str, Any]]:
     """Retrieve historical audits from Supabase PostgreSQL audit_logs table."""
@@ -86,7 +98,7 @@ async def get_audit_history(
 
 @router.get("/metrics", response_model=Dict[str, Any])
 async def get_audit_metrics(
-    user_id: Optional[str] = Query(default=None, description="Filter metrics by Supabase user UUID"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> Dict[str, Any]:
     """Retrieve aggregated audit metrics and compliance rates from Supabase PostgreSQL."""
     return fetch_audit_metrics(user_id=user_id)

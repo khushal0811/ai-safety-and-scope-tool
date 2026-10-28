@@ -10,8 +10,9 @@ from datetime import datetime, timezone
 import logging
 from typing import List, Optional
 from uuid import uuid4
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
+from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
 from app.db.supabase_client import (
     delete_benchmark_runs,
     fetch_benchmark_history,
@@ -85,6 +86,7 @@ async def query_benchmark_models(
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
     x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
     x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ):
     """Query one or all frontier models via OpenRouter or system Groq key.
 
@@ -93,11 +95,12 @@ async def query_benchmark_models(
     are never logged or stored.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
+    active_user_id = user_id or x_user_id
 
     # If keys are not provided in headers, fetch decrypted keys from user's vault
-    if x_user_id and (not x_openrouter_key or not x_groq_key):
+    if active_user_id and (not x_openrouter_key or not x_groq_key):
         from app.db.supabase_client import get_user_vault_keys
-        vault_keys = get_user_vault_keys(x_user_id)
+        vault_keys = get_user_vault_keys(active_user_id)
         if not x_openrouter_key and vault_keys.get("openrouter_key"):
             x_openrouter_key = vault_keys["openrouter_key"]
         if not x_groq_key and vault_keys.get("groq_key"):
@@ -137,7 +140,7 @@ async def evaluate_benchmark_models(
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
     x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
     x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    user_id: Optional[str] = Query(None, description="Optional user ID query param"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
 ):
     """Query frontier models and evaluate each response against the active RoE scope."""
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -301,7 +304,7 @@ async def evaluate_benchmark_models(
 @benchmark_router.get("/history", response_model=List[BenchmarkRunRecord])
 async def get_benchmark_history(
     x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    user_id: Optional[str] = Query(None, description="Optional user ID query param"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
     limit: int = 50,
 ):
     """Retrieve historical benchmark runs for the authenticated user."""
@@ -315,10 +318,10 @@ async def get_benchmark_history(
 async def delete_benchmark_history(
     payload: BenchmarkDeleteRequest,
     x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
-    user_id: Optional[str] = Query(None, description="Optional user ID query param"),
+    auth_user_id: str = Depends(require_authenticated_user_id),
 ):
     """Permanently delete one or more benchmark runs from the database."""
-    active_uid = user_id or x_user_id
+    active_uid = auth_user_id or x_user_id
     if not active_uid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
