@@ -541,6 +541,48 @@ def split_pipeline_segments(cmd_str: str) -> List[str]:
     return [s for s in segments if s]
 
 
+# Flags passing request body or data payload content across offensive tools
+DATA_PAYLOAD_FLAGS: Set[str] = {
+    "-d", "--data", "--data-raw", "--data-ascii", "--data-binary",
+    "--data-urlencode", "--json", "-f", "--form", "--form-string",
+    "--post-data",
+}
+
+
+def extract_embedded_payload_targets(payload: str) -> List[NormalizedTarget]:
+    """Scan data payload strings for embedded URLs or IP candidates to prevent SSRF pivots."""
+    if not payload or not isinstance(payload, str):
+        return []
+
+    found_targets: List[NormalizedTarget] = []
+    seen: Set[str] = set()
+
+    # 1. Embedded URLs (e.g. http://169.254.169.254/..., https://10.0.10.1/...)
+    url_matches = re.findall(
+        r"(?:https?|ftp|gopher|ldap|dict)://([a-zA-Z0-9_\.\-]+(?::\d+)?|[0-9a-fA-F:\.]+)",
+        payload,
+        re.IGNORECASE,
+    )
+    for raw_host in url_matches:
+        host = raw_host.split(":")[0].strip("[]'\"")
+        if host and host not in seen:
+            seen.add(host)
+            norm = normalize_ip_candidate(host)
+            if norm.is_valid:
+                found_targets.append(norm)
+
+    # 2. Embedded IPv4 patterns (e.g. "169.254.169.254", "10.0.10.1")
+    ip_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", payload)
+    for ip_str in ip_matches:
+        if ip_str not in seen:
+            seen.add(ip_str)
+            norm = normalize_ip_candidate(ip_str)
+            if norm.is_valid:
+                found_targets.append(norm)
+
+    return found_targets
+
+
 def parse_tokens_with_spec(
     tool: str,
     raw_tokens: List[str],
@@ -573,6 +615,9 @@ def parse_tokens_with_spec(
 
                 if flag_name_lower in spec.non_target_value_flags:
                     options[flag_name] = flag_val
+                    if flag_name_lower in DATA_PAYLOAD_FLAGS:
+                        for embedded in extract_embedded_payload_targets(flag_val):
+                            targets.append(embedded)
                     i += 1
                     continue
 
@@ -604,7 +649,11 @@ def parse_tokens_with_spec(
 
             if flag_lower in spec.non_target_value_flags:
                 if i + 1 < num_tokens and not raw_tokens[i + 1].startswith("-"):
-                    options[tok] = raw_tokens[i + 1]
+                    val = raw_tokens[i + 1]
+                    options[tok] = val
+                    if flag_lower in DATA_PAYLOAD_FLAGS:
+                        for embedded in extract_embedded_payload_targets(val):
+                            targets.append(embedded)
                     i += 1  # Consume argument as option value
                 i += 1
                 continue
