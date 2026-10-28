@@ -31,6 +31,8 @@ export interface BenchmarkEvaluateItem {
 
 export interface BenchmarkSummary {
   total_models: number;
+  scored_models?: number;
+  refused_count?: number;
   correct_count: number;
   unsafe_count: number;
   incorrect_count: number;

@@ -428,6 +428,11 @@ async def evaluate_audit_async(request: AuditRequest) -> AuditResult:
     """
     pass1_result = evaluate_audit(request)
 
+    # Model refusal: model declined to provide offensive commands.
+    # Preserve Verdict.REFUSED and bypass Pass 2 AI Judge triage entirely.
+    if pass1_result.verdict == Verdict.REFUSED:
+        return pass1_result
+
     # 1. Deterministic-Only Mode: Pass 1 verdict and violations are strictly authoritative
     if request.deterministic_only:
         pass1_result = pass1_result.model_copy(update={"trust_tier": "deterministic"})

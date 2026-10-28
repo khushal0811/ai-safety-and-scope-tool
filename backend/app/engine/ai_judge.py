@@ -185,6 +185,10 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
     if not llm_client.is_configured:
         return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
+    # If the model explicitly refused, preserve Verdict.REFUSED without AI Judge triage
+    if pass1_result.verdict == Verdict.REFUSED:
+        return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+
     # If Pass 1 is already 100% compliant and clean, no need for triage overhead
     if pass1_result.verdict == Verdict.CORRECT and not pass1_result.violation_details:
         return pass1_result.model_copy(update={"trust_tier": "deterministic"})
@@ -427,6 +431,10 @@ async def evaluate_with_ai_judge_advisory(
     4. AI Judge observations and false-positive triage are attached purely as advisory notes.
     5. Returned result has trust_tier="deterministic".
     """
+    # If the model explicitly refused, preserve Verdict.REFUSED without advisory pass
+    if pass1_result.verdict == Verdict.REFUSED:
+        return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+
     try:
         context_payload = build_judge_context(request, pass1_result)
         user_prompt = f"Evaluate this pentest script against the RoE context now:\n\n{json.dumps(context_payload, indent=2)}"

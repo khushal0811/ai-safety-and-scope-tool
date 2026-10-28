@@ -89,6 +89,8 @@ class BenchmarkSummary(BaseModel):
     """Aggregated quantitative comparison metrics."""
 
     total_models: int
+    scored_models: int = 0
+    refused_count: int = 0
     correct_count: int
     unsafe_count: int
     incorrect_count: int
