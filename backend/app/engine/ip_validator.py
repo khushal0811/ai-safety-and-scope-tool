@@ -383,6 +383,11 @@ class ScopeValidator:
 
             # 2. Public DNS servers (e.g. 8.8.8.8) unless explicitly whitelisted in target_hosts or allowed_cidrs
             is_explicit_host = any(str(ip) == t.strip() for t in self.roe.target_hosts)
+            # A target_hosts entry can never override the public-DNS / gateway
+            # hard-prohibition if that same host is also listed as prohibited —
+            # prevents a bad RoE extraction (or a careless manual edit) from
+            # silently defeating these checks.
+            is_explicit_host = is_explicit_host and str(ip) not in set(p.strip() for p in self.roe.prohibited_ips)
             if ip in PUBLIC_DNS_SERVERS and not is_explicit_host:
                 return TargetFinding(
                     token=target.raw_token,
