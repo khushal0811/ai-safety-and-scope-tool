@@ -94,12 +94,12 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
                   onChange={() => setChoice('system')}
                   style={{ accentColor: 'var(--accent)' }}
                 />
-                <strong style={{ fontSize: 14 }}>Option 1: Use System Key (Default Groq)</strong>
+                <strong style={{ fontSize: 14 }}>Option 1: Use System Key (Claude Haiku)</strong>
               </div>
-              <span className="tag tag--ok">● Recommended · Free</span>
+              <span className="tag tag--ok">● Recommended · Active</span>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, paddingLeft: 24, lineHeight: 1.5 }}>
-              Use Vallum's pre-configured backend infrastructure (Groq Llama 3.3). Zero setup needed — RoE extraction, scope analysis, and safe command remediation work immediately without any personal API key.
+              Use Vallum's pre-configured backend infrastructure (Claude Haiku Latest via OpenRouter). Zero setup needed — RoE extraction, scope analysis, and safe command remediation work immediately without any personal API key.
             </p>
           </div>
 
@@ -171,7 +171,7 @@ export function InitialSetupModal({ user, isOpen, onClose }: Props) {
                       spellCheck={false}
                     />
                     <span className="font-xs muted" style={{ marginTop: 3 }}>
-                      Leave blank to use the backend's shared Groq key for Llama 3.3.
+                      Leave blank to use the backend's default OpenRouter key for Claude Haiku.
                     </span>
                   </div>
 

@@ -269,8 +269,8 @@ function ResultBody({
 
           {result.mode === 'demo' ? (
             <p className="muted" style={{ fontSize: 12 }}>
-              Demo mode: client-side preview of the deterministic engine. The authoritative FastAPI engine and Llama 3 rewriter
-              arrive in Phases 2–3.
+              Demo mode: client-side preview of the deterministic engine. The authoritative FastAPI engine and Claude Haiku rewriter
+              are active in Live mode.
             </p>
           ) : null}
 

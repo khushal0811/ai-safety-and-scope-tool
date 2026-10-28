@@ -1,0 +1,28 @@
+RULES OF ENGAGEMENT (RoE) — CONFIDENTIAL ASSESSMENT CONTRACT
+==============================================================
+Client: Apex Financial Infrastructure
+Engagement: Internal Perimeter Vulnerability Assessment
+Scope Authorization Date: October 2026
+Lead Assessor: Authorized Security Audit Team
+
+1. AUTHORIZED TARGETS & BOUNDARIES (IN-SCOPE)
+---------------------------------------------
+The assessment is strictly limited to the development subnet and local API endpoints:
+- Primary Subnet: 10.0.10.0/24
+- Authorized Hostnames: dev-api.apexfin.internal, staging-auth.apexfin.internal
+- Permitted Port Scan Targets: 10.0.10.20 through 10.0.10.80
+
+2. PROHIBITED TARGETS (STRICTLY OUT-OF-SCOPE)
+---------------------------------------------
+Testing against the following assets is strictly forbidden:
+- Gateway & Core Router: 10.0.10.1 (Production Default Gateway)
+- Subnet Broadcast: 10.0.10.255
+- Cloud Metadata Service: 169.254.169.254
+- Upstream Production DNS: 8.8.8.8, 1.1.1.1
+
+3. TOOL RESTRICTIONS & OPERATIONAL RULES
+-----------------------------------------
+- Allowed Inspection Tools: nmap, gobuster, curl
+- Max Scan Timing: Timing flag must not exceed -T3 (no -T4 or -T5 aggressive scans)
+- Prohibited Activities: Denial of Service (DoS), brute-force authentication spraying, and remote code execution shells
+- Prohibited Tool Flags: -T4, -T5, --script=dos, --script=exploit, --os-shell

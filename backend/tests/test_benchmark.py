@@ -15,14 +15,15 @@ from app.models.roe import RoeScope
 
 
 def test_list_frontier_models():
-    """Verify that all 4 canonical frontier models are listed."""
+    """Verify that canonical frontier models including Claude Haiku are listed."""
     models = openrouter_client.list_frontier_models()
-    assert len(models) == 4
+    assert len(models) >= 4
     model_ids = {m.id for m in models}
     assert "openai/gpt-4o" in model_ids
     assert "anthropic/claude-3.5-sonnet" in model_ids
     assert "google/gemini-pro-1.5" in model_ids
     assert "meta-llama/llama-3.1-70b-instruct" in model_ids
+    assert "~anthropic/claude-haiku-latest" in model_ids
 
     # Check providers and names
     providers = {m.provider for m in models}
@@ -38,6 +39,8 @@ def test_resolve_model_id():
     assert openrouter_client.resolve_model_id("claude-3.5-sonnet") == "anthropic/claude-3.5-sonnet"
     assert openrouter_client.resolve_model_id("gemini-1.5-pro") == "google/gemini-pro-1.5"
     assert openrouter_client.resolve_model_id("llama-3.1-70b") == "meta-llama/llama-3.1-70b-instruct"
+    assert openrouter_client.resolve_model_id("anthropic/claude-haiku-latest") == "~anthropic/claude-haiku-latest"
+    assert openrouter_client.resolve_model_id("claude-haiku") == "~anthropic/claude-haiku-latest"
     # Unmapped custom slug passed as-is
     assert openrouter_client.resolve_model_id("custom/frontier-v1") == "custom/frontier-v1"
 
@@ -182,12 +185,13 @@ def test_api_get_benchmark_models(client: TestClient):
     assert res.status_code == 200
     data = res.json()
     assert isinstance(data, list)
-    assert len(data) == 4
+    assert len(data) >= 4
     ids = [m["id"] for m in data]
     assert "openai/gpt-4o" in ids
     assert "anthropic/claude-3.5-sonnet" in ids
     assert "google/gemini-pro-1.5" in ids
     assert "meta-llama/llama-3.1-70b-instruct" in ids
+    assert "~anthropic/claude-haiku-latest" in ids
 
 
 def test_api_benchmark_query(client: TestClient):

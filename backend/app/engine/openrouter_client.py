@@ -54,6 +54,15 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
         tier="frontier",
         recommended=True,
     ),
+    "~anthropic/claude-haiku-latest": FrontierModelInfo(
+        id="~anthropic/claude-haiku-latest",
+        name="Claude Haiku",
+        provider="Anthropic",
+        context_length=200000,
+        description="Fast, cost-effective Anthropic frontier model dynamically routing to the latest Haiku release.",
+        tier="frontier",
+        recommended=True,
+    ),
     "meta-llama/llama-3.1-70b-instruct": FrontierModelInfo(
         id="meta-llama/llama-3.1-70b-instruct",
         name="Llama 3.1 70B Instruct",
@@ -67,12 +76,18 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
 
 # Supported aliases for backward compatibility or flexible slug resolution
 MODEL_ALIASES: Dict[str, str] = {
+    "claude-haiku": "~anthropic/claude-haiku-latest",
+    "claude-haiku-latest": "~anthropic/claude-haiku-latest",
+    "haiku": "~anthropic/claude-haiku-latest",
+    "anthropic/claude-3-haiku": "~anthropic/claude-haiku-latest",
+    "anthropic/claude-haiku-latest": "~anthropic/claude-haiku-latest",
     "gpt-4o": "openai/gpt-4o",
     "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
     "claude-3-5-sonnet": "anthropic/claude-3.5-sonnet",
     "gemini-1.5-pro": "google/gemini-pro-1.5",
     "google/gemini-1.5-pro": "google/gemini-pro-1.5",
     "llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
+    "llama-3.3-70b": "meta-llama/llama-3.1-70b-instruct",
     "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct",
     "meta-llama/llama-3.1-8b-instruct": "meta-llama/llama-3.1-70b-instruct",
 }
@@ -87,7 +102,7 @@ class OpenRouterClient:
     """Async client for querying and benchmarking frontier LLMs via OpenRouter."""
 
     def __init__(self, default_api_key: Optional[str] = None):
-        self.default_api_key = default_api_key or settings.OPENROUTER_API_KEY
+        self.default_api_key = default_api_key
         self.base_url = OPENROUTER_BASE_URL
 
     def resolve_model_id(self, model_id: str) -> str:
@@ -105,10 +120,12 @@ class OpenRouterClient:
         return list(FRONTIER_MODELS.values())
 
     def get_effective_key(self, custom_key: Optional[str] = None) -> str:
-        """Get API key prioritizing user client key over environment default."""
-        if custom_key and custom_key.strip():
+        """Get API key prioritizing user client key over instance default or environment default."""
+        if custom_key is not None and custom_key.strip():
             return custom_key.strip()
-        return (self.default_api_key or settings.OPENROUTER_API_KEY).strip()
+        if self.default_api_key is not None:
+            return self.default_api_key.strip()
+        return (settings.OPENROUTER_API_KEY or "").strip()
 
     async def query_model(
         self,
