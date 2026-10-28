@@ -235,9 +235,34 @@ def test_generate_compliance_report_dispatcher_json():
 # 5. FastAPI Endpoint GET /api/audit/report
 # ==============================================================================
 
+TEST_REPORT_USER_ID = "a56d57aa-1324-4e6b-ad40-de772556d670"
+
+
+def test_api_audit_report_unauthenticated_returns_401():
+    """Verify GET /api/audit/report rejects unauthenticated callers with 401."""
+    response = client.get("/api/audit/report?roe_id=ROE-PRESET-NET-001&format=markdown")
+    assert response.status_code == 401
+
+
+def test_fetch_audit_logs_for_roe_refuses_missing_or_invalid_user_id(monkeypatch):
+    """Verify fetch_audit_logs_for_roe returns [] immediately when user_id is None or invalid."""
+    from app.db import supabase_client
+
+    def fail_if_called():
+        raise AssertionError("get_supabase() must not be called when user_id is missing/invalid")
+
+    monkeypatch.setattr(supabase_client, "get_supabase", fail_if_called)
+    assert supabase_client.fetch_audit_logs_for_roe("ROE-PRESET-NET-001", user_id=None) == []
+    assert supabase_client.fetch_audit_logs_for_roe("ROE-PRESET-NET-001", user_id="") == []
+    assert supabase_client.fetch_audit_logs_for_roe("ROE-PRESET-NET-001", user_id="not-a-uuid") == []
+
+
 def test_api_audit_report_markdown_endpoint():
     with patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS):
-        response = client.get("/api/audit/report?roe_id=ROE-PRESET-NET-001&format=markdown")
+        response = client.get(
+            "/api/audit/report?roe_id=ROE-PRESET-NET-001&format=markdown",
+            headers={"X-User-Id": TEST_REPORT_USER_ID},
+        )
         assert response.status_code == 200
         assert "text/markdown" in response.headers.get("content-type", "")
         assert "attachment" in response.headers.get("content-disposition", "")
@@ -246,7 +271,10 @@ def test_api_audit_report_markdown_endpoint():
 
 def test_api_audit_report_pdf_endpoint():
     with patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS):
-        response = client.get("/api/audit/report?roe_id=ROE-PRESET-NET-001&format=pdf")
+        response = client.get(
+            "/api/audit/report?roe_id=ROE-PRESET-NET-001&format=pdf",
+            headers={"X-User-Id": TEST_REPORT_USER_ID},
+        )
         assert response.status_code == 200
         assert "application/pdf" in response.headers.get("content-type", "")
         assert "attachment" in response.headers.get("content-disposition", "")
@@ -255,7 +283,10 @@ def test_api_audit_report_pdf_endpoint():
 
 def test_api_audit_report_json_endpoint():
     with patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS):
-        response = client.get("/api/audit/report?roe_id=ROE-PRESET-NET-001&format=json")
+        response = client.get(
+            "/api/audit/report?roe_id=ROE-PRESET-NET-001&format=json",
+            headers={"X-User-Id": TEST_REPORT_USER_ID},
+        )
         assert response.status_code == 200
         assert "application/json" in response.headers.get("content-type", "")
         data = response.json()

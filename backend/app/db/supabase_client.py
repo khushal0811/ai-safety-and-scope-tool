@@ -127,19 +127,31 @@ def fetch_audit_logs_for_roe(
     user_id: Optional[str] = None,
     limit: int = 500,
 ) -> List[Dict[str, Any]]:
-    """Retrieve all audit logs for a specific RoE ID in chronological order."""
+    """Retrieve audit logs for a specific RoE ID, scoped strictly to the given user.
+
+    Returns an empty list if no valid user_id is provided — this function must
+    never return data across users.
+    """
+    if not is_valid_uuid(user_id):
+        return []
+
     client = get_supabase()
     if not client:
         return []
 
     try:
-        query = client.table("audit_logs").select("*").eq("roe_id", roe_id)
-        if user_id and is_valid_uuid(user_id):
-            query = query.eq("user_id", user_id)
-        res = query.order("created_at", desc=False).limit(limit).execute()
+        res = (
+            client.table("audit_logs")
+            .select("*")
+            .eq("roe_id", roe_id)
+            .eq("user_id", user_id)
+            .order("created_at", desc=False)
+            .limit(limit)
+            .execute()
+        )
         return res.data or []
     except Exception as e:
-        logger.error(f"[Supabase] Failed to fetch audit logs for RoE {roe_id}: {e}")
+        logger.error(f"[Supabase] Failed to fetch audit logs for RoE {roe_id} (user {user_id}): {e}")
         return []
 
 
@@ -327,7 +339,14 @@ def save_custom_roe(
     user_id: Optional[str] = None,
     raw_document: Optional[str] = None,
 ) -> bool:
-    """Save or update an uploaded/parsed custom RoE to Supabase PostgreSQL."""
+    """Save or update an uploaded/parsed custom RoE to Supabase PostgreSQL.
+
+    Strict Privacy Rule: Only persists when user_id is a valid UUID so anonymous
+    uploads never create public (user_id IS NULL) rows visible to other users.
+    """
+    if not is_valid_uuid(user_id):
+        return False
+
     client = get_supabase()
     if not client:
         return False
@@ -359,19 +378,21 @@ def save_custom_roe(
 
 
 def fetch_custom_roes(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve custom RoEs belonging to user or created during the session."""
+    """Retrieve custom RoEs belonging to the given user, plus any public (user_id IS NULL) presets.
+
+    An unauthenticated or invalid caller sees only public RoEs — never another
+    user's private custom scope.
+    """
     client = get_supabase()
     if not client:
         return []
 
     try:
         query = client.table("custom_roes").select("*").order("created_at", desc=True)
-        if user_id:
-            if is_valid_uuid(user_id):
-                query = query.or_(f"user_id.eq.{user_id},user_id.is.null")
-            else:
-                logger.warning(f"[Supabase] Invalid user_id UUID passed to fetch_custom_roes: '{user_id}'. Querying public only.")
-                query = query.is_("user_id", "null")
+        if user_id and is_valid_uuid(user_id):
+            query = query.or_(f"user_id.eq.{user_id},user_id.is.null")
+        else:
+            query = query.is_("user_id", "null")
         res = query.execute()
         return res.data or []
     except Exception as e:

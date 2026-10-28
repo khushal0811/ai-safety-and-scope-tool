@@ -115,6 +115,73 @@ def test_get_custom_roes_endpoint(client: TestClient):
     assert isinstance(data, list)
 
 
+def test_fetch_custom_roes_isolation_and_public_fallback(monkeypatch):
+    """Verify fetch_custom_roes never runs an unfiltered query and isolates User A from User B."""
+    from app.db import supabase_client
+
+    user_a = "11111111-1111-1111-1111-111111111111"
+    user_b = "22222222-2222-2222-2222-222222222222"
+
+    all_rows = [
+        {"roe_id": "ROE-PUBLIC", "user_id": None, "name": "Public Preset"},
+        {"roe_id": "ROE-USER-A", "user_id": user_a, "name": "User A Private Scope"},
+        {"roe_id": "ROE-USER-B", "user_id": user_b, "name": "User B Private Scope"},
+    ]
+
+    class FakeQuery:
+        def __init__(self, rows):
+            self.rows = list(rows)
+            self.filtered = False
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def order(self, *_args, **_kwargs):
+            return self
+
+        def is_(self, col, val):
+            assert col == "user_id" and val == "null"
+            self.filtered = True
+            self.rows = [r for r in self.rows if r.get("user_id") is None]
+            return self
+
+        def or_(self, expr: str):
+            self.filtered = True
+            # Format: "user_id.eq.<uuid>,user_id.is.null"
+            target_uid = expr.split("user_id.eq.")[1].split(",")[0]
+            self.rows = [r for r in self.rows if r.get("user_id") in (target_uid, None)]
+            return self
+
+        def execute(self):
+            assert self.filtered, "Unfiltered query executed on custom_roes!"
+            return type("Res", (), {"data": self.rows})()
+
+    class FakeClient:
+        def table(self, name):
+            assert name == "custom_roes"
+            return FakeQuery(all_rows)
+
+    monkeypatch.setattr(supabase_client, "get_supabase", lambda: FakeClient())
+
+    # 1. Anonymous / no identity -> public only (never User A or User B)
+    anon_roes = supabase_client.fetch_custom_roes(user_id=None)
+    assert [r["roe_id"] for r in anon_roes] == ["ROE-PUBLIC"]
+
+    # 2. Invalid UUID -> public only
+    invalid_roes = supabase_client.fetch_custom_roes(user_id="not-a-uuid")
+    assert [r["roe_id"] for r in invalid_roes] == ["ROE-PUBLIC"]
+
+    # 3. User A -> sees User A + Public, never User B
+    user_a_roes = supabase_client.fetch_custom_roes(user_id=user_a)
+    assert {r["roe_id"] for r in user_a_roes} == {"ROE-PUBLIC", "ROE-USER-A"}
+    assert all(r["roe_id"] != "ROE-USER-B" for r in user_a_roes)
+
+    # 4. User B -> sees User B + Public, never User A
+    user_b_roes = supabase_client.fetch_custom_roes(user_id=user_b)
+    assert {r["roe_id"] for r in user_b_roes} == {"ROE-PUBLIC", "ROE-USER-B"}
+    assert all(r["roe_id"] != "ROE-USER-A" for r in user_b_roes)
+
+
 def test_delete_audit_history_endpoint(client: TestClient):
     # Unauthenticated body user_id spoofing must be rejected with 401
     unauth_res = client.request(
