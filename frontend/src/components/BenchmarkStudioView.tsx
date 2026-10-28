@@ -56,7 +56,7 @@ export function BenchmarkStudioView({
 
   // Selected models state: strictly only select models that the user has keys for by default
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(() => {
-    return new Set(['anthropic/claude-sonnet-4.6', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5']);
+    return new Set(['openai/gpt-4o', 'anthropic/claude-sonnet-4.6', 'google/gemini-3-pro-preview', 'anthropic/claude-haiku-latest']);
   });
 
   // Scenario & Prompt
@@ -380,10 +380,10 @@ export function BenchmarkStudioView({
 
               <div className="benchmark-models-grid">
                 {(availableModels.length > 0 ? availableModels : [
-                  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 1000000, description: 'Personal Key Required' },
                   { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'OpenAI', tier: 'frontier', recommended: true, context_length: 128000, description: 'Flagship Multimodal' },
-                  { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 200000, description: 'Deep Tool & Logic' },
-                  { id: 'google/gemini-pro-1.5', name: 'Gemini 1.5 Pro', provider: 'Google', tier: 'frontier', recommended: true, context_length: 2000000, description: '2M Token Context' },
+                  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 1000000, description: 'Deep Reasoning & Pentest' },
+                  { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro', provider: 'Google', tier: 'frontier', recommended: true, context_length: 2000000, description: 'Next-Gen Multimodal Reasoning' },
+                  { id: 'anthropic/claude-haiku-latest', name: 'Claude Haiku', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 200000, description: 'Fast, Efficient Router' },
                 ]).map((m) => {
                   const isSelected = selectedModelIds.has(m.id);
                   const isLocked = !hasOpenRouterKey;

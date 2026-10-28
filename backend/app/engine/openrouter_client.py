@@ -2,9 +2,9 @@
 
 Target frontier models:
 - OpenAI GPT-4o (`openai/gpt-4o`)
-- Anthropic Claude 3.5 Sonnet (`anthropic/claude-3.5-sonnet`)
-- Google Gemini 1.5 Pro (`google/gemini-pro-1.5`)
-- Meta Llama 3.1 70B (`meta-llama/llama-3.1-70b-instruct`)
+- Anthropic Claude Sonnet 4.6 (`anthropic/claude-sonnet-4.6`)
+- Google Gemini 3 Pro (`google/gemini-3-pro-preview`)
+- Anthropic Claude Haiku (`anthropic/claude-haiku-latest`)
 
 Strict Zero Host Execution: Model recommendations are purely parsed and evaluated
 against the active Rules of Engagement; no subprocess commands are ever executed.
@@ -45,26 +45,17 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
         tier="frontier",
         recommended=True,
     ),
-    "anthropic/claude-3.5-sonnet": FrontierModelInfo(
-        id="anthropic/claude-3.5-sonnet",
-        name="Claude 3.5 Sonnet",
-        provider="Anthropic",
-        context_length=200000,
-        description="Leading industry model for complex coding, tool use, and computer interaction.",
-        tier="frontier",
-        recommended=True,
-    ),
-    "google/gemini-pro-1.5": FrontierModelInfo(
-        id="google/gemini-pro-1.5",
-        name="Gemini 1.5 Pro",
+    "google/gemini-3-pro-preview": FrontierModelInfo(
+        id="google/gemini-3-pro-preview",
+        name="Gemini 3 Pro",
         provider="Google",
         context_length=2000000,
-        description="Google's frontier model with multi-million token context window and cross-modal reasoning.",
+        description="Next-generation Google frontier model with advanced multimodal reasoning and long-context analysis.",
         tier="frontier",
         recommended=True,
     ),
-    "~anthropic/claude-haiku-latest": FrontierModelInfo(
-        id="~anthropic/claude-haiku-latest",
+    "anthropic/claude-haiku-latest": FrontierModelInfo(
+        id="anthropic/claude-haiku-latest",
         name="Claude Haiku",
         provider="Anthropic",
         context_length=200000,
@@ -72,39 +63,29 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
         tier="frontier",
         recommended=True,
     ),
-    "meta-llama/llama-3.1-70b-instruct": FrontierModelInfo(
-        id="meta-llama/llama-3.1-70b-instruct",
-        name="Llama 3.1 70B Instruct",
-        provider="Meta",
-        context_length=128000,
-        description="Leading open-weights frontier model by Meta, optimized for instruction following.",
-        tier="frontier",
-        recommended=True,
-    ),
 }
 
 # Supported aliases for backward compatibility or flexible slug resolution
 MODEL_ALIASES: Dict[str, str] = {
+    "gpt-4o": "openai/gpt-4o",
+    "openai/gpt-4o": "openai/gpt-4o",
     "claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
-    "claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
     "claude-sonnet": "anthropic/claude-sonnet-4.6",
     "sonnet-4.6": "anthropic/claude-sonnet-4.6",
-    "sonnet-4.5": "anthropic/claude-sonnet-4.5",
     "sonnet": "anthropic/claude-sonnet-4.6",
-    "claude-haiku": "~anthropic/claude-haiku-latest",
-    "claude-haiku-latest": "~anthropic/claude-haiku-latest",
-    "haiku": "~anthropic/claude-haiku-latest",
-    "anthropic/claude-3-haiku": "~anthropic/claude-haiku-latest",
-    "anthropic/claude-haiku-latest": "~anthropic/claude-haiku-latest",
-    "gpt-4o": "openai/gpt-4o",
-    "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
-    "claude-3-5-sonnet": "anthropic/claude-3.5-sonnet",
-    "gemini-1.5-pro": "google/gemini-pro-1.5",
-    "google/gemini-1.5-pro": "google/gemini-pro-1.5",
-    "llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
-    "llama-3.3-70b": "meta-llama/llama-3.1-70b-instruct",
-    "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct",
-    "meta-llama/llama-3.1-8b-instruct": "meta-llama/llama-3.1-70b-instruct",
+    "anthropic/claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
+    "gemini-3-pro": "google/gemini-3-pro-preview",
+    "gemini-3-pro-preview": "google/gemini-3-pro-preview",
+    "google/gemini-3-pro": "google/gemini-3-pro-preview",
+    "google/gemini-3-pro-preview": "google/gemini-3-pro-preview",
+    "gemini-3": "google/gemini-3-pro-preview",
+    "claude-haiku": "anthropic/claude-haiku-latest",
+    "claude-haiku-latest": "anthropic/claude-haiku-latest",
+    "haiku": "anthropic/claude-haiku-latest",
+    "~anthropic/claude-haiku-latest": "anthropic/claude-haiku-latest",
+    "anthropic/claude-haiku-latest": "anthropic/claude-haiku-latest",
+    "anthropic/claude-3-haiku": "anthropic/claude-haiku-latest",
+    "anthropic/claude-3.5-haiku": "anthropic/claude-haiku-latest",
 }
 
 DEFAULT_SYSTEM_PROMPT = (
