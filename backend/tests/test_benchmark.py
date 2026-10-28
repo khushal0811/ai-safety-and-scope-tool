@@ -21,8 +21,8 @@ def test_list_frontier_models():
     model_ids = {m.id for m in models}
     assert "openai/gpt-4o" in model_ids
     assert "anthropic/claude-sonnet-4.6" in model_ids
-    assert "google/gemini-3-pro-preview" in model_ids
-    assert "anthropic/claude-haiku-latest" in model_ids
+    assert "google/gemini-3.8-flash" in model_ids
+    assert "anthropic/claude-haiku-5.5" in model_ids
 
     # Check providers and names
     providers = {m.provider for m in models}
@@ -34,11 +34,12 @@ def test_list_frontier_models():
 def test_resolve_model_id():
     """Verify model alias resolution to canonical slugs."""
     assert openrouter_client.resolve_model_id("gpt-4o") == "openai/gpt-4o"
-    assert openrouter_client.resolve_model_id("gemini-3-pro") == "google/gemini-3-pro-preview"
-    assert openrouter_client.resolve_model_id("google/gemini-3-pro-preview") == "google/gemini-3-pro-preview"
-    assert openrouter_client.resolve_model_id("anthropic/claude-haiku-latest") == "anthropic/claude-haiku-latest"
-    assert openrouter_client.resolve_model_id("claude-haiku") == "anthropic/claude-haiku-latest"
-    assert openrouter_client.resolve_model_id("haiku") == "anthropic/claude-haiku-latest"
+    assert openrouter_client.resolve_model_id("gemini-3.8-flash") == "google/gemini-3.8-flash"
+    assert openrouter_client.resolve_model_id("google/gemini-3.8-flash") == "google/gemini-3.8-flash"
+    assert openrouter_client.resolve_model_id("anthropic/claude-haiku-5.5") == "anthropic/claude-haiku-5.5"
+    assert openrouter_client.resolve_model_id("claude-haiku-5.5") == "anthropic/claude-haiku-5.5"
+    assert openrouter_client.resolve_model_id("claude-haiku") == "anthropic/claude-haiku-5.5"
+    assert openrouter_client.resolve_model_id("haiku") == "anthropic/claude-haiku-5.5"
     assert openrouter_client.resolve_model_id("claude-sonnet-4.6") == "anthropic/claude-sonnet-4.6"
     assert openrouter_client.resolve_model_id("sonnet-4.6") == "anthropic/claude-sonnet-4.6"
     # Unmapped custom slug passed as-is
@@ -60,7 +61,7 @@ async def test_query_model_unauthorized_for_all_models_when_no_key():
     """Verify that all models strictly require user OpenRouter key and reject without it."""
     client_no_key = OpenRouterClient(default_api_key="")
     res = await client_no_key.query_model(
-        model_id="google/gemini-3-pro-preview",
+        model_id="google/gemini-3.8-flash",
         prompt="Scan network host",
     )
     assert res.status == "unauthorized"
@@ -144,7 +145,7 @@ async def test_query_model_handles_rate_limit_and_error():
     mock_client_401.__aexit__.return_value = None
 
     with patch("httpx.AsyncClient", return_value=mock_client_401):
-        res = await client.query_model("google/gemini-3-pro-preview", "Test")
+        res = await client.query_model("google/gemini-3.8-flash", "Test")
         assert res.status == "unauthorized"
         assert "Invalid" in res.error_message
 
@@ -159,8 +160,8 @@ def test_api_get_benchmark_models(client: TestClient):
     ids = [m["id"] for m in data]
     assert "openai/gpt-4o" in ids
     assert "anthropic/claude-sonnet-4.6" in ids
-    assert "google/gemini-3-pro-preview" in ids
-    assert "anthropic/claude-haiku-latest" in ids
+    assert "google/gemini-3.8-flash" in ids
+    assert "anthropic/claude-haiku-5.5" in ids
 
 
 def test_api_benchmark_query(client: TestClient):
