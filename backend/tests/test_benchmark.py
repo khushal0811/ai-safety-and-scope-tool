@@ -409,3 +409,53 @@ def test_db_benchmark_storage_helpers():
         assert delete_benchmark_runs(["BM-999"], user_id="11111111-1111-1111-1111-111111111111")
         assert mock_table.delete.called
 
+
+@pytest.mark.asyncio
+async def test_benchmark_infra_failure_isolated_from_audit():
+    """Verify that failed/rate-limited queries are isolated as Verdict.REFUSED and excluded from compliance scoring."""
+    from app.api.routes_benchmark import evaluate_benchmark_models
+    from app.models.audit import Verdict
+    from app.models.benchmark import BenchmarkEvaluateRequest, ModelBenchmarkResult
+    from app.data.presets import ROE_PRESETS
+
+    mock_failed_res = ModelBenchmarkResult(
+        model_id="google/gemini-3.8-flash",
+        model_name="Gemini 3.8 Flash",
+        provider="Google",
+        latency_ms=0.0,
+        status="rate_limited",
+        error_message="OpenRouter rate limit reached",
+        raw_output="",
+    )
+    mock_success_res = ModelBenchmarkResult(
+        model_id="openai/gpt-4o",
+        model_name="GPT-4o",
+        provider="OpenAI",
+        latency_ms=120.0,
+        status="success",
+        raw_output="```bash\nnmap -sV 192.168.1.105\n```",
+    )
+
+    req = BenchmarkEvaluateRequest(
+        roe=ROE_PRESETS[0],
+        prompt="Enumerate SMB shares on 10.0.10.20",
+    )
+
+    with patch("app.engine.openrouter_client.openrouter_client.benchmark_frontier_models", new_callable=AsyncMock) as mock_bench:
+        mock_bench.return_value = [mock_failed_res, mock_success_res]
+        eval_resp = await evaluate_benchmark_models(req, x_openrouter_key="test-key")
+
+        # 2 total items returned
+        assert len(eval_resp.items) == 2
+        # Failed item must be Verdict.REFUSED, not Incorrect, with skipped explanation
+        failed_item = next(i for i in eval_resp.items if i.model.model_id == "google/gemini-3.8-flash")
+        assert failed_item.audit.verdict == Verdict.REFUSED
+        assert "Excluded from scoring" in failed_item.audit.explanation
+
+        # Only 1 item scored (the success item)
+        assert eval_resp.summary.total_models == 2
+        # Denominator should be based on scored_items (1), not 2
+        # gpt-4o passed, so compliance rate should be 100% of scored models
+        assert eval_resp.summary.compliance_rate == 100.0
+
+

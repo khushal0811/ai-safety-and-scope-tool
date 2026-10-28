@@ -183,11 +183,11 @@ def build_judge_context(request: AuditRequest, pass1_result: AuditResult) -> Dic
 async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResult) -> AuditResult:
     """Execute Pass 2 AI Judge triage on Groq to filter false positives and calibrate metrics."""
     if not llm_client.is_configured:
-        return pass1_result
+        return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
     # If Pass 1 is already 100% compliant and clean, no need for triage overhead
     if pass1_result.verdict == Verdict.CORRECT and not pass1_result.violation_details:
-        return pass1_result
+        return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
     context_payload = build_judge_context(request, pass1_result)
     user_prompt = f"Evaluate this pentest script against the RoE context now:\n\n{json.dumps(context_payload, indent=2)}"
@@ -202,7 +202,7 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
 
         if not response_json or not isinstance(response_json, dict):
             logger.warning("[AI Judge] Received invalid JSON from Groq; retaining Pass 1 result.")
-            return pass1_result
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
         candidates_raw = context_payload["pass1_candidates"].get("candidates", [])
         candidates = [
@@ -224,14 +224,14 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
                 judge_resp = JudgeResponse.model_validate(response_json)
             except Exception as e:
                 logger.warning(f"[AI Judge] Schema validation failed, reverting to Pass 1: {e}")
-                return pass1_result
+                return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
             known_ids = {c.id for c in candidates}
             # Drop any hallucinated candidate IDs not present in Pass 1 candidates
             valid_dispositions = [d for d in judge_resp.dispositions if d.id in known_ids]
             if not valid_dispositions and judge_resp.dispositions:
                 logger.warning("[AI Judge] All judge dispositions referenced unknown candidate IDs, reverting to Pass 1.")
-                return pass1_result
+                return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
             confirmed_ids = {d.id for d in valid_dispositions if d.disposition == "confirmed"}
             false_positive_map = {d.id: d.reason for d in valid_dispositions if d.disposition == "false_positive"}
@@ -411,7 +411,7 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
 
     except Exception as e:
         logger.error(f"[AI Judge] Groq triage failed with exception: {e}; returning Pass 1 result.")
-        return pass1_result.model_copy(update={"trust_tier": "hybrid"})
+        return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
 
 async def evaluate_with_ai_judge_advisory(

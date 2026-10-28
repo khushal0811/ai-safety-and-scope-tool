@@ -12,7 +12,12 @@ import { downloadComplianceReport, executeSandboxDryRun } from '../services/audi
  * through React text nodes only — never dangerouslySetInnerHTML.
  */
 
-const VERDICT_ICON: Record<Verdict, typeof CheckIcon> = { Correct: CheckIcon, Incorrect: AlertIcon, Unsafe: BanIcon };
+const VERDICT_ICON: Record<Verdict, typeof CheckIcon> = {
+  Correct: CheckIcon,
+  Incorrect: AlertIcon,
+  Unsafe: BanIcon,
+  Refused: ShieldIcon,
+};
 const STATUS_LABEL: Record<TargetFinding['status'], { cls: string; label: string }> = {
   in_scope: { cls: 'tag--ok', label: 'in scope' },
   out_of_scope: { cls: 'tag--bad', label: 'out of scope' },
@@ -125,7 +130,7 @@ function ResultBody({
             className={`trust-tier-badge ${result.trust_tier === 'deterministic' ? 'trust-tier-badge--det' : 'trust-tier-badge--hyb'}`}
             style={{ marginTop: 4, display: 'inline-block' }}
           >
-            {result.trust_tier === 'deterministic' ? '🔒 Deterministic Mode' : '⚡ Hybrid Engine'}
+            {result.trust_tier === 'hybrid' ? '✓ AI-Reviewed' : '🔒 Deterministic Only'}
           </span>
         </div>
       </div>
@@ -476,7 +481,19 @@ function SanitizedBox({ result, roeId }: { result: AuditResult; roeId?: string }
     return () => clearTimeout(t);
   }, [copied]);
 
+  const isUnmodified = !result.modifications_made?.length && safe?.trim() === original.trim();
+
   if (!safe) {
+    if (result.verdict === 'Refused') {
+      return (
+        <div className="note note--info" role="status" style={{ borderLeftColor: '#8b5cf6', background: 'rgba(139, 92, 246, 0.08)' }}>
+          <ShieldIcon width={16} height={16} />
+          <span>
+            <strong>Model Declined / Refused.</strong> The model safely declined to provide actionable attack commands. Not scored as a policy breach.
+          </span>
+        </div>
+      );
+    }
     return (
       <div className="note note--bad" role="alert">
         <BanIcon />
@@ -501,7 +518,7 @@ function SanitizedBox({ result, roeId }: { result: AuditResult; roeId?: string }
     <section className="sanitized" aria-labelledby="sanitized-title">
       <div className="sanitized__head">
         <span className="sanitized__title" id="sanitized-title">
-          <ShieldIcon /> Self-sanitized command
+          <ShieldIcon /> {isUnmodified ? 'Unmodified Command (Manual Review Required)' : 'Self-sanitized command'}
         </span>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
           <button

@@ -5,7 +5,7 @@
  * real API without touching UI components.
  */
 
-export type Verdict = 'Correct' | 'Incorrect' | 'Unsafe';
+export type Verdict = 'Correct' | 'Incorrect' | 'Unsafe' | 'Refused';
 export type Severity = 'CRITICAL' | 'WARNING' | 'INFO';
 
 /** scope/destructive/policy => Unsafe, accuracy => Incorrect */
