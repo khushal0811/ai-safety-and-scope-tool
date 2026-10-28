@@ -2,17 +2,26 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AuditResult, RoeScope } from './types/audit';
 import type { PastAudit } from './types/history';
 import type { UserProfile } from './types/user';
+import type { BenchmarkEvaluateResponse, BenchmarkRunRecord } from './types/benchmark';
 import { ROE_PRESETS } from './data/presets';
 import { buildExamples, MODELS, type PromptExample } from './data/models';
 import { runAudit, queryLiveModel } from './services/auditService';
 import { getStoredUser, saveUser, initSupabaseAuthListener } from './lib/authStore';
 import { getPastAudits, savePastAudit, deletePastAudits, clearPastAudits, syncPastAuditsFromCloud } from './lib/historyStore';
+import {
+  getPastBenchmarks,
+  savePastBenchmark,
+  deletePastBenchmarks,
+  clearPastBenchmarks,
+  syncPastBenchmarksFromCloud,
+} from './lib/benchmarkStore';
 import { getOpenRouterKey, fetchVaultStatus } from './lib/keyStore';
 import { NavBar, type AppPage } from './components/NavBar';
 import { RoeSelector, type RoeMode } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
 import { AuditResultView } from './components/AuditResultView';
 import { PastAuditsView } from './components/PastAuditsView';
+import { PastBenchmarksView } from './components/PastBenchmarksView';
 import { BenchmarkStudioView } from './components/BenchmarkStudioView';
 import { SettingsView } from './components/SettingsView';
 import { AuthLandingPage } from './components/AuthLandingPage';
@@ -42,6 +51,11 @@ export default function App() {
 
   // Past Audits history state (Strict Privacy: empty for guests)
   const [audits, setAudits] = useState<PastAudit[]>(() => (user ? getPastAudits(user.id) : []));
+
+  // Past Benchmarks history state (Strict Privacy: empty for guests)
+  const [benchmarks, setBenchmarks] = useState<BenchmarkRunRecord[]>(() =>
+    user ? getPastBenchmarks(user.id) : []
+  );
 
   // Studio state
   const [roeMode, setRoeMode] = useState<RoeMode>('preset');
@@ -130,18 +144,22 @@ export default function App() {
     }
   }, [user?.id]);
 
-  // Synchronize past audits with Supabase PostgreSQL cloud database (Strictly isolated by user_id)
+  // Synchronize past audits & past benchmarks with Supabase PostgreSQL cloud database (Strictly isolated by user_id)
   useEffect(() => {
     if (user) {
       syncPastAuditsFromCloud(user.id).then(setAudits);
+      syncPastBenchmarksFromCloud(user.id).then(setBenchmarks);
     } else {
       setAudits([]);
+      setBenchmarks([]);
     }
   }, [user, page]);
 
   function handleLogin(u: UserProfile) {
     setUser(u);
     saveUser(u);
+    setBenchmarks(getPastBenchmarks(u.id));
+    syncPastBenchmarksFromCloud(u.id).then(setBenchmarks);
     try {
       const completed = localStorage.getItem(`sst.initial_setup_completed_${u.id}`);
       if (!completed) {
@@ -156,19 +174,76 @@ export default function App() {
     setUser(null);
     saveUser(null);
     setAudits([]);
+    setBenchmarks([]);
     setGuestMode(false);
     setPage('studio');
   }
 
   function handleClearHistory() {
     clearPastAudits(user?.id);
+    clearPastBenchmarks(user?.id);
     setAudits([]);
+    setBenchmarks([]);
   }
 
   async function handleDeleteAudits(auditIds: string[]) {
-    if (!user) return;
-    const updated = await deletePastAudits(auditIds, user.id);
-    setAudits(updated);
+    if (user) {
+      const updated = await deletePastAudits(auditIds, user.id);
+      setAudits(updated);
+    } else {
+      const toDelete = new Set(auditIds);
+      setAudits((prev) => prev.filter((a) => !toDelete.has(a.id)));
+    }
+  }
+
+  async function handleDeleteBenchmarks(benchmarkIds: string[]) {
+    if (user) {
+      const updated = await deletePastBenchmarks(benchmarkIds, user.id);
+      setBenchmarks(updated);
+    } else {
+      const toDelete = new Set(benchmarkIds);
+      setBenchmarks((prev) => prev.filter((b) => !toDelete.has(b.benchmark_id)));
+    }
+  }
+
+  function handleBenchmarkComplete(res: BenchmarkEvaluateResponse) {
+    const modelItems = res.items || [];
+    const summary = res.summary || {
+      total_models: modelItems.length,
+      correct_count: modelItems.filter((i) => i.audit?.verdict === 'Correct').length,
+      unsafe_count: modelItems.filter((i) => i.audit?.verdict === 'Unsafe').length,
+      incorrect_count: modelItems.filter((i) => i.audit?.verdict === 'Incorrect').length,
+      compliance_rate: 100,
+      scope_violation_rate: 0,
+      hallucination_rate: 0,
+      average_latency_ms: 0,
+    };
+
+    const record: BenchmarkRunRecord = {
+      benchmark_id: res.benchmark_id || `bm_${Date.now()}`,
+      created_at: new Date().toISOString(),
+      user_id: user?.id || null,
+      scenario_title: res.scenario_title || 'Custom Benchmark',
+      prompt: res.prompt,
+      roe_id: res.roe_id || 'custom-roe',
+      compliance_rate: summary.compliance_rate,
+      scope_violation_rate: summary.scope_violation_rate,
+      scope_violation_count: summary.scope_violation_count,
+      hallucination_rate: summary.hallucination_rate,
+      average_latency_ms: summary.average_latency_ms,
+      total_models: summary.total_models || modelItems.length,
+      fastest_model: summary.fastest_model || undefined,
+      summary,
+      items: modelItems,
+    };
+
+    if (user) {
+      const updated = savePastBenchmark(record, user.id);
+      setBenchmarks(updated);
+    } else {
+      // In-session memory for active guest session
+      setBenchmarks((prev) => [record, ...prev.filter((b) => b.benchmark_id !== record.benchmark_id)]);
+    }
   }
 
   const activeScope = roeMode === 'preset' ? ROE_PRESETS.find((p) => p.roe_id === presetId) ?? null : customScope;
@@ -224,24 +299,25 @@ export default function App() {
       setResult(res);
       setStep(3); // Transition into Step 3 (Audit Verdict & Safe Rewriter)
 
-      // Automatically record audit to Past Audits store ONLY for authenticated users
-      if (user) {
-        const modelObj = MODELS.find((m) => m.id === modelId);
-        const newAudit: PastAudit = {
-          id: res.audit_id || 'aud_' + Math.random().toString(36).substring(2, 8),
-          timestamp: new Date().toISOString(),
-          roeId: activeScope.roe_id,
-          roeName: activeScope.name,
-          modelId,
-          modelName: modelObj ? modelObj.label : modelId,
-          prompt: prompt.trim() || 'Custom Prompt',
-          proposedCommand: modelOutput.trim(),
-          executionTimeMs: 34,
-          result: res,
-        };
+      const modelObj = MODELS.find((m) => m.id === modelId);
+      const newAudit: PastAudit = {
+        id: res.audit_id || 'aud_' + Math.random().toString(36).substring(2, 8),
+        timestamp: new Date().toISOString(),
+        roeId: activeScope.roe_id,
+        roeName: activeScope.name,
+        modelId,
+        modelName: modelObj ? modelObj.label : modelId,
+        prompt: prompt.trim() || 'Custom Prompt',
+        proposedCommand: modelOutput.trim(),
+        executionTimeMs: 34,
+        result: res,
+      };
 
+      if (user) {
         const updated = savePastAudit(newAudit, user.id);
         setAudits(updated);
+      } else {
+        setAudits((prev) => [newAudit, ...prev.filter((a) => a.id !== newAudit.id)]);
       }
     } finally {
       setLoading(false);
@@ -291,6 +367,7 @@ export default function App() {
         activePage={page}
         onNavigate={setPage}
         auditCount={audits.length}
+        benchmarkCount={benchmarks.length}
         currentUser={user}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
@@ -443,10 +520,28 @@ export default function App() {
           }}
           currentUser={user}
           onNavigateSettings={() => setPage('settings')}
+          onNavigatePastBenchmarks={() => setPage('past-benchmarks')}
+          onBenchmarkComplete={handleBenchmarkComplete}
+          pastBenchmarkCount={benchmarks.length}
         />
       )}
 
-      {/* PAGE 4: DEDICATED SETTINGS PAGE */}
+      {/* PAGE 4: PAST BENCHMARKS HISTORY */}
+      {page === 'past-benchmarks' && (
+        <PastBenchmarksView
+          benchmarks={benchmarks}
+          currentUser={user}
+          onDeleteBenchmarks={handleDeleteBenchmarks}
+          onOpenLogin={() => setAuthModalOpen(true)}
+          onSyncCloud={async () => {
+            const synced = await syncPastBenchmarksFromCloud(user?.id);
+            setBenchmarks(synced);
+          }}
+          onNavigateBenchmarkStudio={() => setPage('benchmark')}
+        />
+      )}
+
+      {/* PAGE 5: DEDICATED SETTINGS PAGE */}
       {page === 'settings' && (
         <SettingsView
           currentUser={user}

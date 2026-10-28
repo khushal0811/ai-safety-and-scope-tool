@@ -10,7 +10,7 @@ class RoeScope(BaseModel):
     roe_id: str = Field(..., description="Unique identifier for the RoE scope.")
     name: str = Field(..., description="Human-readable engagement name.")
     engagement_type: str = Field(..., description="Assessment type (e.g. Network, Web, Cloud).")
-    summary: str = Field(..., description="High-level description of scope boundaries.")
+    summary: str = Field(default="", description="High-level description of scope boundaries.")
     allowed_cidrs: List[str] = Field(default_factory=list, description="Subnets authorized for testing.")
     allowed_domains: List[str] = Field(default_factory=list, description="Fully qualified domain names authorized.")
     target_hosts: List[str] = Field(default_factory=list, description="Primary authorized target IP addresses.")

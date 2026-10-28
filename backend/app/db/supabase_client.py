@@ -3,10 +3,12 @@
 Zero Host Execution: Operates strictly over HTTPS via Supabase REST/PostgREST.
 """
 
+import json
 import logging
 import os
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
@@ -175,78 +177,114 @@ def fetch_audit_metrics(user_id: Optional[str] = None) -> Dict[str, Any]:
         return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
 
+LOCAL_BENCHMARKS_FILE = os.path.join(os.path.dirname(__file__), "benchmark_runs_local.json")
+
+
+def _load_local_benchmarks() -> List[Dict[str, Any]]:
+    if not os.path.exists(LOCAL_BENCHMARKS_FILE):
+        return []
+    try:
+        with open(LOCAL_BENCHMARKS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"[LocalBenchmarkStore] Read error: {e}")
+        return []
+
+
+def _save_local_benchmarks(data: List[Dict[str, Any]]) -> None:
+    try:
+        with open(LOCAL_BENCHMARKS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        logger.warning(f"[LocalBenchmarkStore] Write error: {e}")
+
+
 def save_benchmark_run(
     benchmark_data: Dict[str, Any],
     user_id: Optional[str] = None,
 ) -> bool:
-    """Save an evaluated multi-LLM benchmark run to the public.benchmark_runs table.
+    """Save an evaluated multi-LLM benchmark run to PostgreSQL table benchmark_runs with local storage guarantee.
     
     Strict Privacy Rule: Only persists when user_id is a valid UUID. Guest runs are never stored.
     """
     if not is_valid_uuid(user_id):
         return False
 
+    created_at = benchmark_data.get("created_at") or datetime.now(timezone.utc).isoformat()
+    payload = {
+        "benchmark_id": benchmark_data.get("benchmark_id"),
+        "user_id": user_id,
+        "roe_id": benchmark_data.get("roe_id") or "UNKNOWN",
+        "scenario_title": benchmark_data.get("scenario_title") or "Custom Benchmark",
+        "prompt": benchmark_data.get("prompt", ""),
+        "total_models": benchmark_data.get("total_models", 0),
+        "compliance_rate": benchmark_data.get("compliance_rate", 0.0),
+        "scope_violation_rate": benchmark_data.get("scope_violation_rate", 0.0),
+        "scope_violation_count": benchmark_data.get("scope_violation_count", 0),
+        "policy_violation_rate": benchmark_data.get("policy_violation_rate", 0.0),
+        "policy_violation_count": benchmark_data.get("policy_violation_count", 0),
+        "hallucination_rate": benchmark_data.get("hallucination_rate", 0.0),
+        "average_latency_ms": benchmark_data.get("average_latency_ms", 0.0),
+        "fastest_model": benchmark_data.get("fastest_model"),
+        "summary": benchmark_data.get("summary", {}),
+        "items": benchmark_data.get("items", []),
+        "created_at": created_at,
+    }
+
+    # 1. Guarantee persistence in local backup store
+    local_runs = _load_local_benchmarks()
+    filtered = [r for r in local_runs if r.get("benchmark_id") != payload["benchmark_id"]]
+    _save_local_benchmarks([payload, *filtered])
+
+    # 2. Persist to Supabase if connected
     client = get_supabase()
-    if not client:
-        return False
+    if client:
+        try:
+            client.table("benchmark_runs").insert(payload).execute()
+        except Exception as e:
+            logger.warning(f"[Supabase] Table insert failed (local backup active): {e}")
 
-    try:
-        payload = {
-            "benchmark_id": benchmark_data.get("benchmark_id"),
-            "user_id": user_id,
-            "roe_id": benchmark_data.get("roe_id") or "UNKNOWN",
-            "scenario_title": benchmark_data.get("scenario_title") or "Custom Benchmark",
-            "prompt": benchmark_data.get("prompt", ""),
-            "total_models": benchmark_data.get("total_models", 0),
-            "compliance_rate": benchmark_data.get("compliance_rate", 0.0),
-            "scope_violation_rate": benchmark_data.get("scope_violation_rate", 0.0),
-            "policy_violation_rate": benchmark_data.get("policy_violation_rate", 0.0),
-            "hallucination_rate": benchmark_data.get("hallucination_rate", 0.0),
-            "average_latency_ms": benchmark_data.get("average_latency_ms", 0.0),
-            "fastest_model": benchmark_data.get("fastest_model"),
-            "summary": benchmark_data.get("summary", {}),
-            "items": benchmark_data.get("items", []),
-        }
-
-        client.table("benchmark_runs").insert(payload).execute()
-        return True
-    except Exception as e:
-        logger.error(f"[Supabase] Failed to persist benchmark run: {e}")
-        return False
+    return True
 
 
 def fetch_benchmark_history(user_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-    """Retrieve benchmark run history from PostgreSQL benchmark_runs table for authenticated user only."""
+    """Retrieve benchmark run history from PostgreSQL benchmark_runs table or local store."""
     if not is_valid_uuid(user_id):
         return []
 
     client = get_supabase()
-    if not client:
-        return []
+    if client:
+        try:
+            res = client.table("benchmark_runs").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+            if res.data and len(res.data) > 0:
+                return res.data
+        except Exception as e:
+            logger.info(f"[Supabase] Fetching from cloud failed, using local store: {e}")
 
-    try:
-        res = client.table("benchmark_runs").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
-        return res.data or []
-    except Exception as e:
-        logger.error(f"[Supabase] Failed to fetch benchmark history: {e}")
-        return []
+    # Fallback to local store
+    local_runs = _load_local_benchmarks()
+    user_runs = [r for r in local_runs if str(r.get("user_id")) == str(user_id)]
+    user_runs.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    return user_runs[:limit]
 
 
 def delete_benchmark_runs(benchmark_ids: List[str], user_id: str) -> bool:
-    """Permanently delete one or more benchmark runs from PostgreSQL table benchmark_runs."""
+    """Permanently delete one or more benchmark runs from Supabase and local store."""
     if not is_valid_uuid(user_id) or not benchmark_ids:
         return False
 
     client = get_supabase()
-    if not client:
-        return False
+    if client:
+        try:
+            client.table("benchmark_runs").delete().in_("benchmark_id", benchmark_ids).eq("user_id", user_id).execute()
+        except Exception as e:
+            logger.warning(f"[Supabase] Cloud delete failed: {e}")
 
-    try:
-        client.table("benchmark_runs").delete().in_("benchmark_id", benchmark_ids).eq("user_id", user_id).execute()
-        return True
-    except Exception as e:
-        logger.error(f"[Supabase] Failed to delete benchmark runs: {e}")
-        return False
+    local_runs = _load_local_benchmarks()
+    to_delete = set(benchmark_ids)
+    remaining = [r for r in local_runs if not (r.get("benchmark_id") in to_delete and str(r.get("user_id")) == str(user_id))]
+    _save_local_benchmarks(remaining)
+    return True
 
 
 def fetch_roe_presets() -> List[Dict[str, Any]]:
