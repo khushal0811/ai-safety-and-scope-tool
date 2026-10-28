@@ -40,11 +40,11 @@ export function NavBar({
     <header className="nav">
       <div className="container nav__inner">
         {/* Brand */}
-        <div className="brand" onClick={() => onNavigate('studio')} style={{ cursor: 'pointer' }}>
-          <span className="brand__mark" style={{ width: 26, height: 26, padding: 3 }}>
-            <VallumIcon width={20} height={20} />
+        <div className="brand" onClick={() => onNavigate('studio')} style={{ cursor: 'pointer', gap: 10 }}>
+          <span className="brand__mark" style={{ width: 34, height: 34, padding: 4 }}>
+            <VallumIcon width={25} height={25} />
           </span>
-          <span style={{ fontWeight: 800, fontSize: 15.5, letterSpacing: '0.02em', color: 'var(--text)' }}>
+          <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: '-0.01em', color: 'var(--text)' }}>
             Vallum
           </span>
           <span className="brand__sub" style={{ display: 'none' }}>AI Safety &amp; Scope Boundary Engine</span>
