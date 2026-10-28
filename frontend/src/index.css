@@ -280,17 +280,25 @@ button { font: inherit; color: inherit; }
 .nav__actions { display: flex; align-items: center; gap: 8px; }
 
 .status-pill {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 28px; padding: 0 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 9px;
   border: 1px solid var(--border-s); border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 11px; color: var(--text-muted); background: var(--surface);
+  white-space: nowrap;
 }
 .status-pill__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn-fg); }
 .status-pill__dot--live {
   background: var(--healthy);
   box-shadow: 0 0 6px var(--healthy);
   animation: wipPulse 2.5s ease-in-out infinite;
+}
+
+.btn--icon-active {
+  background: var(--surface-raised) !important;
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 @keyframes wipPulse {
@@ -746,28 +754,29 @@ button { font: inherit; color: inherit; }
 .nav-page-tabs {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   background: var(--surface-sunken);
   border: 1px solid var(--border-s);
-  padding: 3px;
+  padding: 2.5px;
   border-radius: 6px;
 }
 
 .nav-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 14px;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
   border: 0;
   background: transparent;
   color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.18s ease;
+  white-space: nowrap;
 }
 
 .nav-tab:hover {
@@ -776,7 +785,7 @@ button { font: inherit; color: inherit; }
 }
 
 .nav-tab--active {
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--accent);
   box-shadow: var(--shadow);
   font-weight: 600;
@@ -1945,29 +1954,36 @@ button { font: inherit; color: inherit; }
 .trust-tier-toggle {
   display: inline-flex;
   align-items: center;
-  background: var(--sunken, #1e1e24);
-  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-s);
   border-radius: 20px;
   padding: 2px;
   gap: 2px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 1px 2px rgba(60, 55, 50, 0.08);
+}
+
+[data-theme='dark'] .trust-tier-toggle {
+  background: var(--surface-sunken);
+  border-color: var(--border);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .trust-tier-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 10px;
-  border-radius: 16px;
+  padding: 3px 9px;
+  border-radius: 14px;
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-subtle);
+  color: var(--text-muted);
   background: transparent;
   border: none;
   cursor: pointer;
   transition: all 0.15s ease;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .trust-tier-btn:hover {
@@ -1975,9 +1991,14 @@ button { font: inherit; color: inherit; }
 }
 
 .trust-tier-btn--active {
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--text);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow);
+}
+
+[data-theme='dark'] .trust-tier-btn--active {
+  background: var(--surface-raised);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .trust-tier-btn__dot {
@@ -2061,5 +2082,72 @@ button { font: inherit; color: inherit; }
   flex: 1;
 }
 
+/* ==========================================================================
+   Key Protection Popover Overlay (Light & Dark Theme Harmonized)
+   ========================================================================== */
 
+.key-protection-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  width: 340px;
+  max-width: 90vw;
+  padding: 14px 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg, 6px);
+  box-shadow: 0 12px 30px -4px rgba(60, 55, 50, 0.16), 0 4px 10px -2px rgba(60, 55, 50, 0.08), 0 0 0 1px var(--border);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+  z-index: 1000;
+  pointer-events: none;
+  text-align: left;
+}
 
+[data-theme='dark'] .key-protection-popover {
+  background: var(--surface-raised);
+  border-color: rgba(98, 114, 240, 0.35);
+  box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(98, 114, 240, 0.2);
+}
+
+.key-protection-popover__title {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.key-protection-popover__body {
+  color: var(--text-muted);
+}
+
+.key-protection-popover__arrow {
+  position: absolute;
+  top: 100%;
+  right: 28px;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--border-strong);
+}
+
+.key-protection-popover__arrow-inner {
+  position: absolute;
+  top: 100%;
+  right: 29px;
+  margin-top: -1px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--surface-raised);
+}
+
+[data-theme='dark'] .key-protection-popover__arrow {
+  border-top-color: rgba(98, 114, 240, 0.35);
+}
