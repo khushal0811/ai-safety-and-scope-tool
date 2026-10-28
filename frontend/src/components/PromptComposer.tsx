@@ -46,8 +46,8 @@ export function PromptComposer(p: Props) {
                 ● OpenRouter Connected
               </span>
             ) : (
-              <span className="tag" style={{ fontSize: 11 }}>
-                Built-in System Tier (Free)
+              <span className="tag tag--warn" style={{ fontSize: 11, color: 'var(--warn-fg)' }}>
+                ⚠ OpenRouter Key Required
               </span>
             )}
           </div>
@@ -58,10 +58,10 @@ export function PromptComposer(p: Props) {
             onChange={(e) => p.onModelChange(e.target.value)}
           >
             {MODELS.map((m) => {
-              const isLocked = m.requiresOpenRouter && !p.hasOpenRouterKey;
+              const isLocked = !p.hasOpenRouterKey;
               return (
                 <option key={m.id} value={m.id} disabled={isLocked}>
-                  {isLocked ? `🔒 ${m.label} — ${m.vendor} (Requires OpenRouter Key)` : `${m.label} — ${m.vendor}`}
+                  {isLocked ? `🔒 ${m.label} — ${m.vendor} (Requires Key)` : `${m.label} — ${m.vendor}`}
                 </option>
               );
             })}
@@ -70,15 +70,15 @@ export function PromptComposer(p: Props) {
           {!p.hasOpenRouterKey && (
             <div className="model-key-banner">
               <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                <KeyIcon width={16} height={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                <KeyIcon width={16} height={16} style={{ color: 'var(--warn-fg)', flexShrink: 0 }} />
                 <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5 }}>
-                  To access more models, configure your OpenRouter API key in the{' '}
+                  <strong>OpenRouter API Key Required:</strong> Live model queries and automated audits require your personal OpenRouter API key. Server system keys are disabled for user tasks. Please enter your key in{' '}
                   <button
                     type="button"
                     className="inline-link-btn"
                     onClick={p.onNavigateToSettings}
                   >
-                    settings page
+                    Settings
                   </button>
                   .
                 </div>
@@ -119,25 +119,38 @@ export function PromptComposer(p: Props) {
             <span className="muted" style={{ fontSize: 12 }}>
               Ask the selected model live, or paste command outputs manually below.
             </span>
-            <button
-              type="button"
-              id="query-model-btn"
-              className="btn btn--sm btn--primary row"
-              style={{ gap: 6 }}
-              disabled={!p.prompt.trim() || p.queryingModel || p.loading}
-              onClick={p.onQueryLiveModel}
-              title={`Query ${selectedModel.label} with this prompt`}
-            >
-              {p.queryingModel ? (
-                <>
-                  <span className="spinner" style={{ width: 13, height: 13 }} /> Querying {selectedModel.label}…
-                </>
-              ) : (
-                <>
-                  <SparkIcon width={14} height={14} /> Ask Model Live ⚡
-                </>
-              )}
-            </button>
+            {!p.hasOpenRouterKey ? (
+              <button
+                type="button"
+                id="query-model-btn"
+                className="btn btn--sm btn--primary row"
+                style={{ gap: 6, background: 'var(--warn-fg)', borderColor: 'var(--warn-fg)' }}
+                onClick={p.onNavigateToSettings}
+                title="Enter your personal OpenRouter API key in Settings to ask models live"
+              >
+                <KeyIcon width={14} height={14} /> Configure Key to Ask Live ⚡
+              </button>
+            ) : (
+              <button
+                type="button"
+                id="query-model-btn"
+                className="btn btn--sm btn--primary row"
+                style={{ gap: 6 }}
+                disabled={!p.prompt.trim() || p.queryingModel || p.loading}
+                onClick={p.onQueryLiveModel}
+                title={`Query ${selectedModel.label} with this prompt`}
+              >
+                {p.queryingModel ? (
+                  <>
+                    <span className="spinner" style={{ width: 13, height: 13 }} /> Querying {selectedModel.label}…
+                  </>
+                ) : (
+                  <>
+                    <SparkIcon width={14} height={14} /> Ask Model Live ⚡
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
 
