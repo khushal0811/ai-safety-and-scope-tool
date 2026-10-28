@@ -134,7 +134,7 @@ class OpenRouterClient:
         api_key: Optional[str] = None,
         groq_key: Optional[str] = None,
         temperature: float = 0.0,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
         timeout: float = 40.0,
     ) -> ModelBenchmarkResult:
         """Query a single model strictly using the user's personal OpenRouter API key."""
@@ -196,7 +196,10 @@ class OpenRouterClient:
                     choices = data.get("choices", [])
                     raw_content = ""
                     if choices:
-                        raw_content = choices[0].get("message", {}).get("content", "")
+                        msg = choices[0].get("message", {})
+                        raw_content = msg.get("content") or msg.get("refusal") or ""
+                        if not isinstance(raw_content, str):
+                            raw_content = ""
 
                     usage = data.get("usage", {})
                     prompt_tokens = usage.get("prompt_tokens", 0)
@@ -309,7 +312,10 @@ class OpenRouterClient:
                     choices = data.get("choices", [])
                     raw_content = ""
                     if choices:
-                        raw_content = choices[0].get("message", {}).get("content", "")
+                        msg = choices[0].get("message", {})
+                        raw_content = msg.get("content") or msg.get("refusal") or ""
+                        if not isinstance(raw_content, str):
+                            raw_content = ""
 
                     usage = data.get("usage", {})
                     prompt_tokens = usage.get("prompt_tokens", 0)
@@ -357,7 +363,7 @@ class OpenRouterClient:
         api_key: Optional[str] = None,
         groq_key: Optional[str] = None,
         temperature: float = 0.0,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
         timeout: float = 40.0,
     ) -> List[ModelBenchmarkResult]:
         """Dispatch parallel queries across frontier models."""
