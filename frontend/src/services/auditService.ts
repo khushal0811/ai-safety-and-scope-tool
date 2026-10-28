@@ -108,7 +108,7 @@ export async function runAudit(req: AuditRequest, userId?: string): Promise<Audi
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify(req),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(60000),
     });
 
     if (res.ok) {
@@ -135,7 +135,7 @@ export async function parseRoeText(content: string, filename?: string, userId?: 
     method: 'POST',
     headers: getApiHeaders(),
     body: JSON.stringify({ content, filename: filename || 'custom_roe.md' }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(60000),
   });
 
   if (!res.ok) {
@@ -167,7 +167,7 @@ export async function parseRoeFile(file: File, userId?: string): Promise<RoeScop
     method: 'POST',
     headers: fileHeaders,
     body: formData,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(60000),
   });
 
   if (!res.ok) {
@@ -309,7 +309,7 @@ export async function executeSandboxDryRun(
       roe_id: roeId || 'ROE-PRESET-NET-001',
       strict_syntax: strictSyntax,
     }),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!res.ok) {
