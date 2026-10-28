@@ -83,8 +83,45 @@ function ResultBody({
           {result.audit_id}
           <br />
           {modelLabel}
+          <br />
+          <span
+            className={`trust-tier-badge ${result.trust_tier === 'deterministic' ? 'trust-tier-badge--det' : 'trust-tier-badge--hyb'}`}
+            style={{ marginTop: 4, display: 'inline-block' }}
+          >
+            {result.trust_tier === 'deterministic' ? '🔒 Deterministic Mode' : '⚡ Hybrid Engine'}
+          </span>
         </div>
       </div>
+
+      {result.ai_judge_notes && result.ai_judge_notes.length > 0 ? (
+        <section className="card advisory-card" aria-labelledby="advisory-title" style={{ marginTop: 12 }}>
+          <div className="card__header" style={{ paddingBottom: 8 }}>
+            <span className="step-index" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', borderColor: 'rgba(234, 179, 8, 0.3)' }}>
+              AI
+            </span>
+            <div>
+              <h2 className="card__title" id="advisory-title" style={{ fontSize: 14 }}>
+                AI Judge Advisory Observations
+              </h2>
+              <p className="card__desc">
+                {result.trust_tier === 'deterministic'
+                  ? 'Deterministic-Only Mode is active: the Pass 1 AST verdict is locked and strictly authoritative. The following LPU observations are provided as advisory annotations.'
+                  : 'Contextual triage observations from the Pass 2 AI Judge.'}
+              </p>
+            </div>
+          </div>
+          <div className="card__body" style={{ paddingTop: 0 }}>
+            <ul className="advisory-list">
+              {result.ai_judge_notes.map((note, i) => (
+                <li key={i} className="advisory-item">
+                  <span className="advisory-bullet">•</span>
+                  <span className="advisory-text">{note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      ) : null}
 
       {result.verdict !== 'Correct' ? <SanitizedBox result={result} /> : null}
 

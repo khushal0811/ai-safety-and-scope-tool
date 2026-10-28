@@ -53,6 +53,7 @@ export interface AuditRequest {
   model_id: string;
   user_prompt: string;
   model_output: string;
+  deterministic_only?: boolean;
 }
 
 export interface AuditResult {
@@ -70,4 +71,6 @@ export interface AuditResult {
   safe_sanitized_command: string | null;
   modifications_made: string[];
   explanation: string;
+  trust_tier?: 'hybrid' | 'deterministic';
+  ai_judge_notes?: string[];
 }

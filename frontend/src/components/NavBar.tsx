@@ -14,6 +14,8 @@ interface Props {
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenAuth: () => void;
+  trustTier: 'hybrid' | 'deterministic';
+  onSelectTrustTier: (tier: 'hybrid' | 'deterministic') => void;
 }
 
 export function NavBar({
@@ -25,6 +27,8 @@ export function NavBar({
   theme,
   onToggleTheme,
   onOpenAuth,
+  trustTier,
+  onSelectTrustTier,
 }: Props) {
   const [live, setLive] = useState<boolean>(isLiveMode());
 
@@ -88,6 +92,28 @@ export function NavBar({
 
         {/* Right Actions */}
         <div className="nav__actions">
+          {/* Trust Tier Switcher */}
+          <div className="trust-tier-toggle" role="group" aria-label="Engine trust tier">
+            <button
+              type="button"
+              className={`trust-tier-btn ${trustTier === 'hybrid' ? 'trust-tier-btn--active' : ''}`}
+              onClick={() => onSelectTrustTier('hybrid')}
+              title="Hybrid Mode: Pass 1 AST static parser + Pass 2 Groq AI Judge context layer"
+            >
+              <span className="trust-tier-btn__dot trust-tier-btn__dot--hybrid" />
+              <span>Hybrid</span>
+            </button>
+            <button
+              type="button"
+              className={`trust-tier-btn ${trustTier === 'deterministic' ? 'trust-tier-btn--active' : ''}`}
+              onClick={() => onSelectTrustTier('deterministic')}
+              title="Deterministic-Only Mode: Strict Pass 1 AST engine authoritative. AI Judge is advisory only."
+            >
+              <span className="trust-tier-btn__dot trust-tier-btn__dot--deterministic" />
+              <span>Deterministic</span>
+            </button>
+          </div>
+
           {/* Status pill */}
           <span
             className="status-pill"
