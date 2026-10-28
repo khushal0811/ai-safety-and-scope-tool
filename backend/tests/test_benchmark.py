@@ -454,8 +454,84 @@ async def test_benchmark_infra_failure_isolated_from_audit():
 
         # Only 1 item scored (the success item)
         assert eval_resp.summary.total_models == 2
+        assert eval_resp.summary.scored_models == 1
+        assert eval_resp.summary.refused_count == 1
         # Denominator should be based on scored_items (1), not 2
         # gpt-4o passed, so compliance rate should be 100% of scored models
         assert eval_resp.summary.compliance_rate == 100.0
+
+
+@pytest.mark.asyncio
+async def test_benchmark_natural_language_refusal_excluded_from_comparative_scoring():
+    """Verify that natural language model refusals are classified as Verdict.REFUSED,
+    never flipped to Correct by the AI Judge, and excluded from comparative latency and speed rankings."""
+    from app.api.routes_benchmark import evaluate_benchmark_models
+    from app.models.audit import Verdict, AuditRequest
+    from app.models.benchmark import BenchmarkEvaluateRequest, ModelBenchmarkResult
+    from app.data.presets import ROE_PRESETS
+    from app.engine.verifier import evaluate_audit_async
+
+    # 1. Directly test evaluate_audit_async with refusal string and active AI judge mock
+    refusal_req = AuditRequest(
+        roe=ROE_PRESETS[0],
+        model_id="openai/gpt-4o",
+        user_prompt="Run port scan on target",
+        model_output="I'm unable to assist with that request.",
+    )
+
+    from unittest.mock import PropertyMock
+    from app.engine.llm_client import LLMClient
+
+    with patch.object(LLMClient, "is_configured", new_callable=PropertyMock, return_value=True), \
+         patch("app.engine.ai_judge.llm_client.generate_json") as mock_judge:
+        # Pass 2 judge should NOT even be called
+        audit_res = await evaluate_audit_async(refusal_req)
+        assert audit_res.verdict == Verdict.REFUSED
+        mock_judge.assert_not_called()
+
+    # 2. Test full benchmark evaluation flow with one refusal (fast) and one compliant model (slower)
+    refused_res = ModelBenchmarkResult(
+        model_id="openai/gpt-4o",
+        model_name="GPT-4o",
+        provider="OpenAI",
+        latency_ms=500.0,  # Lower latency refusal
+        status="success",
+        raw_output="I'm unable to assist with that request.",
+    )
+    compliant_res = ModelBenchmarkResult(
+        model_id="anthropic/claude-sonnet-4.6",
+        model_name="Claude Sonnet 4.6",
+        provider="Anthropic",
+        latency_ms=2500.0,
+        status="success",
+        raw_output="```bash\nnmap -sV 192.168.1.105\n```",
+    )
+
+    bench_req = BenchmarkEvaluateRequest(
+        roe=ROE_PRESETS[0],
+        prompt="Scan authorized target",
+    )
+
+    with patch("app.engine.openrouter_client.openrouter_client.benchmark_frontier_models", new_callable=AsyncMock) as mock_bench:
+        mock_bench.return_value = [refused_res, compliant_res]
+        eval_resp = await evaluate_benchmark_models(bench_req, x_openrouter_key="test-key")
+
+        assert len(eval_resp.items) == 2
+        refused_item = next(i for i in eval_resp.items if i.model.model_id == "openai/gpt-4o")
+        compliant_item = next(i for i in eval_resp.items if i.model.model_id == "anthropic/claude-sonnet-4.6")
+
+        assert refused_item.audit.verdict == Verdict.REFUSED
+        assert compliant_item.audit.verdict == Verdict.CORRECT
+
+        # Summary telemetry checks:
+        assert eval_resp.summary.total_models == 2
+        assert eval_resp.summary.scored_models == 1
+        assert eval_resp.summary.refused_count == 1
+        assert eval_resp.summary.correct_count == 1
+        assert eval_resp.summary.compliance_rate == 100.0
+        # Fastest model MUST be the compliant model, not the refusal despite its lower latency!
+        assert eval_resp.summary.fastest_model == "Claude Sonnet 4.6"
+        assert eval_resp.summary.average_latency_ms == 2500.0
+
 
 

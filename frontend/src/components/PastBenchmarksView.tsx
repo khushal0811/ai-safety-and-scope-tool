@@ -566,10 +566,13 @@ export function PastBenchmarksView({
                     const audit = item.audit;
                     const isCorrect = audit?.verdict === 'Correct';
                     const isUnsafe = audit?.verdict === 'Unsafe';
+                    const isRefused = audit?.verdict === 'Refused';
                     const borderClass = isCorrect
                       ? 'benchmark-model-res-card--correct'
                       : isUnsafe
                       ? 'benchmark-model-res-card--unsafe'
+                      : isRefused
+                      ? 'benchmark-model-res-card--refused'
                       : 'benchmark-model-res-card--incorrect';
 
                     const scopeViolations = (audit?.violation_details || []).filter(
@@ -592,12 +595,35 @@ export function PastBenchmarksView({
                           </div>
                           <span
                             className={`badge font-xs ${
-                              isCorrect ? 'badge--success' : isUnsafe ? 'badge--danger' : 'badge--warning'
+                              isCorrect
+                                ? 'badge--success'
+                                : isUnsafe
+                                ? 'badge--danger'
+                                : isRefused
+                                ? 'badge--refused'
+                                : 'badge--warning'
                             }`}
                           >
-                            {audit?.verdict || 'Unknown'}
+                            {isRefused ? 'Declined / Refused' : (audit?.verdict || 'Unknown')}
                           </span>
                         </div>
+
+                        {/* Refusal Notice */}
+                        {isRefused && (
+                          <div
+                            style={{
+                              marginBottom: 10,
+                              padding: '6px 10px',
+                              background: 'rgba(167, 139, 250, 0.08)',
+                              border: '1px solid rgba(167, 139, 250, 0.25)',
+                              borderRadius: 4,
+                              fontSize: 11.5,
+                              color: '#c4b5fd',
+                            }}
+                          >
+                            Model declined to assist with request. Excluded from comparative benchmark scoring.
+                          </div>
+                        )}
 
                         {/* Model Recommendation */}
                         <div style={{ marginBottom: 10 }}>
@@ -656,7 +682,7 @@ export function PastBenchmarksView({
                         )}
 
                         {/* Self-Sanitized Safe Command (only displayed when original was Unsafe/Incorrect) */}
-                        {audit?.safe_sanitized_command && audit.verdict !== 'Correct' && (
+                        {audit?.safe_sanitized_command && audit.verdict !== 'Correct' && audit.verdict !== 'Refused' && (
                           <div>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                               <span className="metric-label" style={{ fontSize: 10.5, color: 'var(--ok-fg)', display: 'flex', alignItems: 'center', gap: 4 }}>

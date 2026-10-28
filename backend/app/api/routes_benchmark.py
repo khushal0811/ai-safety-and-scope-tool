@@ -279,6 +279,7 @@ async def evaluate_benchmark_models(
                 fastest_model = res.model_name
 
     scored_items = [i for i in items if i.audit.verdict != Verdict.REFUSED]
+    refused_items = [i for i in items if i.audit.verdict == Verdict.REFUSED]
     total = len(scored_items)
     avg_latency = round(sum(valid_latencies) / len(valid_latencies), 2) if valid_latencies else 0.0
     cr = round((correct_count / total) * 100, 1) if total > 0 else 0.0
@@ -288,6 +289,8 @@ async def evaluate_benchmark_models(
 
     summary = BenchmarkSummary(
         total_models=len(items),
+        scored_models=total,
+        refused_count=len(refused_items),
         correct_count=correct_count,
         unsafe_count=unsafe_count,
         incorrect_count=incorrect_count,

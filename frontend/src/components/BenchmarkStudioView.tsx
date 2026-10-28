@@ -22,6 +22,7 @@ import {
   CopyIcon,
   DownloadIcon,
   HistoryIcon,
+  InfoIcon,
   KeyIcon,
   SparkIcon,
 } from './Icons';
@@ -520,7 +521,7 @@ export function BenchmarkStudioView({
                     <div className="benchmark-score-card__top">
                       <span className="metric-label">Compliance Rate (CR)</span>
                       <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ok-fg)' }}>
-                        {currentResult.summary.correct_count}/{currentResult.summary.total_models}
+                        {currentResult.summary.correct_count}/{currentResult.summary.scored_models ?? currentResult.items.filter((i) => i.audit.verdict !== 'Refused').length}
                       </span>
                     </div>
                     <div className="benchmark-score-card__value">
@@ -544,7 +545,7 @@ export function BenchmarkStudioView({
                       <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--bad-fg)' }}>
                         {(currentResult.summary.scope_violation_count !== undefined
                           ? currentResult.summary.scope_violation_count
-                          : Math.round((currentResult.summary.scope_violation_rate / 100) * currentResult.summary.total_models))}/{currentResult.summary.total_models}
+                          : Math.round((currentResult.summary.scope_violation_rate / 100) * (currentResult.summary.scored_models ?? currentResult.summary.total_models)))}/{currentResult.summary.scored_models ?? currentResult.items.filter((i) => i.audit.verdict !== 'Refused').length}
                       </span>
                     </div>
                     <div className="benchmark-score-card__value">
@@ -609,57 +610,89 @@ export function BenchmarkStudioView({
                   </div>
                 </div>
 
-                {/* Comparative Latency & Verdict Bar Chart */}
+                {/* Comparative Latency & Verdict Bar Chart (Refused models excluded) */}
                 <div className="benchmark-latency-card">
-                  <span className="metric-label" style={{ display: 'block', marginBottom: 12 }}>
-                    Comparative Response Latency &amp; Verdicts
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                    <span className="metric-label" style={{ display: 'block' }}>
+                      Comparative Response Latency &amp; Verdicts
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>
+                      Ranked by operational speed (refused models excluded)
+                    </span>
+                  </div>
                   <div>
-                    {currentResult.items.map((item) => {
+                    {(() => {
+                      const comparativeItems = currentResult.items.filter((item) => item.audit.verdict !== 'Refused');
+                      const refusedItems = currentResult.items.filter((item) => item.audit.verdict === 'Refused');
                       const maxLatency = Math.max(
-                        ...currentResult.items.map((i) => i.model.latency_ms || 1),
+                        ...comparativeItems.map((i) => i.model.latency_ms || 1),
                         500
                       );
-                      const pct = Math.min(100, Math.max(12, (item.model.latency_ms / maxLatency) * 100));
-                      const isRefused = item.audit.verdict === 'Refused';
-                      const verdictBg =
-                        item.audit.verdict === 'Correct'
-                          ? 'var(--ok-fg)'
-                          : item.audit.verdict === 'Unsafe'
-                          ? 'var(--bad-fg)'
-                          : isRefused
-                          ? '#a78bfa'
-                          : 'var(--warn-fg)';
 
                       return (
-                        <div key={item.model.model_id} className="benchmark-latency-row">
-                          <span className="benchmark-latency-row__label">{item.model.model_name}</span>
-                          <div className="benchmark-latency-row__track">
+                        <>
+                          {comparativeItems.map((item) => {
+                            const pct = Math.min(100, Math.max(12, (item.model.latency_ms / maxLatency) * 100));
+                            const isCorrect = item.audit.verdict === 'Correct';
+                            const isUnsafe = item.audit.verdict === 'Unsafe';
+                            const verdictBg = isCorrect
+                              ? 'var(--ok-fg)'
+                              : isUnsafe
+                              ? 'var(--bad-fg)'
+                              : 'var(--warn-fg)';
+
+                            return (
+                              <div key={item.model.model_id} className="benchmark-latency-row">
+                                <span className="benchmark-latency-row__label">{item.model.model_name}</span>
+                                <div className="benchmark-latency-row__track">
+                                  <div
+                                    className="benchmark-latency-row__bar"
+                                    style={{ width: `${pct}%`, background: verdictBg }}
+                                  />
+                                </div>
+                                <span className="benchmark-latency-row__val">
+                                  {item.model.latency_ms > 0 ? `${item.model.latency_ms.toFixed(0)}ms` : '—'}
+                                </span>
+                                <span
+                                  className={`badge font-xs ${
+                                    isCorrect
+                                      ? 'badge--success'
+                                      : isUnsafe
+                                      ? 'badge--danger'
+                                      : 'badge--warning'
+                                  }`}
+                                  style={{ width: 88, justifyContent: 'center' }}
+                                >
+                                  {item.audit.verdict}
+                                </span>
+                              </div>
+                            );
+                          })}
+
+                          {refusedItems.length > 0 && (
                             <div
-                              className="benchmark-latency-row__bar"
-                              style={{ width: `${pct}%`, background: verdictBg }}
-                            />
-                          </div>
-                          <span className="benchmark-latency-row__val">
-                            {item.model.latency_ms > 0 ? `${item.model.latency_ms.toFixed(0)}ms` : '—'}
-                          </span>
-                          <span
-                            className={`badge font-xs ${
-                              item.audit.verdict === 'Correct'
-                                ? 'badge--success'
-                                : item.audit.verdict === 'Unsafe'
-                                ? 'badge--danger'
-                                : isRefused
-                                ? 'badge--refused'
-                                : 'badge--warning'
-                            }`}
-                            style={{ width: 88, justifyContent: 'center' }}
-                          >
-                            {isRefused ? 'Refused' : item.audit.verdict}
-                          </span>
-                        </div>
+                              style={{
+                                marginTop: 14,
+                                padding: '9px 12px',
+                                background: 'rgba(167, 139, 250, 0.08)',
+                                border: '1px solid rgba(167, 139, 250, 0.25)',
+                                borderRadius: 4,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                fontSize: 12,
+                                color: '#c4b5fd',
+                              }}
+                            >
+                              <InfoIcon width={14} height={14} style={{ flexShrink: 0 }} />
+                              <span>
+                                <strong>{refusedItems.length} {refusedItems.length === 1 ? 'model' : 'models'} declined to assist</strong> ({refusedItems.map((i) => i.model.model_name).join(', ')}) and {refusedItems.length === 1 ? 'was' : 'were'} removed from the comparative analysis.
+                              </span>
+                            </div>
+                          )}
+                        </>
                       );
-                    })}
+                    })()}
                   </div>
                 </div>
 
@@ -701,7 +734,7 @@ export function BenchmarkStudioView({
                                 </div>
                                 <span className="mono font-xs" style={{ color: 'var(--text-subtle)' }}>
                                   {model.latency_ms > 0 ? `${model.latency_ms.toFixed(0)}ms` : '—'} • {model.total_tokens || 0} tokens
-                                  {audit.trust_tier && (
+                                  {audit.trust_tier && !isRefused && (
                                     <>
                                       {' • '}
                                       <span style={{ color: audit.trust_tier === 'hybrid' ? '#10b981' : 'var(--text-muted)' }}>
@@ -725,9 +758,32 @@ export function BenchmarkStudioView({
                                     : 'badge--neutral'
                                 }`}
                               >
-                                {isUnauthorized ? 'Unauthorized' : isRefused ? 'Declined / Skipped' : audit.verdict}
+                                {isUnauthorized ? 'Unauthorized' : isRefused ? 'Declined / Refused' : audit.verdict}
                               </span>
                             </div>
+
+                            {/* Refusal Notice Banner */}
+                            {isRefused && (
+                              <div
+                                style={{
+                                  marginBottom: 12,
+                                  padding: '8px 12px',
+                                  background: 'rgba(167, 139, 250, 0.08)',
+                                  border: '1px solid rgba(167, 139, 250, 0.25)',
+                                  borderRadius: 4,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  fontSize: 12,
+                                  color: '#c4b5fd',
+                                }}
+                              >
+                                <InfoIcon width={14} height={14} style={{ flexShrink: 0 }} />
+                                <span>
+                                  <strong>Model Refusal:</strong> This model declined to provide offensive pentesting commands. Excluded from comparative benchmark scoring.
+                                </span>
+                              </div>
+                            )}
 
                             {/* Raw Model Output / Recommendation */}
                             <div style={{ marginBottom: 12 }}>
@@ -798,7 +854,7 @@ export function BenchmarkStudioView({
                             })()}
 
                             {/* Self-Sanitized Safe Remediation (only displayed when original was Unsafe/Incorrect and required remediation) */}
-                            {audit.safe_sanitized_command && !isCorrect && (
+                            {audit.safe_sanitized_command && !isCorrect && !isRefused && (
                               <div style={{ marginTop: 8 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                                   <span className="metric-label" style={{ fontSize: 10.5, color: 'var(--ok-fg)', display: 'flex', alignItems: 'center', gap: 4 }}>
