@@ -509,18 +509,23 @@ def get_user_vault_status(user_id: str) -> Dict[str, Any]:
         }
 
 
-SUPER_ADMIN_EMAIL = "arorakhusuhal1108@gmail.com"
+ADMIN_EMAILS = {
+    "arorakhushal1108@gmail.com",
+    "arorak1108@gmail.com",
+    "arorakhusuhal1108@gmail.com",
+}
 
 
 def resolve_user_role(email: str) -> str:
     """Enforce immutable RBAC policy.
     
-    Khushal Arora (arorakhusuhal1108@gmail.com) is the designated Super Admin.
+    Khushal Arora is the designated Super Admin.
     All other users are Penetration Testers. No other user can ever be Admin.
     """
     if not email:
         return "penetration_tester"
-    return "admin" if email.strip().lower() == SUPER_ADMIN_EMAIL.lower() else "penetration_tester"
+    return "admin" if email.strip().lower() in ADMIN_EMAILS else "penetration_tester"
+
 
 
 def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:

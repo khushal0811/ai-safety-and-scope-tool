@@ -221,9 +221,11 @@ def test_command_parser_handles_xss_safely():
 
 def test_rbac_super_admin_assignment():
     from app.db.supabase_client import resolve_user_role
+    assert resolve_user_role("arorakhushal1108@gmail.com") == "admin"
+    assert resolve_user_role("arorak1108@gmail.com") == "admin"
     assert resolve_user_role("arorakhusuhal1108@gmail.com") == "admin"
-    assert resolve_user_role("AroraKhusuhal1108@gmail.com") == "admin"
-    assert resolve_user_role("ARORAKHUSUHAL1108@GMAIL.COM") == "admin"
+    assert resolve_user_role("AroraKhushal1108@gmail.com") == "admin"
+
 
 
 def test_rbac_non_admin_users_forced_to_penetration_tester():
