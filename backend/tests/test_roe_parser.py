@@ -46,3 +46,27 @@ Excluded host: 10.0.50.1
     assert "10.0.50.0/24" in roe.allowed_cidrs
     assert "10.0.50.15" in roe.target_hosts
     assert "169.254.169.254" in roe.prohibited_ips
+
+
+def test_deterministic_post_validation_prohibited_overrides_target_hosts():
+    """Verify that any IP in prohibited_ips is stripped from target_hosts (Apex Financial scenario)."""
+    payload = {
+        "name": "Apex Financial Infrastructure Engagement",
+        "allowed_cidrs": ["10.0.10.0/24"],
+        "target_hosts": ["10.0.10.1", "8.8.8.8", "1.1.1.1", "10.0.10.50"],
+        "prohibited_ips": ["10.0.10.1", "10.0.10.255", "8.8.8.8", "1.1.1.1"],
+    }
+    roe = deterministic_roe_post_validation(payload)
+    # Prohibited hosts must be stripped from target_hosts
+    assert "10.0.10.1" not in roe.target_hosts
+    assert "8.8.8.8" not in roe.target_hosts
+    assert "1.1.1.1" not in roe.target_hosts
+    # Authorized host remains
+    assert "10.0.10.50" in roe.target_hosts
+    # Prohibited IPs are fully present
+    assert "10.0.10.1" in roe.prohibited_ips
+    assert "10.0.10.255" in roe.prohibited_ips
+    assert "8.8.8.8" in roe.prohibited_ips
+    assert "1.1.1.1" in roe.prohibited_ips
+    assert "169.254.169.254" in roe.prohibited_ips
+

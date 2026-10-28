@@ -36,6 +36,15 @@ SECURITY DIRECTIVE:
   "max_nmap_timing": 3
 }
 
+CLASSIFICATION RULES (CRITICAL):
+- Any host, IP, gateway, router, broadcast address, or DNS server the document
+  describes as prohibited, excluded, forbidden, off-limits, or under a
+  "Prohibited Targets" / "Out of Scope" heading belongs ONLY in prohibited_ips —
+  NEVER in target_hosts, allowed_cidrs, or allowed_domains, even if it falls
+  numerically within an authorized subnet.
+- When uncertain whether something is authorized or prohibited, leave it out of
+  every allowed_*/target_hosts field rather than guessing it's authorized.
+
 IMPORTANT CONSTRAINTS:
 - Never include 0.0.0.0/0 in allowed_cidrs.
 - max_nmap_timing must be an integer between 1 and 4 (default 3).
@@ -71,6 +80,9 @@ def deterministic_roe_post_validation(parsed_data: dict, fallback_name: str = "U
     prohibited = set(str(p).strip() for p in parsed_data.get("prohibited_ips", []))
     prohibited.add("169.254.169.254")
 
+    raw_target_hosts = [str(h).strip() for h in parsed_data.get("target_hosts", []) if h]
+    target_hosts = [h for h in raw_target_hosts if h not in prohibited]
+
     # Timing template cap
     timing = parsed_data.get("max_nmap_timing", 3)
     try:
@@ -87,7 +99,7 @@ def deterministic_roe_post_validation(parsed_data: dict, fallback_name: str = "U
         summary=parsed_data.get("summary") or "Custom Rules of Engagement scope parsed from client document.",
         allowed_cidrs=valid_cidrs,
         allowed_domains=[str(d).strip().lower() for d in parsed_data.get("allowed_domains", []) if d],
-        target_hosts=[str(h).strip() for h in parsed_data.get("target_hosts", []) if h],
+        target_hosts=target_hosts,
         prohibited_ips=sorted(list(prohibited)),
         allowed_tools=[str(t).strip().lower() for t in parsed_data.get("allowed_tools", []) if t],
         prohibited_tools=[str(t).strip().lower() for t in parsed_data.get("prohibited_tools", []) if t],
