@@ -101,25 +101,38 @@ export default function App() {
       fetchVaultStatus(user.id)
         .then((st) => {
           if (active) {
-            setHasOpenRouterKey(Boolean(st.hasOpenRouterKey || getOpenRouterKey()));
+            const hasKey = Boolean(st.hasOpenRouterKey || getOpenRouterKey());
+            setHasOpenRouterKey(hasKey);
+            if (!hasKey) {
+              setInitialSetupOpen(true);
+            }
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          if (active && !getOpenRouterKey()) {
+            setHasOpenRouterKey(false);
+            setInitialSetupOpen(true);
+          }
+        });
     } else {
-      setHasOpenRouterKey(Boolean(getOpenRouterKey()));
+      const hasKey = Boolean(getOpenRouterKey());
+      setHasOpenRouterKey(hasKey);
+      if (!hasKey) {
+        setInitialSetupOpen(true);
+      }
     }
     return () => {
       active = false;
     };
   }, [user?.id, page]);
 
-  // Fallback to default system model (Claude Sonnet 4.6) if selected model requires an unconfigured OpenRouter key
+  // Keep selected model valid
   useEffect(() => {
     const activeModel = MODELS.find((m) => m.id === modelId);
-    if (activeModel?.requiresOpenRouter && !hasOpenRouterKey) {
-      setModelId('anthropic/claude-sonnet-4.6');
+    if (!activeModel) {
+      setModelId(MODELS[0].id);
     }
-  }, [hasOpenRouterKey, modelId]);
+  }, [modelId]);
 
   // Listen for Supabase session changes
   useEffect(() => {
@@ -276,6 +289,11 @@ export default function App() {
 
   async function handleQueryLiveModel() {
     if (!prompt.trim()) return;
+    if (!hasOpenRouterKey) {
+      setInitialSetupOpen(true);
+      setQueryError('An OpenRouter API key is required to query models. Please configure your key in Settings or the setup modal.');
+      return;
+    }
     setQueryingModel(true);
     setQueryError(null);
     try {
@@ -292,15 +310,22 @@ export default function App() {
     }
   }
 
-  const blockedReason = !activeScope
-    ? roeMode === 'custom'
-      ? 'Upload a document or paste RoE text and click "Extract Scope" to define boundaries.'
-      : 'Select a preset scope to continue.'
-    : !modelOutput.trim()
-      ? 'Click "Ask Model Live ⚡" to query the model or paste commands into the box to audit.'
-      : null;
+  const blockedReason = !hasOpenRouterKey
+    ? 'An OpenRouter API key is required to audit recommendations or benchmark models. Server system keys are disabled.'
+    : !activeScope
+      ? roeMode === 'custom'
+        ? 'Upload a document or paste RoE text and click "Extract Scope" to define boundaries.'
+        : 'Select a preset scope to continue.'
+      : !modelOutput.trim()
+        ? 'Click "Ask Model Live ⚡" to query the model or paste commands into the box to audit.'
+        : null;
 
   async function handleRun() {
+    if (!hasOpenRouterKey) {
+      setInitialSetupOpen(true);
+      setQueryError('An OpenRouter API key is required to perform an audit.');
+      return;
+    }
     if (!activeScope || !modelOutput.trim()) return;
     setLoading(true);
     setQueryError(null);
@@ -602,6 +627,10 @@ export default function App() {
           user={user}
           isOpen={initialSetupOpen}
           onClose={() => setInitialSetupOpen(false)}
+          onKeySaved={() => {
+            setHasOpenRouterKey(true);
+            setInitialSetupOpen(false);
+          }}
         />
       )}
     </div>

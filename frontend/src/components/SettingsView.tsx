@@ -11,7 +11,7 @@ import {
   type KeyVerificationResult,
   type VaultStatus,
 } from '../lib/keyStore';
-import { GoogleIcon, CheckIcon, TrashIcon, UserIcon, SparkIcon, AlertIcon } from './Icons';
+import { GoogleIcon, CheckIcon, TrashIcon, SparkIcon, AlertIcon } from './Icons';
 import { KeyProtectionNotice } from './KeyProtectionNotice';
 
 interface Props {
@@ -177,53 +177,30 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
           </div>
           <div className="card__body">
             {/* Option 1: Built-in System Key (Default) */}
+            {/* Primary: Personal OpenRouter Key (Mandatory BYOK) */}
             <div
               style={{
-                border: '1px solid var(--border)',
+                border: (openRouterKey || getOpenRouterKey()) ? '1px solid var(--accent)' : '1px solid var(--border)',
                 borderRadius: 'var(--radius)',
                 padding: '16px 18px',
                 marginBottom: 16,
                 background: 'var(--surface-sunken)',
               }}
             >
-              <div className="row between" style={{ marginBottom: 6 }}>
+              <div className="row between" style={{ marginBottom: 8 }}>
                 <span className="row" style={{ gap: 8 }}>
-                  <strong style={{ fontSize: 13.5 }}>Option 1: Built-in System Provider (Default)</strong>
-                  <span className="tag tag--ok">● Active &amp; Ready</span>
+                  <strong style={{ fontSize: 13.5 }}>OpenRouter API Key (Required for All Audits &amp; Benchmarks)</strong>
+                  {getOpenRouterKey() ? (
+                    <span className="tag tag--ok">● Active (User Key)</span>
+                  ) : (
+                    <span className="tag tag--warn">⚠️ Required</span>
+                  )}
                 </span>
-                <span className="mono font-xs text-muted">Backend Managed · Claude Sonnet 4.6</span>
+                <span className="mono font-xs text-muted">sk-or-v1-...</span>
               </div>
-              <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, lineHeight: 1.5 }}>
-                Zero setup required. Powered by Vallum's server-side OpenRouter infrastructure (Claude Sonnet 4.6) for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
+              <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
+                Vallum operates strictly on a Bring-Your-Own-Key (BYOK) architecture. Your personal OpenRouter key is used for all model queries, RoE evaluations, safe command rewrites, and comparative benchmarks. Server system keys are disabled for user tasks.
               </p>
-            </div>
-
-            {/* Option 2: Personal OpenRouter Key (BYOK) */}
-            {currentUser ? (
-              <>
-                <div
-                  style={{
-                    border: openRouterKey ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    borderRadius: 'var(--radius)',
-                    padding: '16px 18px',
-                    marginBottom: 16,
-                    background: 'var(--surface-sunken)',
-                  }}
-                >
-                  <div className="row between" style={{ marginBottom: 8 }}>
-                    <span className="row" style={{ gap: 8 }}>
-                      <strong style={{ fontSize: 13.5 }}>Option 2: Personal OpenRouter Key (BYOK)</strong>
-                      {getOpenRouterKey() ? (
-                        <span className="tag tag--ok">● Active (User Key)</span>
-                      ) : (
-                        <span className="tag">Optional · Frontier Models</span>
-                      )}
-                    </span>
-                    <span className="mono font-xs text-muted">sk-or-v1-...</span>
-                  </div>
-                  <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
-                    Bring your own OpenRouter API key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.3) in real-time. Keys are encrypted with AES-256-GCM before saving to your database vault.
-                  </p>
                   <div className="row" style={{ gap: 8, marginTop: 4 }}>
                     <input
                       type="password"
@@ -322,31 +299,21 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                     </p>
                   </div>
                 </details>
-              </>
-            ) : (
-              /* Locked Option 2 for Guests */
+
+            {!currentUser && (
+              /* Session storage note for Guest Mode */
               <div
                 style={{
-                  border: '1px dashed var(--border)',
+                  marginTop: 10,
+                  padding: '10px 14px',
+                  background: 'rgba(98, 114, 240, 0.05)',
+                  border: '1px solid rgba(98, 114, 240, 0.2)',
                   borderRadius: 'var(--radius)',
-                  padding: '16px 18px',
-                  marginBottom: 16,
-                  background: 'var(--surface-sunken)',
+                  fontSize: 12.5,
+                  color: 'var(--text-subtle)',
                 }}
               >
-                <div className="row between" style={{ marginBottom: 8 }}>
-                  <span className="row" style={{ gap: 8 }}>
-                    <strong style={{ fontSize: 13.5 }}>Option 2: Personal OpenRouter Key (BYOK)</strong>
-                    <span className="tag tag--warn">🔒 Account Required</span>
-                  </span>
-                  <span className="mono font-xs text-muted">No Database For Guests</span>
-                </div>
-                <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
-                  Guest users only have one option: using Vallum's backend system key. Because guest sessions do not have a private database to store and encrypt API keys, custom keys are disabled. Sign in with Google, GitHub, or Email to unlock custom keys.
-                </p>
-                <button className="btn btn--primary btn--sm" onClick={onOpenLogin}>
-                  <UserIcon width={14} height={14} /> Sign In to Enable Custom Keys
-                </button>
+                <strong>Guest Session:</strong> Your key will be saved temporarily in session storage and cleared when you close the browser tab. <button type="button" className="inline-link-btn" onClick={onOpenLogin} style={{ fontWeight: 600 }}>Sign in</button> to encrypt your key permanently in your private database vault.
               </div>
             )}
 

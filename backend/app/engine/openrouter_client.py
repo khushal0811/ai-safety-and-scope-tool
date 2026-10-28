@@ -135,12 +135,14 @@ class OpenRouterClient:
         return list(FRONTIER_MODELS.values())
 
     def get_effective_key(self, custom_key: Optional[str] = None) -> str:
-        """Get API key prioritizing user client key over instance default or environment default."""
+        """Get API key strictly from user client key.
+        Strict BYOK enforcement: User audit and benchmark tasks NEVER use the backend system key.
+        """
         if custom_key is not None and custom_key.strip():
             return custom_key.strip()
-        if self.default_api_key is not None:
+        if self.default_api_key is not None and self.default_api_key.strip():
             return self.default_api_key.strip()
-        return (settings.OPENROUTER_API_KEY or "").strip()
+        return ""
 
     async def query_model(
         self,
@@ -153,7 +155,7 @@ class OpenRouterClient:
         max_tokens: int = 1024,
         timeout: float = 40.0,
     ) -> ModelBenchmarkResult:
-        """Query a single model via OpenRouter or fallback to system Groq key."""
+        """Query a single model strictly using the user's personal OpenRouter API key."""
         resolved_id = self.resolve_model_id(model_id)
         model_meta = FRONTIER_MODELS.get(
             resolved_id,
@@ -167,26 +169,6 @@ class OpenRouterClient:
 
         effective_key = self.get_effective_key(api_key)
         if not effective_key:
-            # Check if this model can run on the backend's built-in system Groq key
-            effective_groq = (groq_key or settings.GROQ_API_KEY).strip()
-            is_groq_compatible = (
-                "llama" in resolved_id.lower()
-                or "system" in resolved_id.lower()
-                or "groq" in resolved_id.lower()
-            )
-
-            if effective_groq and is_groq_compatible:
-                return await self._query_groq_system(
-                    resolved_id=resolved_id,
-                    model_meta=model_meta,
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    groq_key=effective_groq,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout=timeout,
-                )
-
             return ModelBenchmarkResult(
                 model_id=resolved_id,
                 model_name=model_meta.name,
@@ -194,8 +176,8 @@ class OpenRouterClient:
                 latency_ms=0.0,
                 status="unauthorized",
                 error_message=(
-                    f"Benchmarking {model_meta.name} requires a personal OpenRouter API key. "
-                    "Configure your key in Settings or use the built-in system key (Groq)."
+                    f"Executing audits or benchmarks with {model_meta.name} requires your personal OpenRouter API key. "
+                    "The server system key is not used for user tasks. Please configure your key in Settings."
                 ),
             )
 

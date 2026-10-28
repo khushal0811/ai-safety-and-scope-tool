@@ -56,12 +56,7 @@ export function BenchmarkStudioView({
 
   // Selected models state: strictly only select models that the user has keys for by default
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(() => {
-    const hasKey = Boolean(getOpenRouterKey()?.trim());
-    if (hasKey) {
-      return new Set(['anthropic/claude-sonnet-4.6', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5']);
-    }
-    // Claude Sonnet 4.6 has built-in system key; others require user OpenRouter key
-    return new Set(['anthropic/claude-sonnet-4.6']);
+    return new Set(['anthropic/claude-sonnet-4.6', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5']);
   });
 
   // Scenario & Prompt
@@ -87,30 +82,9 @@ export function BenchmarkStudioView({
     };
   }, []);
 
-  // Prune gated frontier models if OpenRouter key is not configured
-  useEffect(() => {
-    if (!hasOpenRouterKey) {
-      setSelectedModelIds((prev) => {
-        const next = new Set<string>();
-        for (const id of prev) {
-          if (id.includes('sonnet') || id.includes('haiku')) {
-            next.add(id);
-          }
-        }
-        if (next.size === 0) {
-          next.add('anthropic/claude-sonnet-4.6');
-        }
-        return next;
-      });
-    }
-  }, [hasOpenRouterKey]);
-
   // Active models that are selected AND authorized/unlocked to run
   const activeSelectedModelIds = useMemo(() => {
-    return Array.from(selectedModelIds).filter((id) => {
-      if (id.includes('sonnet') || id.includes('haiku')) return true;
-      return hasOpenRouterKey;
-    });
+    return hasOpenRouterKey ? Array.from(selectedModelIds) : [];
   }, [selectedModelIds, hasOpenRouterKey]);
 
   // Update prompt whenever active scenario or active RoE changes
@@ -124,8 +98,7 @@ export function BenchmarkStudioView({
 
   // Model toggling
   function toggleModel(id: string) {
-    const isSystemModel = id.includes('sonnet') || id.includes('haiku');
-    if (!hasOpenRouterKey && !isSystemModel) {
+    if (!hasOpenRouterKey) {
       onNavigateSettings();
       return;
     }
@@ -391,7 +364,7 @@ export function BenchmarkStudioView({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
                       <KeyIcon width={15} height={15} style={{ color: 'var(--warn-fg)', flexShrink: 0 }} />
                       <span>
-                        <strong>Frontier Models Gated:</strong> To benchmark GPT-4o, Claude 3.5 Sonnet, and Gemini 1.5 Pro live, enter your OpenRouter key in Settings. Anthropic Claude Sonnet 4.6 is ready to test immediately via the built-in system key.
+                        <strong>OpenRouter Key Required:</strong> To benchmark LLMs live, you must enter your personal OpenRouter API key. Server system keys are strictly disabled for user audits and benchmark runs.
                       </span>
                     </div>
                     <button
@@ -407,14 +380,13 @@ export function BenchmarkStudioView({
 
               <div className="benchmark-models-grid">
                 {(availableModels.length > 0 ? availableModels : [
-                  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 1000000, description: 'Built-in System Key' },
+                  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 1000000, description: 'Personal Key Required' },
                   { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'OpenAI', tier: 'frontier', recommended: true, context_length: 128000, description: 'Flagship Multimodal' },
                   { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 200000, description: 'Deep Tool & Logic' },
                   { id: 'google/gemini-pro-1.5', name: 'Gemini 1.5 Pro', provider: 'Google', tier: 'frontier', recommended: true, context_length: 2000000, description: '2M Token Context' },
                 ]).map((m) => {
                   const isSelected = selectedModelIds.has(m.id);
-                  const isSystemModel = m.id.includes('sonnet') || m.id.includes('haiku');
-                  const isLocked = !hasOpenRouterKey && !isSystemModel;
+                  const isLocked = !hasOpenRouterKey;
 
                   return (
                     <div
@@ -433,14 +405,12 @@ export function BenchmarkStudioView({
                       <div>
                         <div className="benchmark-model-card__header">
                           <span className="benchmark-model-card__provider">{m.provider}</span>
-                          {isSystemModel ? (
-                            <span className="badge badge--success font-xs">System Key Ready</span>
-                          ) : isLocked ? (
+                          {isLocked ? (
                             <span className="badge badge--warning font-xs" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                               <KeyIcon width={10} height={10} /> Key Required
                             </span>
                           ) : (
-                            <span className="badge badge--accent font-xs">Frontier</span>
+                            <span className="badge badge--accent font-xs">Ready</span>
                           )}
                         </div>
 
@@ -461,7 +431,7 @@ export function BenchmarkStudioView({
                         {isLocked ? (
                           <span style={{ color: 'var(--warn-fg)', fontWeight: 600 }}>Settings →</span>
                         ) : (
-                          <span className="mono" style={{ color: 'var(--ok-fg)' }}>Available</span>
+                          <span className="mono" style={{ color: 'var(--ok-fg)' }}>Ready</span>
                         )}
                       </div>
                     </div>
@@ -476,24 +446,36 @@ export function BenchmarkStudioView({
                 Benchmarking <strong style={{ color: 'var(--text)' }}>{activeSelectedModelIds.length} model{activeSelectedModelIds.length === 1 ? '' : 's'}</strong> in parallel with Zero Host Execution guarantee.
               </div>
 
-              <button
-                type="button"
-                className="benchmark-dispatch-btn"
-                onClick={handleRunBenchmark}
-                disabled={running || !prompt.trim() || activeSelectedModelIds.length === 0}
-              >
-                {running ? (
-                  <>
-                    <span className="btn-spinner" />
-                    <span>Benchmarking Frontier Models...</span>
-                  </>
-                ) : (
-                  <>
-                    <SparkIcon width={16} height={16} />
-                    <span>Run Benchmark ({activeSelectedModelIds.length} Model{activeSelectedModelIds.length === 1 ? '' : 's'}) ⚡</span>
-                  </>
-                )}
-              </button>
+              {!hasOpenRouterKey ? (
+                <button
+                  type="button"
+                  className="benchmark-dispatch-btn"
+                  onClick={onNavigateSettings}
+                  style={{ background: 'var(--warn-fg)', borderColor: 'var(--warn-fg)' }}
+                >
+                  <KeyIcon width={16} height={16} />
+                  <span>Configure OpenRouter Key to Run ⚡</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="benchmark-dispatch-btn"
+                  onClick={handleRunBenchmark}
+                  disabled={running || !prompt.trim() || activeSelectedModelIds.length === 0}
+                >
+                  {running ? (
+                    <>
+                      <span className="btn-spinner" />
+                      <span>Benchmarking Frontier Models...</span>
+                    </>
+                  ) : (
+                    <>
+                      <SparkIcon width={16} height={16} />
+                      <span>Run Benchmark ({activeSelectedModelIds.length} Model{activeSelectedModelIds.length === 1 ? '' : 's'}) ⚡</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
             {/* Error Banner */}

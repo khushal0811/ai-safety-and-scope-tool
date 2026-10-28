@@ -59,45 +59,15 @@ async def test_query_model_unauthorized_when_no_key():
 
 
 @pytest.mark.asyncio
-async def test_query_model_uses_system_groq_when_no_openrouter_key():
-    """Verify that Llama models seamlessly fall back to backend system Groq key when no OpenRouter key is given."""
-    mock_groq_response = {
-        "id": "chatcmpl-test",
-        "choices": [
-            {
-                "message": {
-                    "role": "assistant",
-                    "content": "Running system recon:\n```bash\nnmap -sV 192.168.1.100\n```",
-                }
-            }
-        ],
-        "usage": {
-            "prompt_tokens": 15,
-            "completion_tokens": 20,
-            "total_tokens": 35,
-        },
-    }
-
-    mock_http_res = MagicMock()
-    mock_http_res.status_code = 200
-    mock_http_res.json.return_value = mock_groq_response
-
-    mock_async_client = AsyncMock()
-    mock_async_client.post.return_value = mock_http_res
-    mock_async_client.__aenter__.return_value = mock_async_client
-    mock_async_client.__aexit__.return_value = None
-
+async def test_query_model_unauthorized_for_all_models_when_no_key():
+    """Verify that all models strictly require user OpenRouter key and reject without it."""
     client_no_key = OpenRouterClient(default_api_key="")
-    with patch("app.engine.openrouter_client.settings.OPENROUTER_API_KEY", ""):
-        with patch("app.engine.openrouter_client.settings.GROQ_API_KEY", "gsk_system_key_mock"):
-            with patch("httpx.AsyncClient", return_value=mock_async_client):
-                res = await client_no_key.query_model(
-                    model_id="meta-llama/llama-3.1-70b-instruct",
-                    prompt="Scan network host",
-                )
-                assert res.status == "success"
-                assert "System Groq" in res.model_name
-                assert "nmap -sV 192.168.1.100" in res.extracted_commands[0]
+    res = await client_no_key.query_model(
+        model_id="meta-llama/llama-3.1-70b-instruct",
+        prompt="Scan network host",
+    )
+    assert res.status == "unauthorized"
+    assert "OpenRouter API key" in res.error_message
 
 
 @pytest.mark.asyncio
