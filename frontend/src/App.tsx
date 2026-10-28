@@ -603,6 +603,9 @@ export default function App() {
           onLogout={handleLogout}
           onClearHistory={handleClearHistory}
           onOpenInitialSetup={() => setInitialSetupOpen(true)}
+          onKeysUpdated={() => {
+            setHasOpenRouterKey(Boolean(getOpenRouterKey() || hasVaultOpenRouterKey()));
+          }}
         />
       )}
 
