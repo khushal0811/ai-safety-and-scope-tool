@@ -551,3 +551,38 @@ def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"[Supabase] Failed to fetch profile for {user_id}: {e}")
         return None
 
+
+def verify_supabase_jwt(token: str) -> Optional[Dict[str, Any]]:
+    """Verify a Supabase Auth JWT token server-side and retrieve the authenticated user profile.
+
+    Validates signature and expiry using the Supabase auth service.
+    Returns user dict containing id, email, role if valid, or None if invalid/expired.
+    """
+    if not token or not isinstance(token, str):
+        return None
+
+    client = get_supabase()
+    if not client:
+        return None
+
+    try:
+        clean_token = token.strip()
+        if clean_token.lower().startswith("bearer "):
+            clean_token = clean_token[7:].strip()
+
+        user_res = client.auth.get_user(clean_token)
+        if user_res and user_res.user:
+            email = user_res.user.email or ""
+            return {
+                "id": str(user_res.user.id),
+                "email": email,
+                "role": resolve_user_role(email),
+                "app_metadata": getattr(user_res.user, "app_metadata", {}),
+                "user_metadata": getattr(user_res.user, "user_metadata", {}),
+            }
+        return None
+    except Exception as e:
+        logger.warning(f"[Supabase] JWT verification failed: {e}")
+        return None
+
+

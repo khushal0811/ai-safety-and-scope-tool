@@ -1,5 +1,5 @@
 import type { PastAudit } from '../types/history';
-import { supabase } from './supabaseClient';
+import { supabase, getAuthHeaders } from './supabaseClient';
 
 const STORAGE_PREFIX = 'sst.history.audits';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -106,9 +106,10 @@ export async function deletePastAudits(auditIds: string[], userId?: string): Pro
 
   // 1. Delete from Backend FastAPI endpoint
   try {
+    const authHeaders = await getAuthHeaders();
     await fetch(`${API_BASE}/api/audit/history`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
         audit_ids: auditIds,
         user_id: userId,
@@ -161,8 +162,11 @@ export async function syncPastAuditsFromCloud(userId?: string): Promise<PastAudi
 
   try {
     // Attempt 1: Fetch via FastAPI backend endpoint filtered by user_id
+    const authHeaders = await getAuthHeaders();
     const url = `${API_BASE}/api/audit/history?limit=100&user_id=${encodeURIComponent(userId)}`;
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: { ...authHeaders },
+    });
     if (res.ok) {
       const rows = await res.json();
       if (Array.isArray(rows)) {
@@ -220,8 +224,11 @@ export async function fetchCloudMetrics(userId?: string): Promise<{
   }
 
   try {
+    const authHeaders = await getAuthHeaders();
     const url = `${API_BASE}/api/audit/metrics?user_id=${encodeURIComponent(userId)}`;
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: { ...authHeaders },
+    });
     if (res.ok) {
       return await res.json();
     }

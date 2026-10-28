@@ -1,6 +1,7 @@
 import type { AuditRequest, AuditResult, RoeScope } from '../types/audit';
 import { ROE_PRESETS } from '../data/presets';
 import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
+import { getStoredAuthToken } from '../lib/supabaseClient';
 
 function getApiHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
@@ -14,6 +15,10 @@ function getApiHeaders(): Record<string, string> {
   const groq = getGroqKey();
   if (groq) {
     headers['X-Groq-Key'] = groq;
+  }
+  const token = getStoredAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
 }
@@ -155,6 +160,8 @@ export async function parseRoeFile(file: File, userId?: string): Promise<RoeScop
   if (openRouter) fileHeaders['X-OpenRouter-Key'] = openRouter;
   const groq = getGroqKey();
   if (groq) fileHeaders['X-Groq-Key'] = groq;
+  const token = getStoredAuthToken();
+  if (token) fileHeaders['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(url, {
     method: 'POST',

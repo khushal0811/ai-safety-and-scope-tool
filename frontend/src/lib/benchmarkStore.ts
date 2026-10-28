@@ -1,5 +1,5 @@
 import type { BenchmarkRunRecord } from '../types/benchmark';
-import { supabase } from './supabaseClient';
+import { supabase, getAuthHeaders } from './supabaseClient';
 
 const STORAGE_PREFIX = 'sst.history.benchmarks';
 const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -66,11 +66,13 @@ export async function deletePastBenchmarks(benchmarkIds: string[], userId?: stri
 
   // 1. Delete from FastAPI backend
   try {
+    const authHeaders = await getAuthHeaders();
     await fetch(`${API_BASE}/api/benchmark/history`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
         'X-User-Id': userId,
+        ...authHeaders,
       },
       body: JSON.stringify({
         benchmark_ids: benchmarkIds,
@@ -122,11 +124,13 @@ export async function syncPastBenchmarksFromCloud(userId?: string): Promise<Benc
 
   // Attempt 1: Fetch via FastAPI backend endpoint
   try {
+    const authHeaders = await getAuthHeaders();
     const url = `${API_BASE}/api/benchmark/history?limit=100&user_id=${encodeURIComponent(userId)}`;
     const res = await fetch(url, {
       headers: {
         Accept: 'application/json',
         'X-User-Id': userId,
+        ...authHeaders,
       },
     });
     if (res.ok) {

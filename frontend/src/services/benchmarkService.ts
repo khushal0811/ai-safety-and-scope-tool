@@ -6,6 +6,7 @@ import type {
 } from '../types/benchmark';
 import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
 import { getCurrentUser } from '../lib/authStore';
+import { getStoredAuthToken } from '../lib/supabaseClient';
 
 const BACKEND_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
@@ -25,6 +26,10 @@ function getBenchmarkHeaders(): Record<string, string> {
   const user = getCurrentUser();
   if (user && user.id) {
     headers['X-User-Id'] = user.id;
+  }
+  const token = getStoredAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
 }

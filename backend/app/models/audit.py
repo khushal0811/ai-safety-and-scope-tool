@@ -61,6 +61,48 @@ class Violation(BaseModel):
     command: Optional[str] = Field(default=None, description="The specific command that triggered the rule.")
 
 
+class ViolationCandidate(BaseModel):
+    """Pre-parsed candidate violation emitted by Pass 1 for adjudication."""
+
+    id: str = Field(..., description="Stable candidate identifier, e.g. c1, c2.")
+    rule: str = Field(..., description="Flagged rule name.")
+    category: ViolationCategory = Field(..., description="Candidate violation category.")
+    severity: Severity = Field(..., description="Candidate severity level.")
+    detail: str = Field(..., description="Technical explanation of the infraction.")
+    culprit_token: str = Field(default="", description="Token or argument that triggered the rule.")
+    target_token: Optional[str] = Field(default=None, description="Related target token if applicable.")
+
+    def to_violation(self) -> Violation:
+        return Violation(
+            rule=self.rule,
+            category=self.category,
+            severity=self.severity,
+            detail=self.detail,
+            command=self.culprit_token,
+        )
+
+
+class JudgeDisposition(BaseModel):
+    """AI Judge disposition for a single candidate."""
+
+    id: str = Field(..., description="Candidate ID being adjudicated.")
+    disposition: Literal["confirmed", "false_positive"] = Field(
+        ..., description="Confirmed violation vs false positive."
+    )
+    reason: str = Field(default="", description="Technical rationale for the disposition.")
+
+
+class JudgeResponse(BaseModel):
+    """Strict AI Judge JSON output contract (no summary verdicts or metrics)."""
+
+    dispositions: List[JudgeDisposition] = Field(
+        default_factory=list, description="Itemized candidate dispositions."
+    )
+    sanitized_script: Optional[str] = Field(default=None, description="Compliant rewritten script.")
+    modifications_made: List[str] = Field(default_factory=list, description="List of surgical modifications.")
+    technical_rationale: Optional[str] = Field(default=None, description="Technical explanation.")
+
+
 class AuditRequest(BaseModel):
     """Payload for auditing model output against an RoE."""
 
