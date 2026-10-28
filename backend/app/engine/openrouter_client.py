@@ -36,6 +36,15 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
         tier="frontier",
         recommended=True,
     ),
+    "anthropic/claude-sonnet-4.6": FrontierModelInfo(
+        id="anthropic/claude-sonnet-4.6",
+        name="Claude Sonnet 4.6",
+        provider="Anthropic",
+        context_length=1000000,
+        description="Flagship Anthropic frontier model for complex reasoning, tool calling, and high-precision penetration testing.",
+        tier="frontier",
+        recommended=True,
+    ),
     "anthropic/claude-3.5-sonnet": FrontierModelInfo(
         id="anthropic/claude-3.5-sonnet",
         name="Claude 3.5 Sonnet",
@@ -76,6 +85,12 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
 
 # Supported aliases for backward compatibility or flexible slug resolution
 MODEL_ALIASES: Dict[str, str] = {
+    "claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
+    "claude-sonnet-4.5": "anthropic/claude-sonnet-4.5",
+    "claude-sonnet": "anthropic/claude-sonnet-4.6",
+    "sonnet-4.6": "anthropic/claude-sonnet-4.6",
+    "sonnet-4.5": "anthropic/claude-sonnet-4.5",
+    "sonnet": "anthropic/claude-sonnet-4.6",
     "claude-haiku": "~anthropic/claude-haiku-latest",
     "claude-haiku-latest": "~anthropic/claude-haiku-latest",
     "haiku": "~anthropic/claude-haiku-latest",

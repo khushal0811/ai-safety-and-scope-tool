@@ -113,11 +113,11 @@ export default function App() {
     };
   }, [user?.id, page]);
 
-  // Fallback to default system model (Claude Haiku) if selected model requires an unconfigured OpenRouter key
+  // Fallback to default system model (Claude Sonnet 4.6) if selected model requires an unconfigured OpenRouter key
   useEffect(() => {
     const activeModel = MODELS.find((m) => m.id === modelId);
     if (activeModel?.requiresOpenRouter && !hasOpenRouterKey) {
-      setModelId('anthropic/claude-haiku-latest');
+      setModelId('anthropic/claude-sonnet-4.6');
     }
   }, [hasOpenRouterKey, modelId]);
 

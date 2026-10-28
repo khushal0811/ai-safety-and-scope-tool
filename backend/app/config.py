@@ -15,8 +15,8 @@ class Settings(BaseSettings):
 
     OPENROUTER_API_KEY: str = ""
     GROQ_API_KEY: str = ""
-    DEFAULT_MODEL: str = "anthropic/claude-haiku-latest"
-    LLAMA_MODEL: str = "anthropic/claude-haiku-latest"
+    DEFAULT_MODEL: str = "anthropic/claude-sonnet-4.6"
+    LLAMA_MODEL: str = "anthropic/claude-sonnet-4.6"
     KEY_VAULT_MASTER_KEY: str = ""
 
     @property

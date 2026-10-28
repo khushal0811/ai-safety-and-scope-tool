@@ -45,6 +45,15 @@ export const FALLBACK_FRONTIER_MODELS: FrontierModelInfo[] = [
     recommended: true,
   },
   {
+    id: 'anthropic/claude-sonnet-4.6',
+    name: 'Claude Sonnet 4.6',
+    provider: 'Anthropic',
+    context_length: 1000000,
+    description: 'Flagship frontier model for complex reasoning and cybersecurity tool analysis.',
+    tier: 'frontier',
+    recommended: true,
+  },
+  {
     id: 'anthropic/claude-3.5-sonnet',
     name: 'Claude 3.5 Sonnet',
     provider: 'Anthropic',
