@@ -8,12 +8,10 @@ export interface ModelOption {
 }
 
 export const MODELS: ModelOption[] = [
-  { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', vendor: 'Anthropic', requiresOpenRouter: true },
-  { id: 'anthropic/claude-haiku-latest', label: 'Claude Haiku', vendor: 'Anthropic', requiresOpenRouter: true },
   { id: 'openai/gpt-4o', label: 'GPT-4o', vendor: 'OpenAI', requiresOpenRouter: true },
-  { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet', vendor: 'Anthropic', requiresOpenRouter: true },
-  { id: 'google/gemini-pro-1.5', label: 'Gemini 1.5 Pro', vendor: 'Google', requiresOpenRouter: true },
-  { id: 'meta-llama/llama-3.1-70b-instruct', label: 'Llama 3.3 70B', vendor: 'Meta', requiresOpenRouter: true },
+  { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', vendor: 'Anthropic', requiresOpenRouter: true },
+  { id: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro', vendor: 'Google', requiresOpenRouter: true },
+  { id: 'anthropic/claude-haiku-latest', label: 'Claude Haiku', vendor: 'Anthropic', requiresOpenRouter: true },
 ];
 
 export interface PromptExample {

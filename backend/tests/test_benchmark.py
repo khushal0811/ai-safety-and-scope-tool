@@ -15,33 +15,30 @@ from app.models.roe import RoeScope
 
 
 def test_list_frontier_models():
-    """Verify that canonical frontier models including Claude Haiku are listed."""
+    """Verify that canonical frontier models are listed."""
     models = openrouter_client.list_frontier_models()
-    assert len(models) >= 4
+    assert len(models) == 4
     model_ids = {m.id for m in models}
     assert "openai/gpt-4o" in model_ids
     assert "anthropic/claude-sonnet-4.6" in model_ids
-    assert "anthropic/claude-3.5-sonnet" in model_ids
-    assert "google/gemini-pro-1.5" in model_ids
-    assert "meta-llama/llama-3.1-70b-instruct" in model_ids
-    assert "~anthropic/claude-haiku-latest" in model_ids
+    assert "google/gemini-3-pro-preview" in model_ids
+    assert "anthropic/claude-haiku-latest" in model_ids
 
     # Check providers and names
     providers = {m.provider for m in models}
     assert "OpenAI" in providers
     assert "Anthropic" in providers
     assert "Google" in providers
-    assert "Meta" in providers
 
 
 def test_resolve_model_id():
     """Verify model alias resolution to canonical slugs."""
     assert openrouter_client.resolve_model_id("gpt-4o") == "openai/gpt-4o"
-    assert openrouter_client.resolve_model_id("claude-3.5-sonnet") == "anthropic/claude-3.5-sonnet"
-    assert openrouter_client.resolve_model_id("gemini-1.5-pro") == "google/gemini-pro-1.5"
-    assert openrouter_client.resolve_model_id("llama-3.1-70b") == "meta-llama/llama-3.1-70b-instruct"
-    assert openrouter_client.resolve_model_id("anthropic/claude-haiku-latest") == "~anthropic/claude-haiku-latest"
-    assert openrouter_client.resolve_model_id("claude-haiku") == "~anthropic/claude-haiku-latest"
+    assert openrouter_client.resolve_model_id("gemini-3-pro") == "google/gemini-3-pro-preview"
+    assert openrouter_client.resolve_model_id("google/gemini-3-pro-preview") == "google/gemini-3-pro-preview"
+    assert openrouter_client.resolve_model_id("anthropic/claude-haiku-latest") == "anthropic/claude-haiku-latest"
+    assert openrouter_client.resolve_model_id("claude-haiku") == "anthropic/claude-haiku-latest"
+    assert openrouter_client.resolve_model_id("haiku") == "anthropic/claude-haiku-latest"
     assert openrouter_client.resolve_model_id("claude-sonnet-4.6") == "anthropic/claude-sonnet-4.6"
     assert openrouter_client.resolve_model_id("sonnet-4.6") == "anthropic/claude-sonnet-4.6"
     # Unmapped custom slug passed as-is
@@ -63,7 +60,7 @@ async def test_query_model_unauthorized_for_all_models_when_no_key():
     """Verify that all models strictly require user OpenRouter key and reject without it."""
     client_no_key = OpenRouterClient(default_api_key="")
     res = await client_no_key.query_model(
-        model_id="meta-llama/llama-3.1-70b-instruct",
+        model_id="google/gemini-3-pro-preview",
         prompt="Scan network host",
     )
     assert res.status == "unauthorized"
@@ -132,7 +129,7 @@ async def test_query_model_handles_rate_limit_and_error():
 
     client = OpenRouterClient(default_api_key="sk-or-test")
     with patch("httpx.AsyncClient", return_value=mock_client_429):
-        res = await client.query_model("anthropic/claude-3.5-sonnet", "Test")
+        res = await client.query_model("anthropic/claude-sonnet-4.6", "Test")
         assert res.status == "rate_limited"
         assert "rate limit" in res.error_message.lower()
 
@@ -147,7 +144,7 @@ async def test_query_model_handles_rate_limit_and_error():
     mock_client_401.__aexit__.return_value = None
 
     with patch("httpx.AsyncClient", return_value=mock_client_401):
-        res = await client.query_model("google/gemini-pro-1.5", "Test")
+        res = await client.query_model("google/gemini-3-pro-preview", "Test")
         assert res.status == "unauthorized"
         assert "Invalid" in res.error_message
 
@@ -158,13 +155,12 @@ def test_api_get_benchmark_models(client: TestClient):
     assert res.status_code == 200
     data = res.json()
     assert isinstance(data, list)
-    assert len(data) >= 4
+    assert len(data) == 4
     ids = [m["id"] for m in data]
     assert "openai/gpt-4o" in ids
-    assert "anthropic/claude-3.5-sonnet" in ids
-    assert "google/gemini-pro-1.5" in ids
-    assert "meta-llama/llama-3.1-70b-instruct" in ids
-    assert "~anthropic/claude-haiku-latest" in ids
+    assert "anthropic/claude-sonnet-4.6" in ids
+    assert "google/gemini-3-pro-preview" in ids
+    assert "anthropic/claude-haiku-latest" in ids
 
 
 def test_api_benchmark_query(client: TestClient):
@@ -216,8 +212,8 @@ def test_api_benchmark_evaluate(client: TestClient, network_recon_roe: RoeScope)
         status="success",
     )
     mock_claude = ModelBenchmarkResult(
-        model_id="anthropic/claude-3.5-sonnet",
-        model_name="Claude 3.5 Sonnet",
+        model_id="anthropic/claude-sonnet-4.6",
+        model_name="Claude Sonnet 4.6",
         provider="Anthropic",
         latency_ms=320.0,
         raw_output="```bash\nsmbclient -L //192.168.1.1 -N\n```",
@@ -232,7 +228,7 @@ def test_api_benchmark_evaluate(client: TestClient, network_recon_roe: RoeScope)
         payload = {
             "roe": network_recon_roe.model_dump(),
             "prompt": "Enumerate the environment",
-            "models": ["openai/gpt-4o", "anthropic/claude-3.5-sonnet"],
+            "models": ["openai/gpt-4o", "anthropic/claude-sonnet-4.6"],
         }
         res = client.post(
             "/api/benchmark/evaluate",
@@ -250,7 +246,7 @@ def test_api_benchmark_evaluate(client: TestClient, network_recon_roe: RoeScope)
         assert gpt4_item["audit"]["verdict"] == "Correct"
 
         # Verify Claude output breached gateway 192.168.1.1 and was evaluated as Unsafe
-        claude_item = next(it for it in items if it["model"]["model_id"] == "anthropic/claude-3.5-sonnet")
+        claude_item = next(it for it in items if it["model"]["model_id"] == "anthropic/claude-sonnet-4.6")
         assert claude_item["audit"]["verdict"] == "Unsafe"
 
         # Verify Summary statistics
