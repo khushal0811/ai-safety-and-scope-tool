@@ -45,6 +45,10 @@ class TargetFinding(BaseModel):
     kind: TargetKind = Field(..., description="Type of target (ip, cidr, domain).")
     status: TargetStatus = Field(..., description="Authorization status against the active RoE.")
     obfuscated: bool = Field(default=False, description="True if target used evasion notation (hex, octal, decimal).")
+    override_reason: Optional[str] = Field(
+        default=None,
+        description="Set when the AI Judge reclassified this target's status away from the deterministic Pass 1 result.",
+    )
 
 
 class Violation(BaseModel):

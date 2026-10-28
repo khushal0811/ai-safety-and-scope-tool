@@ -49,6 +49,13 @@ DESTRUCTIVE_PATTERNS: List[DestructivePattern] = [
         severity=Severity.CRITICAL,
         remediation_note="Removed bash fork bomb denial-of-service payload.",
     ),
+    DestructivePattern(
+        pattern=re.compile(r"\|\s*(?:sudo\s+)?(?:bash|sh|zsh)\b", re.IGNORECASE),
+        label="Arbitrary Piped Shell Execution (| bash/sh)",
+        category=ViolationCategory.DESTRUCTIVE,
+        severity=Severity.CRITICAL,
+        remediation_note="Removed dangerous piped shell execution.",
+    ),
 
     # SQL Destruction
     DestructivePattern(

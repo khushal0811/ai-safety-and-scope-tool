@@ -52,83 +52,115 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
         )
         modifications.append("Stripped unauthorized 'sudo' prefix.")
 
-    # 2. Package Manager Check
-    if tool in PACKAGE_MANAGERS:
-        violations.append(
-            Violation(
-                rule="Prohibited Local Package Installation",
-                category=ViolationCategory.POLICY,
-                severity=Severity.CRITICAL,
-                detail=(
-                    f"Runtime package manager '{tool}' is prohibited. Assessment must utilize pre-installed utilities."
-                ),
-                command=parsed_cmd.raw,
-            )
-        )
-        modifications.append(f"Dropped unauthorized runtime package installation '{tool}'.")
-        return violations, modifications
-
-    # 3. Interactive Remote Session Tool Check
     allowed_lower = [t.lower() for t in roe.allowed_tools]
-    if tool in INTERACTIVE_SESSION_TOOLS and tool not in allowed_lower:
-        violations.append(
-            Violation(
-                rule="Prohibited Interactive Session Utility",
-                category=ViolationCategory.POLICY,
-                severity=Severity.WARNING,
-                detail=(
-                    f"Interactive remote utility '{tool}' is prohibited. Use non-interactive banner grab "
-                    "or port scan instead (e.g., nmap -sV -p 22)."
-                ),
-                command=parsed_cmd.raw,
-            )
-        )
-        modifications.append(f"Replaced interactive session '{tool}' with non-interactive scanner.")
-        return violations, modifications
-
-    # 4. Prohibited Offensive Tools Check
-    if tool in [t.lower() for t in roe.prohibited_tools]:
-        violations.append(
-            Violation(
-                rule="Prohibited Offensive Tool",
-                category=ViolationCategory.POLICY,
-                severity=Severity.CRITICAL,
-                detail=f'"{tool}" is explicitly banned under this engagement\'s Rules of Engagement.',
-                command=parsed_cmd.raw,
-            )
-        )
-        modifications.append(f'Removed banned tool "{tool}".')
-        return violations, modifications
-
-    # 5. Tool Whitelist Check (Permits both allowed attack tools and standard system utilities)
     sys_utils = set(WHITELISTED_SYSTEM_UTILITIES)
     if hasattr(roe, "whitelisted_system_utilities") and roe.whitelisted_system_utilities:
         sys_utils.update(u.lower() for u in roe.whitelisted_system_utilities)
 
-    if roe.allowed_tools and tool:
-        is_allowed_attack_tool = tool in allowed_lower
-        is_system_util = tool in sys_utils
+    # 2. Pipeline-aware Tool Verification across all stages
+    all_stages = [parsed_cmd] + parsed_cmd.pipeline_stages
+    for idx, stage in enumerate(all_stages):
+        stage_tool = stage.tool.lower()
+        if not stage_tool:
+            continue
 
-        if not is_allowed_attack_tool and not is_system_util:
+        # Package manager check
+        if stage_tool in PACKAGE_MANAGERS:
             violations.append(
                 Violation(
-                    rule="Tool Outside Authorized Whitelist",
+                    rule="Prohibited Local Package Installation",
                     category=ViolationCategory.POLICY,
-                    severity=Severity.WARNING,
-                    detail=f'"{tool}" is not listed in the authorized tools whitelist for this engagement.',
+                    severity=Severity.CRITICAL,
+                    detail=(
+                        f"Runtime package manager '{stage_tool}' is prohibited. Assessment must utilize pre-installed utilities."
+                    ),
                     command=parsed_cmd.raw,
                 )
             )
+            modifications.append(f"Dropped unauthorized runtime package installation '{stage_tool}'.")
 
+        # Prohibited offensive tool check
+        is_prohibited_tool = False
+        if stage_tool in [t.lower() for t in roe.prohibited_tools]:
+            is_prohibited_tool = True
+            violations.append(
+                Violation(
+                    rule="Prohibited Offensive Tool",
+                    category=ViolationCategory.POLICY,
+                    severity=Severity.CRITICAL,
+                    detail=f'"{stage_tool}" is explicitly banned under this engagement\'s Rules of Engagement.',
+                    command=parsed_cmd.raw,
+                )
+            )
+            modifications.append(f'Removed banned tool "{stage_tool}".')
 
-    # 3. Prohibited Flags Check
+        # Interactive remote session tool check
+        if stage_tool in INTERACTIVE_SESSION_TOOLS and stage_tool not in allowed_lower:
+            violations.append(
+                Violation(
+                    rule="Prohibited Interactive Session Utility",
+                    category=ViolationCategory.POLICY,
+                    severity=Severity.WARNING,
+                    detail=(
+                        f"Interactive remote utility '{stage_tool}' is prohibited. Use non-interactive banner grab "
+                        "or port scan instead (e.g., nmap -sV -p 22)."
+                    ),
+                    command=parsed_cmd.raw,
+                )
+            )
+            modifications.append(f"Replaced interactive session '{stage_tool}' with non-interactive scanner.")
+
+        # Piped shell interpreter execution check (e.g. echo ... | bash)
+        if idx > 0 and stage_tool in {"sh", "bash", "zsh"}:
+            violations.append(
+                Violation(
+                    rule="Arbitrary Piped Shell Execution",
+                    category=ViolationCategory.DESTRUCTIVE,
+                    severity=Severity.CRITICAL,
+                    detail=f"Piping stream into shell interpreter '{stage_tool}' constitutes arbitrary code execution risk.",
+                    command=parsed_cmd.raw,
+                )
+            )
+            modifications.append(f"Dropped piped execution into interpreter '{stage_tool}'.")
+
+        # Whitelist check (only evaluate if not already flagged as an explicitly banned offensive tool)
+        if not is_prohibited_tool and roe.allowed_tools and stage_tool:
+            is_allowed = stage_tool in allowed_lower
+            is_sys = stage_tool in sys_utils
+            if not is_allowed and not is_sys:
+                violations.append(
+                    Violation(
+                        rule="Tool Outside Authorized Whitelist",
+                        category=ViolationCategory.POLICY,
+                        severity=Severity.WARNING,
+                        detail=f'"{stage_tool}" is not listed in the authorized tools whitelist for this engagement.',
+                        command=parsed_cmd.raw,
+                    )
+                )
+
+    # 3. Prohibited Flags & Action Sequences Check (Tokenized & phrase-matched)
+    raw_flag_tokens = {f.split("=", 1)[0].lower() for stage in all_stages for f in stage.flags}
+    toks_lower = [t.lower() for stage in all_stages for t in stage.tokens]
+
     for banned_flag in roe.prohibited_flags:
         bf_clean = banned_flag.strip()
         if not bf_clean:
             continue
-        # Search for exact substring or regex boundary
-        pattern = re.compile(rf"(?:\s|^){re.escape(bf_clean)}(?:\s|=|:|$)", re.IGNORECASE)
-        if pattern.search(parsed_cmd.raw) or bf_clean.lower() in parsed_cmd.raw.lower():
+        bf_lower = bf_clean.lower()
+        if bf_lower.startswith("-"):
+            # Match flag tokens (e.g. --script-args or -T5) exactly
+            hit = bf_lower in raw_flag_tokens
+        else:
+            # Action-shaped prohibitions (e.g. "s3 rm", "kerberos::golden"):
+            # require the phrase to appear as whole, adjacent tokens
+            phrase_tokens = bf_lower.split()
+            if not phrase_tokens:
+                continue
+            hit = any(
+                toks_lower[i : i + len(phrase_tokens)] == phrase_tokens
+                for i in range(len(toks_lower) - len(phrase_tokens) + 1)
+            )
+        if hit:
             violations.append(
                 Violation(
                     rule="Prohibited Parameter or Action Flag",

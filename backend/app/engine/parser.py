@@ -32,6 +32,12 @@ TARGET_FLAGS: Set[str] = {
     "-d", "--domain", "-L", "-l", "--server", "-s",
 }
 
+# Exclusion flags whose arguments must NEVER be treated as scan targets
+# (exclusion lists, negative-match filters, input target files).
+EXCLUSION_TARGET_FLAGS: Set[str] = {
+    "--exclude", "--exclude-hosts", "--exclude-ports", "-iL", "--excludefile",
+}
+
 # Typical file extensions to avoid classifying dictionary files as domains
 FILE_EXTENSIONS: Set[str] = {
     "txt", "php", "py", "lst", "html", "htm", "xml", "json", "sh", "conf",
@@ -48,6 +54,7 @@ class ParsedCommand:
     tokens: List[str] = field(default_factory=list)
     flags: List[str] = field(default_factory=list)
     targets: List[NormalizedTarget] = field(default_factory=list)
+    pipeline_stages: List["ParsedCommand"] = field(default_factory=list)
 
 
 def extract_host_from_token(token: str) -> Optional[str]:
@@ -191,8 +198,75 @@ def split_chained_commands(cmd_str: str) -> List[str]:
     return [s for s in sub_commands if s]
 
 
-def parse_cli_command(command_str: str) -> ParsedCommand:
+def split_pipeline_segments(cmd_str: str) -> List[str]:
+    """Split a single sub-command string on unquoted `|` into pipeline stages."""
+    segments: List[str] = []
+    current: List[str] = []
+    in_single = in_double = False
+    i = 0
+    chars = list(cmd_str)
+    length = len(chars)
+
+    while i < length:
+        c = chars[i]
+        if c == "'" and not in_double:
+            in_single = not in_single
+            current.append(c)
+        elif c == '"' and not in_single:
+            in_double = not in_double
+            current.append(c)
+        elif c == "|" and not in_single and not in_double:
+            # Skip logical OR `||`
+            if i + 1 < length and chars[i + 1] == "|":
+                current.append(c)
+                current.append(chars[i + 1])
+                i += 1
+            else:
+                seg = "".join(current).strip()
+                if seg:
+                    segments.append(seg)
+                current = []
+        else:
+            current.append(c)
+        i += 1
+
+    if current:
+        seg = "".join(current).strip()
+        if seg:
+            segments.append(seg)
+
+    return [s for s in segments if s]
+
+
+def parse_cli_command(command_str: str, is_substage: bool = False) -> ParsedCommand:
     """Parse a single command into tool, tokens, flags, and targets using shlex."""
+    # Check for unquoted pipeline segments unless already inspecting a substage
+    if not is_substage:
+        stages = split_pipeline_segments(command_str)
+        if len(stages) > 1:
+            first_stage = parse_cli_command(stages[0], is_substage=True)
+            other_stages = [parse_cli_command(s, is_substage=True) for s in stages[1:]]
+
+            all_flags = list(first_stage.flags)
+            all_targets = list(first_stage.targets)
+            for stage in other_stages:
+                all_flags.extend(stage.flags)
+                all_targets.extend(stage.targets)
+
+            try:
+                all_tokens = shlex.split(command_str, comments=True, posix=True)
+            except ValueError:
+                all_tokens = command_str.split()
+
+            return ParsedCommand(
+                raw=command_str,
+                tool=first_stage.tool,
+                tokens=all_tokens,
+                flags=all_flags,
+                targets=all_targets,
+                pipeline_stages=other_stages,
+            )
+
     # Tokenize using shlex safely
     try:
         tokens = shlex.split(command_str, comments=True, posix=True)
@@ -277,12 +351,21 @@ def parse_cli_command(command_str: str) -> ParsedCommand:
             # Check if this flag takes an argument e.g. -u http://target.com or --url=http://target.com
             if "=" in tok:
                 flag_name, flag_val = tok.split("=", 1)
+                if flag_name.lower() in EXCLUSION_TARGET_FLAGS:
+                    i += 1
+                    continue
                 host = extract_host_from_token(flag_val)
                 if host:
                     norm = normalize_ip_candidate(host)
                     if norm.is_valid:
                         targets.append(norm)
-            elif tok in TARGET_FLAGS and i + 1 < num_tokens:
+            elif tok.lower() in EXCLUSION_TARGET_FLAGS and i + 1 < num_tokens:
+                next_tok = tokens[i + 1]
+                if not next_tok.startswith("-"):
+                    i += 1
+                i += 1
+                continue
+            elif tok.lower() in TARGET_FLAGS and i + 1 < num_tokens:
                 next_tok = tokens[i + 1]
                 if not next_tok.startswith("-"):
                     host = extract_host_from_token(next_tok)

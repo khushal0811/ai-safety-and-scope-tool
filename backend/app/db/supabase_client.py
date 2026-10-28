@@ -346,7 +346,11 @@ def fetch_custom_roes(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     try:
         query = client.table("custom_roes").select("*").order("created_at", desc=True)
         if user_id:
-            query = query.or_(f"user_id.eq.{user_id},user_id.is.null")
+            if is_valid_uuid(user_id):
+                query = query.or_(f"user_id.eq.{user_id},user_id.is.null")
+            else:
+                logger.warning(f"[Supabase] Invalid user_id UUID passed to fetch_custom_roes: '{user_id}'. Querying public only.")
+                query = query.is_("user_id", "null")
         res = query.execute()
         return res.data or []
     except Exception as e:
