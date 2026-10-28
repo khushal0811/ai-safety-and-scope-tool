@@ -507,3 +507,38 @@ def get_user_vault_status(user_id: str) -> Dict[str, Any]:
             "has_groq_key": False,
             "groq_hint": None,
         }
+
+
+SUPER_ADMIN_EMAIL = "arorakhusuhal1108@gmail.com"
+
+
+def resolve_user_role(email: str) -> str:
+    """Enforce immutable RBAC policy.
+    
+    Khushal Arora (arorakhusuhal1108@gmail.com) is the designated Super Admin.
+    All other users are Penetration Testers. No other user can ever be Admin.
+    """
+    if not email:
+        return "penetration_tester"
+    return "admin" if email.strip().lower() == SUPER_ADMIN_EMAIL.lower() else "penetration_tester"
+
+
+def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch user profile with enforced role governance."""
+    if not is_valid_uuid(user_id):
+        return None
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        res = client.table("profiles").select("*").eq("id", user_id).limit(1).execute()
+        rows = res.data or []
+        if not rows:
+            return None
+        profile = rows[0]
+        profile["role"] = resolve_user_role(profile.get("email", ""))
+        return profile
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to fetch profile for {user_id}: {e}")
+        return None
+

@@ -102,10 +102,18 @@ Vallum follows an architectural, tactile dark-canvas design philosophy focused o
 ## 🛡️ Security & Privacy Guarantees
 
 - **Zero Host Execution:** Vallum is strictly a static verification and auditing tool. It will **never** execute proposed pentest commands on the host machine or network.
-- **IP Obfuscation Normalization:** Addresses obfuscation evasion techniques (decimal, octal, hex, IPv6-mapped IPv4) using Python's `ipaddress` library before validation.
-- **Indirect Prompt Injection Defense:** Document parser wraps uploaded RoEs in strict system boundaries and validates outputs against strict Pydantic schemas.
-- **API Key Isolation:** User-entered keys remain strictly in browser `sessionStorage` or transient memory—never logged or saved to the database.
-- **Database Row Level Security (RLS):** Supabase PostgreSQL tables enforce strict access controls.
+- **Role-Based Access Control (RBAC):** Built-in immutable role enforcement. **Khushal Arora** (`arorakhusuhal1108@gmail.com`) is designated as the sole Super Admin; all other registered accounts are automatically assigned **Penetration Tester**. Database triggers strictly prevent unauthorized elevation to admin.
+- **Verified Authentication:** Anonymous account creation is disabled. All accounts require verified Google OAuth, GitHub OAuth, or Email + Password with confirmed email delivery.
+- **IP Obfuscation Normalization:** Normalizes evasion techniques (decimal DWORD, octal, hex, IPv6-mapped IPv4) using deterministic algorithms prior to CIDR matching.
+- **Prompt Injection Defense:** RoE document parser enforces strict XML boundary isolation (`<untrusted_document_content>`) and strips wildcard overrides (`0.0.0.0/0`).
+- **Cryptographic API Vault:** User API keys (OpenRouter / Groq) are encrypted using AES-256-GCM zero-knowledge encryption before reaching PostgreSQL storage.
+
+---
+
+## 📚 Documentation & Lab Walkthroughs
+
+* [**Deployment & Setup Manual (`docs/SETUP.md`)**](docs/SETUP.md): Step-by-step installation, environment variables, Supabase migrations (`001` through `004`), and API vault setup.
+* [**20-Scenario Lab Walkthrough (`docs/LAB_WALKTHROUGH.md`)**](docs/LAB_WALKTHROUGH.md): Comprehensive offensive validation matrix testing Metasploitable 2, DVWA, Nmap timing templates, SQLMap destructive queries, and cloud metadata SSRF.
 
 ---
 
@@ -115,27 +123,21 @@ Vallum follows an architectural, tactile dark-canvas design philosophy focused o
 ai-safety-and-scope-tool/
 ├── backend/                  # FastAPI audit engine & verification rules
 │   ├── app/
-│   │   ├── api/              # API endpoints (/api/roe, /api/audit, /api/history)
-│   │   ├── core/             # Configuration & security policies
-│   │   ├── engine/           # Deterministic validators (IP, Regex, CVE, Whitelist)
-│   │   ├── remediation/      # Llama 3 parser & safe command rewriter
-│   │   └── models/           # Pydantic schemas (RoE, AuditResult, Violations)
-│   ├── tests/                # Deterministic unit test suite
-│   ├── requirements.txt
-│   └── .env.example
+│   │   ├── api/              # API endpoints (/api/roe, /api/audit, /api/benchmark, /api/vault)
+│   │   ├── db/               # Supabase PostgreSQL client & local fallback cache
+│   │   ├── engine/           # Shlex lexer, IP validator, CVE checker, AI Judge, Sanitizer
+│   │   └── models/           # Pydantic schemas (RoE, AuditResult, BenchmarkMatrix)
+│   ├── tests/                # 119+ test fixtures (Security audit, 20 lab scenarios, vault)
+│   └── requirements.txt
 ├── frontend/                 # React + Vite multi-page web application
 │   ├── src/
-│   │   ├── components/       # AuthLandingPage, RoeSelector, PromptComposer, AuditResultView, PastAuditsView, SettingsView, NavBar
-│   │   ├── data/             # RoE presets and offensive model templates
-│   │   ├── lib/              # Auth store, history store, IP normalizer, diff engine, key store
-│   │   ├── services/         # Audit service & client-side deterministic demo engine
-│   │   └── types/            # TypeScript interfaces (AuditResult, RoE, PastAudit, UserProfile)
-│   ├── package.json
-│   └── vite.config.ts
+│   │   ├── components/       # AuditStudio, BenchmarkStudio, PastAudits, PastBenchmarks, AuthModal
+│   │   ├── lib/              # Auth store, benchmark store, history store, crypto vault, diff engine
+│   │   └── types/            # TypeScript interfaces
 ├── supabase/                 # PostgreSQL migrations & Row Level Security
-│   └── migrations/           # 001_initial_schema.sql (profiles & audit_logs with RLS)
-├── scenarios/                # Standardized JSON scenario presets
-└── docs/                     # Architecture documentation & API specs
+│   └── migrations/           # 001_initial_schema to 004_auth_rbac_hardening
+├── docs/                     # SETUP.md & LAB_WALKTHROUGH.md
+└── README.md
 ```
 
 ---
@@ -143,10 +145,9 @@ ai-safety-and-scope-tool/
 ## 🚀 Getting Started
 
 ### Prerequisites
-- **Python 3.10+**
+- **Python 3.11+**
 - **Node.js 18+** & `npm`
-- **Supabase Account** (Cloud PostgreSQL)
-- **OpenRouter API Key** (for Llama 3 parser and multi-model benchmarking)
+- **Supabase Project** (Cloud PostgreSQL or Local CLI)
 
 ### Setup & Installation
 ```bash
@@ -156,14 +157,18 @@ cd ai-safety-and-scope-tool
 
 # Setup Backend
 cd backend
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+
+# Run Tests
+pytest tests/ -v
 
 # Setup Frontend
 cd ../frontend
 npm install
+npm run build
 npm run dev
 ```
 
@@ -172,3 +177,4 @@ npm run dev
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
