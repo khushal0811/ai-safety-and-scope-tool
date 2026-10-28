@@ -99,15 +99,43 @@ export function NavBar({
             <span className="status-pill__text">{live ? 'Live Engine' : 'Demo Mode'}</span>
           </span>
 
-          {/* User Auth Profile or Google Login button */}
+          {/* User Auth Profile or Login button */}
           {currentUser ? (
             <button
               className="user-nav-pill"
               onClick={onOpenAuth}
-              title={`Logged in as ${currentUser.email}`}
+              title={`Logged in as ${currentUser.email} (${currentUser.role === 'admin' ? 'Super Admin' : 'Penetration Tester'})`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}
             >
               <img src={currentUser.avatarUrl} alt={currentUser.name} className="user-nav-pill__avatar" />
               <span className="user-nav-pill__name">{currentUser.name.split(' ')[0]}</span>
+              {currentUser.role === 'admin' ? (
+                <span style={{
+                  fontSize: 9.5,
+                  fontWeight: 700,
+                  padding: '1.5px 5px',
+                  borderRadius: 3,
+                  background: 'rgba(234, 179, 8, 0.16)',
+                  border: '1px solid rgba(234, 179, 8, 0.4)',
+                  color: '#eab308',
+                  letterSpacing: '0.06em',
+                }}>
+                  ADMIN
+                </span>
+              ) : (
+                <span style={{
+                  fontSize: 9.5,
+                  fontWeight: 600,
+                  padding: '1.5px 5px',
+                  borderRadius: 3,
+                  background: 'rgba(34, 211, 238, 0.12)',
+                  border: '1px solid rgba(34, 211, 238, 0.3)',
+                  color: '#22d3ee',
+                  letterSpacing: '0.03em',
+                }}>
+                  TESTER
+                </span>
+              )}
             </button>
           ) : (
             <button

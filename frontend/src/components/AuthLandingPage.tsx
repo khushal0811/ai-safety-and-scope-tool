@@ -1,12 +1,14 @@
 import { useState, useRef, type FormEvent } from 'react';
 import type { UserProfile } from '../types/user';
-import { createEmailUser } from '../lib/authStore';
+import { createEmailUser, resolveUserRole } from '../lib/authStore';
 import {
+  supabase,
   signInWithGoogle,
   signInWithGithub,
   signInWithEmailPassword,
   signUpWithEmailPassword,
 } from '../lib/supabaseClient';
+
 import { GoogleIcon, GithubIcon, MailIcon, MoonIcon, ShieldIcon, SunIcon, CheckIcon, AlertIcon, VallumIcon } from './Icons';
 
 interface Props {
@@ -110,6 +112,7 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
         name: (supaUser.user_metadata?.full_name || email.trim().split('@')[0]) as string,
         avatarUrl: (supaUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email.trim())}`) as string,
         provider: 'email',
+        role: resolveUserRole(supaUser.email || email.trim()),
         isVerified: true,
         createdAt: supaUser.created_at || new Date().toISOString(),
       };
@@ -151,6 +154,7 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
         name: (supaUser.user_metadata?.full_name || name.trim() || email.trim().split('@')[0]) as string,
         avatarUrl: (supaUser.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email.trim())}`) as string,
         provider: 'email',
+        role: resolveUserRole(supaUser.email || email.trim()),
         isVerified: true,
         createdAt: supaUser.created_at || new Date().toISOString(),
       };
@@ -180,7 +184,7 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
     }
   }
 
-  function handleVerifyOtp() {
+  async function handleVerifyOtp() {
     const code = otp.join('');
     if (code.length < 6) {
       setError('Please enter all 6 digits of your verification code.');
@@ -189,22 +193,48 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
 
     setLoading(true);
     setError(null);
-    setTimeout(() => {
-      const user = createEmailUser(email, name, true);
+    try {
+      if (supabase) {
+        const { data, error: supaErr } = await supabase.auth.verifyOtp({
+          email: email.trim(),
+          token: code,
+          type: 'signup',
+        });
+        if (supaErr) {
+          setLoading(false);
+          setError(supaErr.message);
+          return;
+        }
+        if (data.user) {
+          const profile: UserProfile = {
+            id: data.user.id,
+            email: data.user.email || email.trim(),
+            name: (data.user.user_metadata?.full_name || name.trim() || email.trim().split('@')[0]) as string,
+            avatarUrl: (data.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email.trim())}`) as string,
+            provider: 'email',
+            role: resolveUserRole(data.user.email || email.trim()),
+            isVerified: true,
+            createdAt: data.user.created_at || new Date().toISOString(),
+          };
+          onAuthenticated(profile);
+          setLoading(false);
+          return;
+        }
+      }
+      const user = createEmailUser(email.trim(), name.trim(), true);
       onAuthenticated(user);
       setLoading(false);
-    }, 400);
-  }
-
-  function handleAutoFillDemoOtp() {
-    setOtp(['8', '4', '9', '2', '0', '1']);
-    setError(null);
+    } catch (err: any) {
+      setLoading(false);
+      setError(err?.message || 'Verification failed. Please check the code.');
+    }
   }
 
   function handleResend() {
     setResendNotice(true);
     setTimeout(() => setResendNotice(false), 3000);
   }
+
 
   return (
     <div className="landing-layout">
@@ -446,26 +476,18 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
                   ))}
                 </div>
 
-                {/* Demo Helper Pill */}
-                <div style={{ textAlign: 'center', margin: '14px 0 20px' }}>
+                {/* Action button */}
+                <div style={{ marginTop: 24 }}>
                   <button
                     type="button"
-                    className="btn btn--ghost btn--sm mono font-xs"
-                    onClick={handleAutoFillDemoOtp}
-                    style={{ textDecoration: 'underline', color: 'var(--accent)' }}
+                    className="btn btn--primary btn--block btn--lg"
+                    onClick={handleVerifyOtp}
+                    disabled={loading}
                   >
-                    Auto-fill demo code (849201)
+                    {loading ? 'Verifying...' : 'Verify Email & Enter Studio'}
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  className="btn btn--primary btn--block btn--lg"
-                  onClick={handleVerifyOtp}
-                  disabled={loading}
-                >
-                  {loading ? 'Verifying...' : 'Verify Email & Enter Studio'}
-                </button>
 
                 <div className="row between" style={{ marginTop: 16, fontSize: 12 }}>
                   <button

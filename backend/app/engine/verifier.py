@@ -258,6 +258,13 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
     all_violations.extend(cve_violations)
     all_modifications.extend(cve_notes)
 
+    # 2b. Global destructive checks across the entire model response (catches fork bombs, standalone wipes)
+    global_destructive = check_destructive_commands(request.model_output)
+    for gd in global_destructive:
+        if not any(v.rule == gd.rule for v in all_violations):
+            all_violations.append(gd)
+
+
     # 3. Check for empty command output
     if not parsed_commands:
         all_violations.append(
