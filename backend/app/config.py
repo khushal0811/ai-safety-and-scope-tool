@@ -13,25 +13,28 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
-    GROQ_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
-    LLAMA_MODEL: str = "openai/gpt-oss-120b"
+    GROQ_API_KEY: str = ""
+    DEFAULT_MODEL: str = "anthropic/claude-haiku-latest"
+    LLAMA_MODEL: str = "anthropic/claude-haiku-latest"
     KEY_VAULT_MASTER_KEY: str = ""
 
     @property
     def llm_provider(self) -> str:
-        if self.GROQ_API_KEY:
-            return "groq"
         if self.OPENROUTER_API_KEY:
             return "openrouter"
+        if self.GROQ_API_KEY:
+            return "groq"
         return "none"
 
     @property
     def llm_api_key(self) -> str:
-        return self.GROQ_API_KEY or self.OPENROUTER_API_KEY
+        return self.OPENROUTER_API_KEY or self.GROQ_API_KEY
 
     @property
     def llm_base_url(self) -> str:
+        if self.OPENROUTER_API_KEY:
+            return "https://openrouter.ai/api/v1"
         if self.GROQ_API_KEY:
             return "https://api.groq.com/openai/v1"
         return "https://openrouter.ai/api/v1"

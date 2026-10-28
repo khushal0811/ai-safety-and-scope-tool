@@ -58,10 +58,10 @@ export function BenchmarkStudioView({
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(() => {
     const hasKey = Boolean(getOpenRouterKey()?.trim());
     if (hasKey) {
-      return new Set(['meta-llama/llama-3.1-70b-instruct', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5']);
+      return new Set(['anthropic/claude-haiku-latest', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5']);
     }
-    // Only Llama has built-in system key; others require user OpenRouter key
-    return new Set(['meta-llama/llama-3.1-70b-instruct']);
+    // Claude Haiku has built-in system key; others require user OpenRouter key
+    return new Set(['anthropic/claude-haiku-latest']);
   });
 
   // Scenario & Prompt
@@ -93,12 +93,12 @@ export function BenchmarkStudioView({
       setSelectedModelIds((prev) => {
         const next = new Set<string>();
         for (const id of prev) {
-          if (id.includes('llama')) {
+          if (id.includes('haiku')) {
             next.add(id);
           }
         }
         if (next.size === 0) {
-          next.add('meta-llama/llama-3.1-70b-instruct');
+          next.add('anthropic/claude-haiku-latest');
         }
         return next;
       });
@@ -108,7 +108,7 @@ export function BenchmarkStudioView({
   // Active models that are selected AND authorized/unlocked to run
   const activeSelectedModelIds = useMemo(() => {
     return Array.from(selectedModelIds).filter((id) => {
-      if (id.includes('llama')) return true;
+      if (id.includes('haiku')) return true;
       return hasOpenRouterKey;
     });
   }, [selectedModelIds, hasOpenRouterKey]);
@@ -124,8 +124,8 @@ export function BenchmarkStudioView({
 
   // Model toggling
   function toggleModel(id: string) {
-    const isLlama = id.includes('llama');
-    if (!hasOpenRouterKey && !isLlama) {
+    const isSystemModel = id.includes('haiku');
+    if (!hasOpenRouterKey && !isSystemModel) {
       onNavigateSettings();
       return;
     }
@@ -152,7 +152,7 @@ export function BenchmarkStudioView({
 
     const modelsToRun = activeSelectedModelIds.length > 0
       ? activeSelectedModelIds
-      : ['meta-llama/llama-3.1-70b-instruct'];
+      : ['anthropic/claude-haiku-latest'];
 
     try {
       const result = await evaluateBenchmark(
@@ -391,7 +391,7 @@ export function BenchmarkStudioView({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
                       <KeyIcon width={15} height={15} style={{ color: 'var(--warn-fg)', flexShrink: 0 }} />
                       <span>
-                        <strong>Frontier Models Gated:</strong> To benchmark GPT-4o, Claude 3.5 Sonnet, and Gemini 1.5 Pro live, enter your OpenRouter key in Settings. Meta Llama 3.3 is ready to test immediately via the built-in system key.
+                        <strong>Frontier Models Gated:</strong> To benchmark GPT-4o, Claude 3.5 Sonnet, and Gemini 1.5 Pro live, enter your OpenRouter key in Settings. Anthropic Claude Haiku is ready to test immediately via the built-in system key.
                       </span>
                     </div>
                     <button
@@ -407,14 +407,14 @@ export function BenchmarkStudioView({
 
               <div className="benchmark-models-grid">
                 {(availableModels.length > 0 ? availableModels : [
-                  { id: 'meta-llama/llama-3.1-70b-instruct', name: 'Llama 3.3 70B', provider: 'Meta', tier: 'frontier', recommended: true, context_length: 128000, description: 'Built-in System Key' },
+                  { id: 'anthropic/claude-haiku-latest', name: 'Claude Haiku', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 200000, description: 'Built-in System Key' },
                   { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'OpenAI', tier: 'frontier', recommended: true, context_length: 128000, description: 'Flagship Multimodal' },
                   { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', tier: 'frontier', recommended: true, context_length: 200000, description: 'Deep Tool & Logic' },
                   { id: 'google/gemini-pro-1.5', name: 'Gemini 1.5 Pro', provider: 'Google', tier: 'frontier', recommended: true, context_length: 2000000, description: '2M Token Context' },
                 ]).map((m) => {
                   const isSelected = selectedModelIds.has(m.id);
-                  const isLlama = m.id.includes('llama');
-                  const isLocked = !hasOpenRouterKey && !isLlama;
+                  const isSystemModel = m.id.includes('haiku');
+                  const isLocked = !hasOpenRouterKey && !isSystemModel;
 
                   return (
                     <div
@@ -433,7 +433,7 @@ export function BenchmarkStudioView({
                       <div>
                         <div className="benchmark-model-card__header">
                           <span className="benchmark-model-card__provider">{m.provider}</span>
-                          {isLlama ? (
+                          {isSystemModel ? (
                             <span className="badge badge--success font-xs">System Key Ready</span>
                           ) : isLocked ? (
                             <span className="badge badge--warning font-xs" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>

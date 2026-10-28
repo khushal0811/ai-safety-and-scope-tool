@@ -113,11 +113,11 @@ export default function App() {
     };
   }, [user?.id, page]);
 
-  // Fallback to free system model (Llama 3.3) if selected model requires an unconfigured OpenRouter key
+  // Fallback to default system model (Claude Haiku) if selected model requires an unconfigured OpenRouter key
   useEffect(() => {
     const activeModel = MODELS.find((m) => m.id === modelId);
     if (activeModel?.requiresOpenRouter && !hasOpenRouterKey) {
-      setModelId('meta-llama/llama-3.1-70b-instruct');
+      setModelId('anthropic/claude-haiku-latest');
     }
   }, [hasOpenRouterKey, modelId]);
 

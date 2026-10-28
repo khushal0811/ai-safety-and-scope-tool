@@ -20,7 +20,11 @@ class LLMClient:
     def __init__(self):
         self.api_key = settings.llm_api_key
         self.base_url = settings.llm_base_url
-        self.model = settings.LLAMA_MODEL
+        raw_model = getattr(settings, "DEFAULT_MODEL", settings.LLAMA_MODEL)
+        if raw_model in ("anthropic/claude-haiku-latest", "claude-haiku", "claude-haiku-latest"):
+            self.model = "~anthropic/claude-haiku-latest"
+        else:
+            self.model = raw_model
 
     @property
     def is_configured(self) -> bool:
@@ -56,8 +60,11 @@ class LLMClient:
             ],
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
         }
+
+        # Only append response_format if not using Claude / Anthropic
+        if "claude" not in self.model.lower():
+            payload["response_format"] = {"type": "json_object"}
 
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
@@ -71,7 +78,14 @@ class LLMClient:
                     data = res.json()
                     choices = data.get("choices", [])
                     if choices:
-                        raw_content = choices[0].get("message", {}).get("content", "")
+                        raw_content = choices[0].get("message", {}).get("content", "").strip()
+                        if raw_content.startswith("```"):
+                            lines = raw_content.splitlines()
+                            if lines and lines[0].startswith("```"):
+                                lines = lines[1:]
+                            if lines and lines[-1].startswith("```"):
+                                lines = lines[:-1]
+                            raw_content = "\n".join(lines).strip()
                         return json.loads(raw_content)
                 else:
                     logger.error(

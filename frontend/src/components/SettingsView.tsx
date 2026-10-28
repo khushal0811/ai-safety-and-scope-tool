@@ -191,10 +191,10 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                   <strong style={{ fontSize: 13.5 }}>Option 1: Built-in System Provider (Default)</strong>
                   <span className="tag tag--ok">● Active &amp; Ready</span>
                 </span>
-                <span className="mono font-xs text-muted">Backend Managed · Groq Llama 3.3</span>
+                <span className="mono font-xs text-muted">Backend Managed · Claude Haiku</span>
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, lineHeight: 1.5 }}>
-                Zero setup required. Powered by Vallum's server-side Groq infrastructure for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
+                Zero setup required. Powered by Vallum's server-side OpenRouter infrastructure (Claude Haiku Latest) for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
               </p>
             </div>
 
@@ -222,7 +222,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                     <span className="mono font-xs text-muted">sk-or-v1-...</span>
                   </div>
                   <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12, lineHeight: 1.5 }}>
-                    Bring your own OpenRouter API key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1) in real-time. Keys are encrypted with AES-256-GCM before saving to your database vault.
+                    Bring your own OpenRouter API key to benchmark frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.3) in real-time. Keys are encrypted with AES-256-GCM before saving to your database vault.
                   </p>
                   <div className="row" style={{ gap: 8, marginTop: 4 }}>
                     <input

@@ -181,7 +181,7 @@ export async function parseRoeFile(file: File, userId?: string): Promise<RoeScop
 
 /**
  * Query a selected model live via the backend engine.
- * Supports Groq Llama 3.3 (free system tier) or OpenRouter models (if key provided).
+ * Supports Claude Haiku via OpenRouter (system tier) or frontier models (if key provided).
  */
 export async function queryLiveModel(
   prompt: string,

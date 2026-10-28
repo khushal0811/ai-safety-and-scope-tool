@@ -240,7 +240,7 @@ function CustomRoe({
             onClick={handleParseText}
             style={{ fontSize: 12, padding: '4px 10px' }}
           >
-            {parsing ? 'Parsing with LLM...' : '⚡ Extract Scope (Llama 3)'}
+            {parsing ? 'Parsing with LLM...' : '⚡ Extract Scope (Claude Haiku)'}
           </button>
         </div>
         <textarea
