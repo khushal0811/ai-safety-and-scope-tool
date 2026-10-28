@@ -483,6 +483,33 @@ vallum() {
     return 0
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """Generate a formal, signed compliance attestation report with SHA-256 hash chains."""
+    from app.engine.reporter import generate_compliance_report
+
+    config = get_config()
+    roe_id = args.roe or config.get("active_roe_id", DEFAULT_ROE_ID)
+    fmt = args.format or "markdown"
+
+    try:
+        content, media_type, filename = generate_compliance_report(roe_id=roe_id, format=fmt)
+        out_path = args.output or filename
+        if isinstance(content, str):
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        else:
+            with open(out_path, "wb") as f:
+                f.write(content)
+
+        print(f"\n{Colors.GREEN}{Colors.BOLD}[✓] Formal Compliance Attestation Generated:{Colors.RESET} {Colors.WHITE}{out_path}{Colors.RESET}")
+        print(f"    Format: {Colors.CYAN}{fmt.upper()}{Colors.RESET} | Scope: {Colors.PURPLE}{roe_id}{Colors.RESET}")
+        print(f"    Media-Type: {media_type}\n")
+        return 0
+    except Exception as e:
+        sys.stderr.write(f"{Colors.RED}[!] Failed to generate compliance report: {e}{Colors.RESET}\n")
+        return 1
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -538,6 +565,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("shell", nargs="?", choices=["bash", "zsh", "fish"], default="zsh")
     p_init.add_argument("--install", action="store_true", help="Automatically append wrapper to user's shell rc file")
 
+    # 7. report
+    p_report = subparsers.add_parser("report", help="Generate formal signed RoE compliance attestation (PDF/Markdown)")
+    p_report.add_argument("--roe", default=None, help="Preset ID or custom RoE ID")
+    p_report.add_argument("--format", choices=["markdown", "pdf", "json"], default="markdown", help="Report format")
+    p_report.add_argument("-o", "--output", default=None, help="Output destination file path")
+
     return parser
 
 
@@ -565,6 +598,8 @@ def main() -> int:
         return cmd_daemon(args)
     elif args.subcommand == "init":
         return cmd_init(args)
+    elif args.subcommand == "report":
+        return cmd_report(args)
     else:
         parser.print_help()
         return 0

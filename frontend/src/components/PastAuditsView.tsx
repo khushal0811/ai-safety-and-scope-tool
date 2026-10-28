@@ -10,9 +10,11 @@ import {
   HistoryIcon,
   RefreshIcon,
   SearchIcon,
+  ShieldIcon,
   TrashIcon,
   XIcon,
 } from './Icons';
+import { downloadComplianceReport } from '../services/auditService';
 
 interface Props {
   audits: PastAudit[];
@@ -37,6 +39,19 @@ export function PastAuditsView({
   const [syncing, setSyncing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [exportingReport, setExportingReport] = useState<'pdf' | 'markdown' | null>(null);
+
+  async function handleDownloadAttestation(format: 'pdf' | 'markdown', roeIdOverride?: string) {
+    setExportingReport(format);
+    try {
+      const roeId = roeIdOverride || (selectedAudit?.roeId) || (filteredAudits[0]?.roeId) || 'ROE-PRESET-NET-001';
+      await downloadComplianceReport(roeId, format, currentUser?.id);
+    } catch (err) {
+      console.error('Failed to export compliance attestation:', err);
+    } finally {
+      setExportingReport(null);
+    }
+  }
 
   async function handleCloudSync() {
     if (!onSyncCloud) return;
@@ -281,7 +296,28 @@ export function PastAuditsView({
               {syncing ? 'Syncing...' : 'Sync Cloud'}
             </button>
           )}
-          <button className="btn btn--sm" onClick={exportJSON} title="Download audits as JSON">
+          <button
+            type="button"
+            className="btn btn--sm btn--primary row"
+            style={{ gap: 6 }}
+            onClick={() => handleDownloadAttestation('pdf')}
+            disabled={exportingReport !== null}
+            title="Download signed, client-ready RoE compliance attestation PDF with cryptographic SHA-256 hash chains"
+          >
+            <ShieldIcon width={13} height={13} />
+            {exportingReport === 'pdf' ? 'Generating PDF...' : 'RoE Attestation (PDF)'}
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm row"
+            style={{ gap: 6 }}
+            onClick={() => handleDownloadAttestation('markdown')}
+            disabled={exportingReport !== null}
+            title="Download signed RoE compliance attestation in Markdown"
+          >
+            {exportingReport === 'markdown' ? 'Generating...' : 'Markdown'}
+          </button>
+          <button className="btn btn--sm btn--ghost" onClick={exportJSON} title="Download audits as JSON">
             <DownloadIcon width={13} height={13} /> Export JSON
           </button>
         </div>
@@ -541,6 +577,17 @@ export function PastAuditsView({
                     Delete Permanently
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="btn btn--sm row"
+                  style={{ gap: 6 }}
+                  onClick={() => handleDownloadAttestation('pdf', selectedAudit.roeId)}
+                  disabled={exportingReport !== null}
+                  title={`Download signed RoE compliance attestation report for ${selectedAudit.roeName}`}
+                >
+                  <ShieldIcon width={13} height={13} />
+                  {exportingReport === 'pdf' ? 'Generating...' : 'Scope Attestation (PDF)'}
+                </button>
                 <button className="btn" onClick={() => setSelectedAudit(null)}>
                   Close
                 </button>

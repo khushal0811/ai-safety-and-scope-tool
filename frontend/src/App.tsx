@@ -513,6 +513,8 @@ export default function App() {
               loading={loading}
               onAuditAnother={handleAuditAnother}
               onResetAll={handleResetAll}
+              activeScope={activeScope}
+              currentUser={user}
             />
           )}
         </main>

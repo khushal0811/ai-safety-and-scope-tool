@@ -122,6 +122,27 @@ def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[
         return []
 
 
+def fetch_audit_logs_for_roe(
+    roe_id: str,
+    user_id: Optional[str] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """Retrieve all audit logs for a specific RoE ID in chronological order."""
+    client = get_supabase()
+    if not client:
+        return []
+
+    try:
+        query = client.table("audit_logs").select("*").eq("roe_id", roe_id)
+        if user_id and is_valid_uuid(user_id):
+            query = query.eq("user_id", user_id)
+        res = query.order("created_at", desc=False).limit(limit).execute()
+        return res.data or []
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to fetch audit logs for RoE {roe_id}: {e}")
+        return []
+
+
 def delete_audit_logs(audit_ids: List[str], user_id: str) -> bool:
     """Permanently delete one or more audit logs from PostgreSQL table audit_logs."""
     if not is_valid_uuid(user_id) or not audit_ids:
