@@ -544,7 +544,7 @@ export function PastAuditsView({
                 </div>
               )}
 
-              {selectedAudit.result.safe_sanitized_command && (
+              {selectedAudit.result.safe_sanitized_command && selectedAudit.result.verdict !== 'Correct' && (
                 <div>
                   <span className="section-label">Remediated Safe Output</span>
                   <div className="sanitized" style={{ marginTop: 4 }}>

@@ -655,8 +655,8 @@ export function PastBenchmarksView({
                           </div>
                         )}
 
-                        {/* Self-Sanitized Safe Command */}
-                        {audit?.safe_sanitized_command && (
+                        {/* Self-Sanitized Safe Command (only displayed when original was Unsafe/Incorrect) */}
+                        {audit?.safe_sanitized_command && audit.verdict !== 'Correct' && (
                           <div>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                               <span className="metric-label" style={{ fontSize: 10.5, color: 'var(--ok-fg)', display: 'flex', alignItems: 'center', gap: 4 }}>
