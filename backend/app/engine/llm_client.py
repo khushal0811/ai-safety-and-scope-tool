@@ -23,6 +23,10 @@ class LLMClient:
         raw_model = getattr(settings, "DEFAULT_MODEL", settings.LLAMA_MODEL)
         if raw_model in ("anthropic/claude-haiku-latest", "claude-haiku", "claude-haiku-latest"):
             self.model = "~anthropic/claude-haiku-latest"
+        elif raw_model in ("claude-sonnet-4.6", "claude-sonnet", "sonnet-4.6", "sonnet"):
+            self.model = "anthropic/claude-sonnet-4.6"
+        elif raw_model in ("claude-sonnet-4.5", "sonnet-4.5"):
+            self.model = "anthropic/claude-sonnet-4.5"
         else:
             self.model = raw_model
 

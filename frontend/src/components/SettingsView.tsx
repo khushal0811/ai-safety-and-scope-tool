@@ -191,10 +191,10 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                   <strong style={{ fontSize: 13.5 }}>Option 1: Built-in System Provider (Default)</strong>
                   <span className="tag tag--ok">● Active &amp; Ready</span>
                 </span>
-                <span className="mono font-xs text-muted">Backend Managed · Claude Haiku</span>
+                <span className="mono font-xs text-muted">Backend Managed · Claude Sonnet 4.6</span>
               </div>
               <p style={{ fontSize: 12.5, color: 'var(--text-subtle)', margin: 0, lineHeight: 1.5 }}>
-                Zero setup required. Powered by Vallum's server-side OpenRouter infrastructure (Claude Haiku Latest) for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
+                Zero setup required. Powered by Vallum's server-side OpenRouter infrastructure (Claude Sonnet 4.6) for RoE document extraction, intelligent scope violation analysis, and safe command rewriting. No personal API key needed.
               </p>
             </div>
 

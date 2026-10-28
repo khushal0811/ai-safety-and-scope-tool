@@ -269,7 +269,7 @@ function ResultBody({
 
           {result.mode === 'demo' ? (
             <p className="muted" style={{ fontSize: 12 }}>
-              Demo mode: client-side preview of the deterministic engine. The authoritative FastAPI engine and Claude Haiku rewriter
+              Demo mode: client-side preview of the deterministic engine. The authoritative FastAPI engine and Claude Sonnet 4.6 rewriter
               are active in Live mode.
             </p>
           ) : null}
