@@ -1,5 +1,4 @@
 import type { AuditRequest, AuditResult, RoeScope } from '../types/audit';
-import { runDemoAudit } from './demoEngine';
 import { ROE_PRESETS } from '../data/presets';
 import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
 
@@ -98,8 +97,8 @@ export async function fetchRoePresets(): Promise<RoeScope[]> {
  * Audit model output against RoE rules.
  */
 export async function runAudit(req: AuditRequest, userId?: string): Promise<AuditResult> {
+  const url = `${API_BASE_URL}/api/audit${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
   try {
-    const url = `${API_BASE_URL}/api/audit${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: getApiHeaders(),
@@ -112,14 +111,14 @@ export async function runAudit(req: AuditRequest, userId?: string): Promise<Audi
       notifyStatus(true);
       return data;
     }
-  } catch (err) {
-    console.warn('[Vallum] Live backend audit request failed, falling back to demo engine:', err);
-    notifyStatus(false);
-  }
 
-  // Graceful fallback to client-side deterministic demo engine
-  await new Promise((r) => setTimeout(r, 450));
-  return runDemoAudit(req);
+    const errText = await res.text().catch(() => '');
+    notifyStatus(false);
+    throw new Error(`Audit backend returned HTTP ${res.status}: ${errText.slice(0, 300)}`);
+  } catch (err) {
+    notifyStatus(false);
+    throw err instanceof Error ? err : new Error('Failed to reach the audit backend.');
+  }
 }
 
 /**

@@ -351,8 +351,13 @@ class ScopeValidator:
                         obfuscated=target.is_obfuscated,
                     )
 
-            # Check if contained in any allowed subnet
-            in_scope = any(net.subnet_of(a_net) for a_net in self.allowed_networks)
+            # Check if contained in any allowed subnet. `subnet_of()` raises TypeError
+            # when compared across IP versions (e.g. an IPv6 target against an IPv4-only
+            # RoE), so guard on version equality first rather than letting it propagate.
+            in_scope = any(
+                net.version == a_net.version and net.subnet_of(a_net)
+                for a_net in self.allowed_networks
+            )
             return TargetFinding(
                 token=target.raw_token,
                 normalized=target.canonical,

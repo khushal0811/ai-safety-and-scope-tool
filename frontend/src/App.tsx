@@ -294,6 +294,7 @@ export default function App() {
   async function handleRun() {
     if (!activeScope || !modelOutput.trim()) return;
     setLoading(true);
+    setQueryError(null);
     try {
       const res = await runAudit({ roe: activeScope, model_id: modelId, user_prompt: prompt, model_output: modelOutput }, user?.id);
       setResult(res);
@@ -319,6 +320,9 @@ export default function App() {
       } else {
         setAudits((prev) => [newAudit, ...prev.filter((a) => a.id !== newAudit.id)]);
       }
+    } catch (err: any) {
+      console.error('[Vallum] Audit verification error:', err);
+      setQueryError(err?.message || 'Audit verification failed. Backend service may be unreachable.');
     } finally {
       setLoading(false);
     }

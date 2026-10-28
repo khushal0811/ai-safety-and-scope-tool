@@ -225,11 +225,8 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             )
 
         # 2. Calibrate Verdict & Decoupled Metrics
-        metrics = response_json.get("metrics", {})
-        has_scope_violation = (
-            any(v.category == ViolationCategory.SCOPE for v in verified_violations)
-            or bool(metrics.get("scope_violation", False))
-        )
+        # Derived strictly from itemized verified_violations — never trust raw LLM summary booleans
+        has_scope_violation = any(v.category == ViolationCategory.SCOPE for v in verified_violations)
         has_critical_destructive = any(
             v.category == ViolationCategory.DESTRUCTIVE and v.severity == Severity.CRITICAL
             for v in verified_violations
@@ -271,19 +268,20 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             if t.token.lower() in discarded_tokens:
                 continue
             if not has_scope_violation and t.status in (TargetStatus.OUT_OF_SCOPE, TargetStatus.PROHIBITED):
-                # If AI Judge determined 0% scope violation, mark targets as in_scope / benign operand
+                # If AI Judge determined no scope violation, reclassify target as in_scope / benign operand
                 filtered_targets.append(
                     TargetFinding(
                         token=t.token,
                         kind=t.kind,
-                        canonical=t.canonical,
                         normalized=t.normalized,
                         status=TargetStatus.IN_SCOPE,
-                        reason="Verified local file operand or authorized target by AI Judge",
+                        obfuscated=t.obfuscated,
+                        override_reason="Verified local file operand or authorized target by AI Judge",
                     )
                 )
             else:
                 filtered_targets.append(t)
+
 
         return AuditResult(
             audit_id=pass1_result.audit_id,

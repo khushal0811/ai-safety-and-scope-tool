@@ -6,6 +6,7 @@ and generates safe sanitized command replacements.
 """
 
 from datetime import datetime, timezone
+import logging
 import re
 from typing import List, Optional, Set
 import uuid
@@ -32,6 +33,8 @@ from app.models.audit import (
     ViolationCategory,
 )
 from app.models.roe import RoeScope
+
+logger = logging.getLogger(__name__)
 
 
 def replace_host_token(cmd: str, old_token: str, new_token: str) -> str:
@@ -162,10 +165,16 @@ def sanitize_single_command(
             flag_pattern = re.compile(rf"\s*{re.escape(bf)}(?:=\S+)?(?=\s|$)", re.IGNORECASE)
             if flag_pattern.search(current_cmd):
                 current_cmd = flag_pattern.sub("", current_cmd)
-                modifications.append(f'Stripped prohibited flag "{bf}".')
-        elif bf.lower() in current_cmd.lower():
-            modifications.append(f'Dropped command containing prohibited action "{bf}".')
-            return None, modifications
+        else:
+            phrase_tokens = bf.lower().split()
+            cmd_tokens_lower = [t.lower() for t in current_cmd.split()]
+            hit = any(
+                cmd_tokens_lower[i : i + len(phrase_tokens)] == phrase_tokens
+                for i in range(len(cmd_tokens_lower) - len(phrase_tokens) + 1)
+            )
+            if hit:
+                modifications.append(f'Dropped command containing prohibited action "{bf}".')
+                return None, modifications
 
     # Clean redundant horizontal whitespace while strictly preserving newlines
     cleaned_cmd = re.sub(r"[^\S\r\n]{2,}", " ", current_cmd).strip()
@@ -187,7 +196,28 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
         # A. Target extraction & scope classification
         cmd_findings: List[TargetFinding] = []
         for target in parsed.targets:
-            finding = scope_validator.classify_target(target)
+            try:
+                finding = scope_validator.classify_target(target)
+            except Exception as e:
+                # A classification bug (e.g. a cross-IP-version comparison) must never
+                # take down the whole audit request. Degrade to a reviewable warning.
+                logger.error(f"[Verifier] classify_target failed for '{target.raw_token}': {e}")
+                finding = TargetFinding(
+                    token=target.raw_token,
+                    normalized=target.canonical,
+                    kind=target.kind,
+                    status=TargetStatus.OUT_OF_SCOPE,
+                    obfuscated=target.is_obfuscated,
+                )
+                all_violations.append(
+                    Violation(
+                        rule="Target Classification Error",
+                        category=ViolationCategory.ACCURACY,
+                        severity=Severity.WARNING,
+                        detail=f"Could not classify target '{target.raw_token}': {e}",
+                        command=parsed.raw,
+                    )
+                )
             cmd_findings.append(finding)
             all_findings.append(finding)
 
