@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AuditResult, TargetFinding, Verdict } from '../types/audit';
+import type { AuditResult, RoeScope, TargetFinding, Verdict } from '../types/audit';
+import type { UserProfile } from '../types/user';
 import { MODELS } from '../data/models';
 import { diffWords, computeSplitDiff, type SplitDiffRow } from '../lib/diff';
-import { AlertIcon, BanIcon, CheckIcon, CopyIcon, ShieldIcon } from './Icons';
+import { AlertIcon, BanIcon, CheckIcon, CopyIcon, DownloadIcon, ShieldIcon } from './Icons';
+import { downloadComplianceReport } from '../services/auditService';
 
 /**
  * XSS note: model output is attacker-influenced. Everything below renders
@@ -21,15 +23,27 @@ export function AuditResultView({
   loading,
   onAuditAnother,
   onResetAll,
+  activeScope,
+  currentUser,
 }: {
   result: AuditResult | null;
   loading: boolean;
   onAuditAnother?: () => void;
   onResetAll?: () => void;
+  activeScope?: RoeScope | null;
+  currentUser?: UserProfile | null;
 }) {
   if (loading) return <LoadingState />;
   if (!result) return <EmptyState />;
-  return <ResultBody result={result} onAuditAnother={onAuditAnother} onResetAll={onResetAll} />;
+  return (
+    <ResultBody
+      result={result}
+      onAuditAnother={onAuditAnother}
+      onResetAll={onResetAll}
+      activeScope={activeScope}
+      currentUser={currentUser}
+    />
+  );
 }
 
 function EmptyState() {
@@ -59,13 +73,33 @@ function ResultBody({
   result,
   onAuditAnother,
   onResetAll,
+  activeScope,
+  currentUser,
 }: {
   result: AuditResult;
   onAuditAnother?: () => void;
   onResetAll?: () => void;
+  activeScope?: RoeScope | null;
+  currentUser?: UserProfile | null;
 }) {
   const Icon = VERDICT_ICON[result.verdict];
   const modelLabel = MODELS.find((m) => m.id === result.selected_model)?.label ?? result.selected_model;
+  const [exportingFormat, setExportingFormat] = useState<'pdf' | 'markdown' | 'json' | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  async function handleExportReport(format: 'pdf' | 'markdown' | 'json') {
+    setExportingFormat(format);
+    setExportError(null);
+    try {
+      const targetRoeId = activeScope?.roe_id || 'ROE-PRESET-NET-001';
+      await downloadComplianceReport(targetRoeId, format, currentUser?.id);
+    } catch (err: any) {
+      setExportError(err?.message || 'Failed to download compliance report');
+    } finally {
+      setExportingFormat(null);
+    }
+  }
+
   const uniqueTargets = useMemo(() => {
     const seen = new Map<string, TargetFinding>();
     result.targets.forEach((t) => seen.set(`${t.kind}:${t.token}`, t));
@@ -213,6 +247,94 @@ function ResultBody({
               arrive in Phases 2–3.
             </p>
           ) : null}
+
+          {/* Phase 4.4: Cryptographic RoE Attestation Export */}
+          <div
+            className="attestation-box"
+            style={{
+              padding: '14px 18px',
+              background: 'var(--surface-sunken)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 6,
+                    background: 'rgba(98, 114, 240, 0.15)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    color: 'var(--accent)',
+                    border: '1px solid rgba(98, 114, 240, 0.3)',
+                  }}
+                >
+                  <ShieldIcon width={18} height={18} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <strong style={{ fontSize: 13.5, letterSpacing: '-0.01em' }}>
+                      Formal RoE Compliance Attestation
+                    </strong>
+                    <span className="tag tag--ok" style={{ fontSize: 10, padding: '1px 6px' }}>
+                      SHA-256 Chained
+                    </span>
+                  </div>
+                  <p className="muted" style={{ fontSize: 12, margin: '2px 0 0' }}>
+                    SOC 2 (CC6.1/7.2), ISO 27001, and CREST-certified engagement non-repudiation report.
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  id="export-attestation-pdf-btn"
+                  className="btn btn--sm btn--primary row"
+                  style={{ gap: 6 }}
+                  onClick={() => handleExportReport('pdf')}
+                  disabled={exportingFormat !== null}
+                  title="Download signed, client-ready PDF attestation report"
+                >
+                  <DownloadIcon width={13} height={13} />
+                  {exportingFormat === 'pdf' ? 'Generating PDF...' : 'Attestation Report (PDF)'}
+                </button>
+                <button
+                  type="button"
+                  id="export-attestation-md-btn"
+                  className="btn btn--sm row"
+                  style={{ gap: 6 }}
+                  onClick={() => handleExportReport('markdown')}
+                  disabled={exportingFormat !== null}
+                  title="Download attestation report in GitHub-flavored Markdown"
+                >
+                  {exportingFormat === 'markdown' ? 'Generating...' : 'Markdown'}
+                </button>
+                <button
+                  type="button"
+                  id="export-attestation-json-btn"
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => handleExportReport('json')}
+                  disabled={exportingFormat !== null}
+                  title="Download raw hash chain ledger as JSON"
+                >
+                  {exportingFormat === 'json' ? 'Exporting...' : 'JSON'}
+                </button>
+              </div>
+            </div>
+
+            {exportError && (
+              <div className="alert alert--bad" style={{ fontSize: 12, padding: '8px 12px' }}>
+                {exportError}
+              </div>
+            )}
+          </div>
 
           {onAuditAnother || onResetAll ? (
             <div className="card__actions" style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>

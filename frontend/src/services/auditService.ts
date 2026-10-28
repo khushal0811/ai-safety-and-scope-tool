@@ -241,3 +241,53 @@ export async function queryLiveModel(
   }
 }
 
+/**
+ * Phase 4.4: Download formal, client-ready RoE compliance attestation report
+ * with cryptographic SHA-256 hash chains (PDF, Markdown, or JSON).
+ */
+export async function downloadComplianceReport(
+  roeId: string,
+  format: 'pdf' | 'markdown' | 'json' = 'pdf',
+  userId?: string
+): Promise<void> {
+  const params = new URLSearchParams({
+    roe_id: roeId,
+    format: format,
+  });
+  if (userId) {
+    params.set('user_id', userId);
+  }
+
+  const url = `${API_BASE_URL}/api/audit/report?${params.toString()}`;
+  const token = getStoredAuthToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Failed to generate compliance report: HTTP ${res.status} ${errText.slice(0, 200)}`);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get('content-disposition');
+  let filename = `vallum_attestation_${roeId.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}.${format === 'markdown' ? 'md' : format}`;
+  if (disposition) {
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    if (match && match[1]) {
+      filename = match[1];
+    }
+  }
+
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(blobUrl);
+}
+

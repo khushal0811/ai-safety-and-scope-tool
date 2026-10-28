@@ -3,7 +3,7 @@
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
 from app.db import (
@@ -120,3 +120,28 @@ async def get_db_status() -> Dict[str, Any]:
         "database": "Supabase PostgreSQL",
         "authenticated": connected,
     }
+
+
+@router.get("/report")
+async def get_compliance_report(
+    roe_id: str = Query(default="ROE-PRESET-NET-001", description="Rules of Engagement preset or custom ID"),
+    format: str = Query(default="markdown", description="Report format: 'markdown', 'pdf', or 'json'"),
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
+):
+    """Generate formal, signed RoE compliance attestation report with cryptographic hash chains."""
+    from app.engine.reporter import generate_compliance_report
+
+    content, media_type, filename = generate_compliance_report(
+        roe_id=roe_id,
+        format=format,
+        user_id=user_id,
+    )
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache",
+        },
+    )

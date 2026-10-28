@@ -13,6 +13,7 @@ from app.db.supabase_client import (
     fetch_roe_presets,
     save_custom_roe,
     fetch_custom_roes,
+    fetch_audit_logs_for_roe,
     is_valid_uuid,
     verify_supabase_jwt,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "is_database_connected",
     "save_audit_log",
     "fetch_audit_history",
+    "fetch_audit_logs_for_roe",
     "delete_audit_logs",
     "fetch_audit_metrics",
     "save_benchmark_run",
