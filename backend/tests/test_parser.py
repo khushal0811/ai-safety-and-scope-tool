@@ -120,3 +120,63 @@ echo "Vulnerability found" > web_rce_scan.txt
     assert parsed[1].tool == "echo"
     assert ">" in parsed[1].tokens
 
+
+def test_phase2_1_command_substitution_ast():
+    """Verify bashlex AST extracts nested command substitutions ($(cmd) and `cmd`)."""
+    cmd = "nmap -sV $(cat /tmp/targets.txt)"
+    parsed = parse_cli_command(cmd)
+    assert parsed.tool == "nmap"
+    assert parsed.has_substitution is True
+    assert len(parsed.pipeline_stages) == 1
+    nested = parsed.pipeline_stages[0]
+    assert nested.tool == "cat"
+    assert nested.source == "substitution"
+
+    # Backtick substitution
+    cmd_backtick = "nmap -sV `cat /tmp/hosts.txt`"
+    parsed_bt = parse_cli_command(cmd_backtick)
+    assert parsed_bt.tool == "nmap"
+    assert parsed_bt.has_substitution is True
+    assert any(st.tool == "cat" for st in parsed_bt.pipeline_stages)
+
+
+def test_phase2_1_nested_banned_tool_in_substitution():
+    """Verify offensive tools nested inside command substitutions are captured."""
+    cmd = "nmap $(cat wordlist.txt | hydra -l admin -P - 192.168.1.10 ssh)"
+    parsed = parse_cli_command(cmd)
+    assert parsed.tool == "nmap"
+    # Find nested hydra stage
+    hydra_stages = [st for st in parsed.pipeline_stages if st.tool == "hydra"]
+    assert len(hydra_stages) >= 1
+    assert any(t.canonical == "192.168.1.10" for t in hydra_stages[0].targets)
+
+
+def test_phase2_2_per_tool_flag_specs():
+    """Verify ToolFlagSpec correctly distinguishes target flags from non-target arguments."""
+    from app.engine.parser import TOOL_FLAG_SPECS
+
+    assert "nmap" in TOOL_FLAG_SPECS
+    assert "gobuster" in TOOL_FLAG_SPECS
+    assert "ffuf" in TOOL_FLAG_SPECS
+    assert "sqlmap" in TOOL_FLAG_SPECS
+
+    # Gobuster: -w is wordlist (non-target), -u is target, 'dir' is mode (not target)
+    gb_cmd = parse_cli_command("gobuster dir -u http://10.10.20.15:8080/app -w common.txt")
+    assert gb_cmd.tool == "gobuster"
+    assert len(gb_cmd.targets) == 1
+    assert gb_cmd.targets[0].canonical == "10.10.20.15"
+    assert not any(t.canonical == "dir" for t in gb_cmd.targets)
+    assert not any("common.txt" in t.canonical for t in gb_cmd.targets)
+
+    # SQLMap: -u is target, -p and --dbms are non-target option values
+    sql_cmd = parse_cli_command("sqlmap -u http://10.10.20.15/item?id=1 --dbms=mysql -p id")
+    assert sql_cmd.tool == "sqlmap"
+    assert len(sql_cmd.targets) == 1
+    assert sql_cmd.targets[0].canonical == "10.10.20.15"
+
+    # FFuf: -w is wordlist, -u is target
+    ffuf_cmd = parse_cli_command("ffuf -u http://10.10.20.15/FUZZ -w /usr/share/wordlists/dirb/big.txt")
+    assert ffuf_cmd.tool == "ffuf"
+    assert len(ffuf_cmd.targets) == 1
+    assert ffuf_cmd.targets[0].canonical == "10.10.20.15"
+
