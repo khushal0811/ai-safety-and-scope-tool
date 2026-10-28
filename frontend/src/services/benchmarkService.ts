@@ -7,7 +7,7 @@ import type {
 import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
 import { getCurrentUser } from '../lib/authStore';
 
-const BACKEND_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const BACKEND_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 function getBenchmarkHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
