@@ -402,7 +402,7 @@ def save_user_vault_keys(
     if openrouter_key is not None:
         clean_or = openrouter_key.strip()
         if clean_or:
-            payload["encrypted_openrouter_key"] = encrypt_api_key(clean_or)
+            payload["encrypted_openrouter_key"] = encrypt_api_key(clean_or, user_id)
             payload["key_hint_openrouter"] = mask_api_key(clean_or)
         else:
             payload["encrypted_openrouter_key"] = None
@@ -411,7 +411,7 @@ def save_user_vault_keys(
     if groq_key is not None:
         clean_groq = groq_key.strip()
         if clean_groq:
-            payload["encrypted_groq_key"] = encrypt_api_key(clean_groq)
+            payload["encrypted_groq_key"] = encrypt_api_key(clean_groq, user_id)
             payload["key_hint_groq"] = mask_api_key(clean_groq)
         else:
             payload["encrypted_groq_key"] = None
@@ -495,13 +495,15 @@ def get_user_vault_keys(user_id: str) -> Dict[str, Optional[str]]:
         enc_or = row.get("encrypted_openrouter_key")
         enc_groq = row.get("encrypted_groq_key")
 
-        decrypted_or = decrypt_api_key(enc_or) if enc_or else None
-        decrypted_groq = decrypt_api_key(enc_groq) if enc_groq else None
+        decrypted_or = decrypt_api_key(enc_or, user_id) if enc_or else None
+        decrypted_groq = decrypt_api_key(enc_groq, user_id) if enc_groq else None
 
         return {
             "openrouter_key": decrypted_or,
             "groq_key": decrypted_groq,
         }
+    except RuntimeError:
+        raise
     except Exception as e:
         logger.error(f"[Supabase] Failed to retrieve vault keys for user {user_id}: {e}")
         return {"openrouter_key": None, "groq_key": None}

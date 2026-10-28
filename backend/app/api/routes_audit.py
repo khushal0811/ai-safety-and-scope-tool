@@ -26,23 +26,15 @@ class DeleteAuditsPayload(BaseModel):
     """Payload to permanently delete one or more audit logs."""
 
     audit_ids: List[str] = Field(..., description="List of audit UUIDs/IDs to permanently delete")
-    user_id: Optional[str] = Field(None, description="Owner Supabase user UUID (optional if Authorization header provided)")
 
 
 @router.delete("/history")
 async def delete_audit_history(
     payload: DeleteAuditsPayload,
-    user_id: Optional[str] = Depends(get_authenticated_user_id),
+    user_id: str = Depends(require_authenticated_user_id),
 ) -> Dict[str, Any]:
     """Permanently delete specified audit records from Supabase PostgreSQL audit_logs table."""
-    effective_uid = user_id or payload.user_id
-    if not effective_uid or not is_valid_uuid(effective_uid):
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required. Please provide a valid Bearer token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    success = delete_audit_logs(audit_ids=payload.audit_ids, user_id=effective_uid)
+    success = delete_audit_logs(audit_ids=payload.audit_ids, user_id=user_id)
     return {"success": success, "deleted_count": len(payload.audit_ids)}
 
 

@@ -19,10 +19,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import bashlex
 import bashlex.errors
 
+from app.engine.destructive_rules import check_destructive_commands
 from app.engine.parser import (
+    CommandInvocation,
     KNOWN_SECURITY_TOOLS,
     TOOL_FLAG_SPECS,
     DEFAULT_TOOL_FLAG_SPEC,
+    parse_cli_command,
 )
 from app.models.roe import RoeScope
 from app.models.sandbox import (
@@ -107,9 +110,9 @@ class IsolatedVirtualSandbox:
                 elapsed_ms=elapsed,
             )
 
-        # 2. Extract atomic command words
-        tokens = cls._tokenize_command_line(raw_cmd)
-        if not tokens:
+        # 2. Parse into AST CommandInvocation and pipeline stages via parser.py
+        invocation = parse_cli_command(raw_cmd)
+        if not invocation or not invocation.tool:
             elapsed = int((time.perf_counter() - t0) * 1000)
             return SandboxDryRunResponse(
                 command=command_str,
@@ -122,12 +125,57 @@ class IsolatedVirtualSandbox:
                 elapsed_ms=elapsed,
             )
 
-        tool_binary = tokens[0].lower()
-        args = tokens[1:]
+        tool_binary = invocation.tool.lower()
+        pipeline_stages: List[CommandInvocation] = list(invocation.pipeline_stages or [])
+        stage0_tokens = (
+            invocation.tokens[: invocation.tokens.index("|")]
+            if (pipeline_stages and "|" in invocation.tokens)
+            else list(invocation.tokens)
+        )
+        args = stage0_tokens[1:] if len(stage0_tokens) > 1 else []
 
-        # 3. Tool-Specific Flag Grammar Validation
+        # Surface per-stage diagnostics when a pipeline or subshell stage is present
+        if pipeline_stages:
+            total_stages = 1 + len(pipeline_stages)
+            diagnostics.append(
+                f"Pipeline Stage 1/{total_stages}: tool='{tool_binary}' args={args}"
+            )
+            for idx, st in enumerate(pipeline_stages, start=2):
+                st_tool = (st.tool or "unknown").lower()
+                st_args = st.tokens[1:] if len(st.tokens) > 1 else []
+                diagnostics.append(
+                    f"Pipeline Stage {idx}/{total_stages}: tool='{st_tool}' args={st_args}"
+                )
+                if st_tool in {"bash", "sh", "zsh", "dash", "ksh", "python", "python3", "perl", "ruby", "powershell"}:
+                    diagnostics.append(
+                        f"CRITICAL Policy Diagnostic [Stage {idx}]: Arbitrary Piped Shell Execution "
+                        f"('| {st_tool}') detected — this stage will be blocked by the Vallum enforcement engine."
+                    )
+
+        # Destructive payload pre-check across command and stages
+        destructive_viols = check_destructive_commands(raw_cmd, tokens=[tool_binary] + args)
+        for st in pipeline_stages:
+            for st_v in check_destructive_commands(st.raw, tokens=list(st.tokens)):
+                if not any(v.rule == st_v.rule for v in destructive_viols):
+                    destructive_viols.append(st_v)
+        for dv in destructive_viols:
+            diagnostics.append(
+                f"CRITICAL Destructive Policy Diagnostic: {dv.rule} — {dv.detail}"
+            )
+
+        # 3. Tool-Specific Flag Grammar Validation ( across primary stage and pipeline stages )
         syntax_valid, flag_errors, validated_flags, targets = cls._validate_tool_flags(tool_binary, args)
         diagnostics.extend(flag_errors)
+        for idx, st in enumerate(pipeline_stages, start=2):
+            st_tool = (st.tool or "").lower()
+            st_args = st.tokens[1:] if len(st.tokens) > 1 else []
+            if st_tool:
+                st_ok, st_errs, st_flags, st_targets = cls._validate_tool_flags(st_tool, st_args)
+                if not st_ok:
+                    syntax_valid = False
+                    diagnostics.extend(f"[Stage {idx} ({st_tool})] {e}" for e in st_errs)
+                if roe:
+                    cls._append_scope_diagnostics(st_tool, st_flags, st_targets, roe, diagnostics)
 
         if not syntax_valid and strict_syntax:
             elapsed = int((time.perf_counter() - t0) * 1000)
@@ -149,6 +197,19 @@ class IsolatedVirtualSandbox:
 
         # 5. Synthesize Execution Output (stdout/stderr)
         stdout_sim, stderr_sim, exit_code = cls._simulate_tool_execution(tool_binary, args, validated_flags, targets)
+        if pipeline_stages:
+            stage_lines = ["", "--- [VALLUM PIPELINE STAGE TRACE] ---"]
+            for idx, st in enumerate(pipeline_stages, start=2):
+                st_tool = (st.tool or "unknown").lower()
+                if st_tool in {"bash", "sh", "zsh", "dash", "ksh", "python", "python3", "perl", "ruby", "powershell"}:
+                    stage_lines.append(
+                        f"[Stage {idx}: {st_tool}] BLOCKED IN PRE-FLIGHT: Arbitrary Piped Shell Execution ('| {st_tool}') is prohibited."
+                    )
+                else:
+                    stage_lines.append(
+                        f"[Stage {idx}: {st_tool}] Simulated pipeline consumer (args={list(st.argv)}, Egress: DISABLED)"
+                    )
+            stdout_sim = stdout_sim.rstrip("\n") + "\n" + "\n".join(stage_lines) + "\n"
 
         elapsed = int((time.perf_counter() - t0) * 1000)
         return SandboxDryRunResponse(
@@ -171,17 +232,11 @@ class IsolatedVirtualSandbox:
 
     @classmethod
     def _tokenize_command_line(cls, cmd_line: str) -> List[str]:
-        """Split a command line into arguments respecting quotes and escapes."""
-        # Simple regex tokenizer respecting double and single quotes
-        token_pattern = re.compile(r"""(?:[^\s"']+|"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')+""")
-        raw_tokens = token_pattern.findall(cmd_line)
-        cleaned: List[str] = []
-        for t in raw_tokens:
-            if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
-                cleaned.append(t[1:-1])
-            else:
-                cleaned.append(t)
-        return cleaned
+        """Delegate tokenization to parser.py's AST-backed CommandInvocation parser."""
+        inv = parse_cli_command(cmd_line)
+        if not inv or not inv.tool:
+            return []
+        return [inv.tool] + list(inv.argv)
 
     @classmethod
     def _validate_tool_flags(

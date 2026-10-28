@@ -42,7 +42,6 @@ class VerifyKeyRequest(BaseModel):
 
     openrouter_key: Optional[str] = Field(None, description="OpenRouter API key to test")
     groq_key: Optional[str] = Field(None, description="Groq API key to test")
-    user_id: Optional[str] = Field(None, description="Authenticated user UUID")
 
 
 class VerifyKeyResponse(BaseModel):
@@ -55,7 +54,6 @@ class VerifyKeyResponse(BaseModel):
 class VaultKeysPayload(BaseModel):
     """Payload for saving encrypted user API keys."""
 
-    user_id: Optional[str] = Field(None, description="Authenticated user UUID")
     openrouter_key: Optional[str] = Field(None, description="OpenRouter API key (sk-or-v1-...)")
     groq_key: Optional[str] = Field(None, description="Custom Groq API key (gsk_...)")
 
@@ -95,16 +93,12 @@ async def get_vault_status(
 @router.post("/keys")
 async def save_vault_keys(
     payload: VaultKeysPayload,
-    user_id: Optional[str] = Depends(get_authenticated_user_id),
+    user_id: str = Depends(require_authenticated_user_id),
 ):
     """Encrypt and store OpenRouter and/or Groq API keys in the database vault."""
-    effective_uid = user_id or payload.user_id
-    if not effective_uid or not is_valid_uuid(effective_uid):
-        raise HTTPException(status_code=400, detail="A valid user UUID is required.")
-
     try:
         res = save_user_vault_keys(
-            user_id=effective_uid,
+            user_id=user_id,
             openrouter_key=payload.openrouter_key,
             groq_key=payload.groq_key,
         )
@@ -120,14 +114,9 @@ async def save_vault_keys(
 
 @router.delete("/keys")
 async def revoke_vault_keys(
-    user_id: Optional[str] = Depends(get_authenticated_user_id),
-    target_user_id: Optional[str] = Query(None, alias="user_id"),
+    user_id: str = Depends(require_authenticated_user_id),
 ):
     """Permanently revoke and delete the user's API vault record from the database."""
-    effective_uid = user_id or target_user_id
-    if not effective_uid or not is_valid_uuid(effective_uid):
-        raise HTTPException(status_code=400, detail="A valid user UUID is required to revoke keys.")
-
     try:
         success = revoke_user_vault_keys(user_id)
         return {
@@ -142,19 +131,19 @@ async def revoke_vault_keys(
 @router.post("/verify-key", response_model=VerifyKeyResponse)
 async def verify_api_keys(
     payload: VerifyKeyRequest,
-    x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
-    x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    user_id: str = Depends(require_authenticated_user_id),
 ):
-    """Test and verify custom API key connectivity against upstream providers (OpenRouter / Groq)."""
-    target_openrouter = payload.openrouter_key or x_openrouter_key
-    target_groq = payload.groq_key or x_groq_key
-    target_uid = payload.user_id or x_user_id
+    """Test and verify API key connectivity against upstream providers (OpenRouter / Groq).
 
-    # If keys not explicitly passed, inspect user's encrypted vault
-    if target_uid and is_valid_uuid(target_uid) and (not target_openrouter or not target_groq):
+    If the caller didn't paste a key to test directly, fall back to testing their
+    own stored vault key — never another user's.
+    """
+    target_openrouter = payload.openrouter_key
+    target_groq = payload.groq_key
+
+    if not target_openrouter or not target_groq:
         try:
-            vault_keys = get_user_vault_keys(target_uid)
+            vault_keys = get_user_vault_keys(user_id)
             if not target_openrouter and vault_keys.get("openrouter_key"):
                 target_openrouter = vault_keys["openrouter_key"]
             if not target_groq and vault_keys.get("groq_key"):

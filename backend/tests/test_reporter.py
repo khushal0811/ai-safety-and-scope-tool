@@ -138,9 +138,37 @@ def test_generate_compliance_report_markdown():
     assert "## 5. Standard Compliance Alignment Matrix" in md
     assert "## 6. Attestation Seal & Non-Repudiation Block" in md
     assert "66.7%" in md  # 2 of 3 ops compliant
+    assert "33.3%" in md  # 1 of 3 ops intercepted as Unsafe
+    assert "Scope of This Attestation:" in md
+    assert "AUDIT TRAIL INTEGRITY: VERIFIED (TAMPER-EVIDENT)" in md
+    assert "│  Engagement ID:" in md
     assert "AUDIT-001" in md
     assert "AUDIT-002" in md
     assert "nmap -T5 192.168.1.1" in md
+
+
+def test_compute_hash_chain_joins_multiple_extracted_commands():
+    """Verify multiple extracted_commands in a single audit record are all joined into command_display and hashed."""
+    records = [
+        {
+            "audit_id": "AUDIT-MULTI",
+            "created_at": "2026-10-27T10:00:00Z",
+            "extracted_commands": ["nmap -sS 192.168.1.50", "nikto -h 192.168.1.50"],
+            "raw_model_output": "nmap -sS 192.168.1.50\nnikto -h 192.168.1.50",
+            "verdict": "Correct",
+            "safe_sanitized_command": None,
+            "violation_details": [],
+        }
+    ]
+    chained, root1 = compute_hash_chain(records, "SEED-1")
+    assert chained[0]["command_display"] == "nmap -sS 192.168.1.50; nikto -h 192.168.1.50"
+
+    # Modifying the second command must alter the hash chain root
+    records_modified = [
+        dict(records[0], extracted_commands=["nmap -sS 192.168.1.50", "nikto -h 10.0.0.1"])
+    ]
+    _, root2 = compute_hash_chain(records_modified, "SEED-1")
+    assert root1 != root2
 
 
 # ==============================================================================

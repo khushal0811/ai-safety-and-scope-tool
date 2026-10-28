@@ -17,6 +17,9 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+if settings.ENVIRONMENT not in ("development", "staging", "production"):
+    raise RuntimeError(f"Unrecognized ENVIRONMENT='{settings.ENVIRONMENT}' — refusing to start.")
+
 # CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,

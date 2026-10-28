@@ -8,6 +8,7 @@ import logging
 from typing import Optional
 from fastapi import Header, HTTPException, Query, status
 
+from app.config import settings
 from app.db.supabase_client import get_supabase, is_valid_uuid, verify_supabase_jwt
 
 logger = logging.getLogger(__name__)
@@ -20,13 +21,10 @@ async def get_authenticated_user_id(
 ) -> Optional[str]:
     """Extract and cryptographically verify the calling user's identity.
 
-    - If an Authorization Bearer token is provided: verifies signature with Supabase.
-      If invalid or expired, raises HTTP 401.
-    - If valid, returns the verified user UUID (ignoring any forged query params).
-    - If no Authorization header is provided:
-      Falls back to valid UUID for offline testing/development environments.
+    Returns the verified user UUID from a valid Supabase Bearer token, or None
+    if no token was provided. NEVER trusts a client-supplied X-User-Id header
+    or user_id query param as identity outside of local development.
     """
-    # 1. Bearer Token Verification
     if authorization and authorization.strip().lower().startswith("bearer "):
         verified = verify_supabase_jwt(authorization)
         if not verified:
@@ -37,7 +35,6 @@ async def get_authenticated_user_id(
             )
         return verified["id"]
 
-    # 2. Malformed Authorization Header
     if authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -45,12 +42,16 @@ async def get_authenticated_user_id(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 3. Development / Mock Testing Fallback
-    client = get_supabase()
-    candidate_uid = user_id or x_user_id
-    if candidate_uid and is_valid_uuid(candidate_uid):
-        # In test environments without an active Supabase session
-        return candidate_uid
+    # Unauthenticated identity fallback is permitted ONLY in local development,
+    # and only ever for manual testing — never reachable in a deployed environment.
+    if settings.ENVIRONMENT == "development":
+        candidate_uid = user_id or x_user_id
+        if candidate_uid and is_valid_uuid(candidate_uid):
+            logger.warning(
+                f"[Auth] DEV-ONLY unauthenticated uid fallback used: {candidate_uid}. "
+                "This path is disabled whenever ENVIRONMENT != 'development'."
+            )
+            return candidate_uid
 
     return None
 
