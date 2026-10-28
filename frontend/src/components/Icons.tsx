@@ -134,4 +134,18 @@ export const BenchmarkIcon = (p: P) => (
   </svg>
 );
 
+export const TerminalIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <polyline points="4 17 10 11 4 5" />
+    <line x1="12" y1="19" x2="20" y2="19" />
+  </svg>
+);
+
+export const PlayIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <polygon points="5 3 19 12 5 21 5 3" />
+  </svg>
+);
+
+
 

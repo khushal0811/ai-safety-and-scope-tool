@@ -40,6 +40,12 @@ fi
 # 2. Host Execution Wrapper ('run' mode)
 if [ "$1" = "run" ]; then
     shift
+    for arg in "$@"; do
+        if [ "$arg" = "--dry-run" ]; then
+            exec "$PYTHON_BIN" -m app.cli run "$@"
+        fi
+    done
+
     # First: evaluate command using pure Python static inspection
     if "$PYTHON_BIN" -m app.cli check "$@"; then
         # Authorized: Execute command in host shell

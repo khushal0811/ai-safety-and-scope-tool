@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AuditResult, RoeScope, TargetFinding, Verdict } from '../types/audit';
 import type { UserProfile } from '../types/user';
+import type { SandboxDryRunResult } from '../types/sandbox';
 import { MODELS } from '../data/models';
 import { diffWords, computeSplitDiff, type SplitDiffRow } from '../lib/diff';
-import { AlertIcon, BanIcon, CheckIcon, CopyIcon, DownloadIcon, ShieldIcon } from './Icons';
-import { downloadComplianceReport } from '../services/auditService';
+import { AlertIcon, BanIcon, CheckIcon, CopyIcon, DownloadIcon, ShieldIcon, TerminalIcon } from './Icons';
+import { downloadComplianceReport, executeSandboxDryRun } from '../services/auditService';
 
 /**
  * XSS note: model output is attacker-influenced. Everything below renders
@@ -100,6 +101,8 @@ function ResultBody({
     }
   }
 
+  const [sandboxCommand, setSandboxCommand] = useState<string | null>(null);
+
   const uniqueTargets = useMemo(() => {
     const seen = new Map<string, TargetFinding>();
     result.targets.forEach((t) => seen.set(`${t.kind}:${t.token}`, t));
@@ -157,7 +160,7 @@ function ResultBody({
         </section>
       ) : null}
 
-      {result.verdict !== 'Correct' ? <SanitizedBox result={result} /> : null}
+      {result.verdict !== 'Correct' ? <SanitizedBox result={result} roeId={activeScope?.roe_id} /> : null}
 
       <section className="card" aria-labelledby="findings-title">
         <div className="card__header">
@@ -171,15 +174,38 @@ function ResultBody({
         </div>
         <div className="card__body" style={{ display: 'grid', gap: 18 }}>
           <div>
-            <p className="section-label">Detected commands</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p className="section-label">Detected commands</p>
+              <span className="muted font-xs mono">Phase 4.5 Micro-Sandbox Dry-Run</span>
+            </div>
             {result.extracted_commands.length ? (
               <ul className="code-list">
                 {result.extracted_commands.map((c, i) => (
-                  <li key={i}>{c}</li>
+                  <li key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <span className="mono" style={{ flex: 1, overflowX: 'auto' }}>{c}</span>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${sandboxCommand === c ? 'btn--primary' : 'btn--ghost'} row`}
+                      style={{ padding: '3px 8px', fontSize: 11, gap: 4, flexShrink: 0 }}
+                      onClick={() => setSandboxCommand((prev) => (prev === c ? null : c))}
+                      title="Dry-run command in network-egress disabled micro-sandbox"
+                    >
+                      <TerminalIcon width={11} height={11} />
+                      {sandboxCommand === c ? 'Close' : 'Dry-Run'}
+                    </button>
+                  </li>
                 ))}
               </ul>
             ) : (
               <p className="muted">No commands detected.</p>
+            )}
+
+            {sandboxCommand && (
+              <MicroSandboxConsole
+                command={sandboxCommand}
+                roeId={activeScope?.roe_id}
+                onClose={() => setSandboxCommand(null)}
+              />
             )}
           </div>
 
@@ -434,10 +460,11 @@ function SideBySideDiff({ rows }: { rows: SplitDiffRow[] }) {
   );
 }
 
-function SanitizedBox({ result }: { result: AuditResult }) {
+function SanitizedBox({ result, roeId }: { result: AuditResult; roeId?: string }) {
   const [copied, setCopied] = useState(false);
   const [showDiff, setShowDiff] = useState(true);
   const [diffMode, setDiffMode] = useState<'split' | 'unified'>('split');
+  const [sandboxOpen, setSandboxOpen] = useState(false);
   const original = result.extracted_commands.join('\n');
   const safe = result.safe_sanitized_command;
   const parts = useMemo(() => (safe ? diffWords(original, safe) : []), [original, safe]);
@@ -477,6 +504,17 @@ function SanitizedBox({ result }: { result: AuditResult }) {
           <ShieldIcon /> Self-sanitized command
         </span>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            id="dry-run-sandbox-btn"
+            className={`btn btn--sm ${sandboxOpen ? 'btn--primary' : ''} row`}
+            style={{ gap: 6 }}
+            onClick={() => setSandboxOpen((s) => !s)}
+            title="Dry-run sanitized command in network-egress disabled ephemeral micro-sandbox"
+          >
+            <TerminalIcon width={13} height={13} />
+            {sandboxOpen ? 'Close Sandbox' : 'Dry-Run Micro-Sandbox'}
+          </button>
           <div className="diff-mode-toggle" aria-label="Diff display format">
             <button
               type="button"
@@ -510,6 +548,11 @@ function SanitizedBox({ result }: { result: AuditResult }) {
       </div>
       <div className="sanitized__body">
         <pre className="code-block">{safe}</pre>
+
+        {sandboxOpen && (
+          <MicroSandboxConsole command={safe} roeId={roeId} onClose={() => setSandboxOpen(false)} />
+        )}
+
         {showDiff ? (
           <div>
             <p className="section-label" style={{ marginBottom: 8 }}>
@@ -532,3 +575,172 @@ function SanitizedBox({ result }: { result: AuditResult }) {
     </section>
   );
 }
+
+function MicroSandboxConsole({
+  command,
+  roeId,
+  onClose,
+}: {
+  command: string;
+  roeId?: string;
+  onClose: () => void;
+}) {
+  const [running, setRunning] = useState(true);
+  const [result, setResult] = useState<SandboxDryRunResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setRunning(true);
+    setError(null);
+    executeSandboxDryRun(command, roeId)
+      .then((res) => {
+        if (active) {
+          setResult(res);
+          setRunning(false);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setError(err?.message || 'Dry-run evaluation failed');
+          setRunning(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [command, roeId]);
+
+  return (
+    <div
+      className="sandbox-console card"
+      style={{
+        marginTop: 14,
+        background: '#0a0d14',
+        border: '1px solid var(--border-s)',
+        borderRadius: 'var(--radius)',
+        overflow: 'hidden',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+      }}
+    >
+      {/* Console Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 16px',
+          background: 'rgba(255, 255, 255, 0.03)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff5f56', display: 'inline-block' }} />
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ffbd2e', display: 'inline-block' }} />
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#27c93f', display: 'inline-block' }} />
+          </div>
+          <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: '#e6edf3', letterSpacing: '-0.01em' }}>
+            vallum-sandbox (isolated-dry-run)
+          </span>
+          <span
+            className="tag tag--ok mono"
+            style={{ fontSize: 10, padding: '1px 6px', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}
+          >
+            EGRESS: DISABLED
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {result && (
+            <span
+              className={`mono font-xs ${result.syntax_valid ? 'tag tag--ok' : 'tag tag--bad'}`}
+              style={{ fontSize: 11 }}
+            >
+              {result.syntax_valid ? `✓ Valid Syntax (Exit ${result.exit_code})` : `✗ Syntax Error (Exit ${result.exit_code})`}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={onClose}
+            style={{ padding: '2px 8px', fontSize: 11 }}
+          >
+            Close ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Console Body */}
+      <div style={{ padding: '14px 16px' }}>
+        {running ? (
+          <div style={{ padding: '18px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <span className="spinner" style={{ width: 16, height: 16, display: 'inline-block', marginBottom: 8 }} />
+            <div className="mono font-xs">Decomposing AST and pre-checking CLI grammar in micro-sandbox...</div>
+          </div>
+        ) : error ? (
+          <div className="alert alert--bad" style={{ fontSize: 12 }}>
+            {error}
+          </div>
+        ) : result ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Diagnostics */}
+            {result.diagnostics.length > 0 && (
+              <div
+                style={{
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderRadius: 4,
+                  padding: '8px 12px',
+                }}
+              >
+                <span className="mono font-xs" style={{ color: 'var(--text-subtle)', display: 'block', marginBottom: 4 }}>
+                  Pre-Flight Diagnostics:
+                </span>
+                <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11.5 }}>
+                  {result.diagnostics.map((d, i) => (
+                    <li key={i} className="mono" style={{ color: d.includes('Error') ? 'var(--bad-fg)' : 'var(--text-muted)' }}>
+                      {d}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Terminal Screen */}
+            <div
+              style={{
+                background: '#040711',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: 4,
+                padding: '12px 14px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11.5,
+                lineHeight: 1.55,
+                overflowX: 'auto',
+                maxHeight: 260,
+              }}
+            >
+              {result.simulated_stdout && (
+                <pre style={{ margin: 0, color: '#a5d6ff', whiteSpace: 'pre-wrap' }}>
+                  {result.simulated_stdout}
+                </pre>
+              )}
+              {result.simulated_stderr && (
+                <pre style={{ margin: '8px 0 0', color: '#ff7b72', whiteSpace: 'pre-wrap' }}>
+                  {result.simulated_stderr}
+                </pre>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--text-subtle)' }}>
+              <span className="mono">0 packets released to host/network interfaces</span>
+              <span className="mono">Virtual sandbox elapsed: {result.elapsed_ms}ms</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+

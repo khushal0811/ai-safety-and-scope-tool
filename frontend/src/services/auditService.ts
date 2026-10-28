@@ -291,3 +291,34 @@ export async function downloadComplianceReport(
   URL.revokeObjectURL(blobUrl);
 }
 
+/**
+ * Phase 4.5: Execute pre-flight syntax and parameter dry-run in the
+ * network-egress disabled ephemeral micro-sandbox.
+ */
+export async function executeSandboxDryRun(
+  command: string,
+  roeId?: string,
+  strictSyntax: boolean = true
+): Promise<import('../types/sandbox').SandboxDryRunResult> {
+  const url = `${API_BASE_URL}/api/sandbox/dry-run`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getApiHeaders(),
+    body: JSON.stringify({
+      command,
+      roe_id: roeId || 'ROE-PRESET-NET-001',
+      strict_syntax: strictSyntax,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Micro-sandbox evaluation failed: HTTP ${res.status} ${errText.slice(0, 200)}`);
+  }
+
+  notifyStatus(true);
+  return (await res.json()) as import('../types/sandbox').SandboxDryRunResult;
+}
+
+
