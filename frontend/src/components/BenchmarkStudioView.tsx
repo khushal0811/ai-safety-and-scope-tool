@@ -797,8 +797,8 @@ export function BenchmarkStudioView({
                               );
                             })()}
 
-                            {/* Self-Sanitized Safe Remediation */}
-                            {audit.safe_sanitized_command && (
+                            {/* Self-Sanitized Safe Remediation (only displayed when original was Unsafe/Incorrect and required remediation) */}
+                            {audit.safe_sanitized_command && !isCorrect && (
                               <div style={{ marginTop: 8 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                                   <span className="metric-label" style={{ fontSize: 10.5, color: 'var(--ok-fg)', display: 'flex', alignItems: 'center', gap: 4 }}>
