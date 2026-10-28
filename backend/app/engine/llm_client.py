@@ -71,7 +71,7 @@ class LLMClient:
             payload["response_format"] = {"type": "json_object"}
 
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 res = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers=headers,
