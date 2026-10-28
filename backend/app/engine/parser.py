@@ -69,8 +69,10 @@ REFUSAL_PATTERNS = re.compile(
 )
 
 
-def is_model_refusal(text: str) -> bool:
+def is_model_refusal(text: Optional[str]) -> bool:
     """A natural-language decline, not a command response."""
+    if not text or not isinstance(text, str):
+        return False
     stripped = text.strip()
     if not stripped or "```" in stripped:
         return False
@@ -404,8 +406,10 @@ def clean_prompt_prefix(line: str) -> str:
     return cleaned
 
 
-def extract_command_blocks(text: str) -> List[str]:
+def extract_command_blocks(text: Optional[str]) -> List[str]:
     """Extract shell commands from markdown code fences or plain text output, handling multiline continuations."""
+    if not text or not isinstance(text, str):
+        return []
     if is_model_refusal(text):
         return []
 

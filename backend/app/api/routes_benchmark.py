@@ -201,7 +201,7 @@ async def evaluate_benchmark_models(
             )
             continue
 
-        output_text = res.raw_output
+        output_text = res.raw_output or ""
         if not output_text.strip() and res.extracted_commands:
             output_text = "\n".join(f"```bash\n{c}\n```" for c in res.extracted_commands)
         if not output_text.strip():
