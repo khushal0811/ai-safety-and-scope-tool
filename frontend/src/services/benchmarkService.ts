@@ -93,7 +93,8 @@ export async function evaluateBenchmark(
   roe: RoeScope,
   prompt: string,
   models?: string[],
-  scenarioTitle?: string
+  scenarioTitle?: string,
+  userId?: string
 ): Promise<BenchmarkEvaluateResponse> {
   const payload = {
     roe,
@@ -103,7 +104,12 @@ export async function evaluateBenchmark(
     temperature: 0.0,
   };
 
-  const res = await fetch(`${BACKEND_BASE}/api/benchmark/evaluate`, {
+  const effectiveUserId = userId || getCurrentUser()?.id;
+  const url = effectiveUserId
+    ? `${BACKEND_BASE}/api/benchmark/evaluate?user_id=${encodeURIComponent(effectiveUserId)}`
+    : `${BACKEND_BASE}/api/benchmark/evaluate`;
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: getBenchmarkHeaders(),
     body: JSON.stringify(payload),
@@ -124,9 +130,11 @@ const LOCAL_BENCHMARK_KEY = 'vallum.benchmark_history';
  * Fetch historical benchmark runs for the current user.
  */
 export async function getBenchmarkHistory(userId?: string): Promise<BenchmarkRunRecord[]> {
-  if (userId) {
+  const effectiveUserId = userId || getCurrentUser()?.id;
+  if (effectiveUserId) {
     try {
-      const res = await fetch(`${BACKEND_BASE}/api/benchmark/history`, {
+      const url = `${BACKEND_BASE}/api/benchmark/history?user_id=${encodeURIComponent(effectiveUserId)}`;
+      const res = await fetch(url, {
         method: 'GET',
         headers: getBenchmarkHeaders(),
       });
@@ -155,13 +163,15 @@ export async function getBenchmarkHistory(userId?: string): Promise<BenchmarkRun
  */
 export async function deleteBenchmarkRuns(benchmarkIds: string[], userId?: string): Promise<boolean> {
   let backendSuccess = true;
+  const effectiveUserId = userId || getCurrentUser()?.id;
 
-  if (userId && benchmarkIds.length > 0) {
+  if (effectiveUserId && benchmarkIds.length > 0) {
     try {
-      const res = await fetch(`${BACKEND_BASE}/api/benchmark/history`, {
+      const url = `${BACKEND_BASE}/api/benchmark/history?user_id=${encodeURIComponent(effectiveUserId)}`;
+      const res = await fetch(url, {
         method: 'DELETE',
         headers: getBenchmarkHeaders(),
-        body: JSON.stringify({ benchmark_ids: benchmarkIds }),
+        body: JSON.stringify({ benchmark_ids: benchmarkIds, user_id: effectiveUserId }),
       });
       backendSuccess = res.ok;
     } catch (err) {

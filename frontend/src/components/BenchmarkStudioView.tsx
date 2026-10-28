@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RoeScope } from '../types/audit';
 import type {
-  BenchmarkEvaluateItem,
   BenchmarkEvaluateResponse,
   BenchmarkRunRecord,
   FrontierModelInfo,
@@ -12,9 +11,7 @@ import {
   formatScenarioPrompt,
 } from '../data/scenarios';
 import {
-  deleteBenchmarkRuns,
   evaluateBenchmark,
-  getBenchmarkHistory,
   getBenchmarkModels,
 } from '../services/benchmarkService';
 import { getOpenRouterKey } from '../lib/keyStore';
@@ -26,11 +23,7 @@ import {
   DownloadIcon,
   HistoryIcon,
   KeyIcon,
-  RefreshIcon,
-  SearchIcon,
   SparkIcon,
-  TrashIcon,
-  XIcon,
 } from './Icons';
 import { computeSplitDiff } from '../lib/diff';
 
@@ -40,6 +33,9 @@ interface Props {
   onSelectRoe: (roe: RoeScope) => void;
   currentUser: UserProfile | null;
   onNavigateSettings: () => void;
+  onNavigatePastBenchmarks?: () => void;
+  onBenchmarkComplete?: (result: BenchmarkEvaluateResponse) => void;
+  pastBenchmarkCount?: number;
 }
 
 export function BenchmarkStudioView({
@@ -48,15 +44,25 @@ export function BenchmarkStudioView({
   onSelectRoe,
   currentUser,
   onNavigateSettings,
+  onNavigatePastBenchmarks,
+  onBenchmarkComplete,
+  pastBenchmarkCount = 0,
 }: Props) {
-  // Top Sub-Tabs: 'run' | 'history'
-  const [subTab, setSubTab] = useState<'run' | 'history'>('run');
+  // Check if OpenRouter key exists in vault/session
+  const hasOpenRouterKey = Boolean(getOpenRouterKey()?.trim());
 
   // Available models from backend
   const [availableModels, setAvailableModels] = useState<FrontierModelInfo[]>([]);
-  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(
-    new Set(['meta-llama/llama-3.1-70b-instruct', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5'])
-  );
+
+  // Selected models state: strictly only select models that the user has keys for by default
+  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(() => {
+    const hasKey = Boolean(getOpenRouterKey()?.trim());
+    if (hasKey) {
+      return new Set(['meta-llama/llama-3.1-70b-instruct', 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'google/gemini-pro-1.5']);
+    }
+    // Only Llama has built-in system key; others require user OpenRouter key
+    return new Set(['meta-llama/llama-3.1-70b-instruct']);
+  });
 
   // Scenario & Prompt
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>('smb-null-session');
@@ -67,19 +73,8 @@ export function BenchmarkStudioView({
   const [currentResult, setCurrentResult] = useState<BenchmarkEvaluateResponse | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
-  // History state
-  const [historyRuns, setHistoryRuns] = useState<BenchmarkRunRecord[]>([]);
-  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
-  const [historySearch, setHistorySearch] = useState<string>('');
-  const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set());
-  const [historyDeleting, setHistoryDeleting] = useState<boolean>(false);
-  const [inspectedRun, setInspectedRun] = useState<BenchmarkRunRecord | null>(null);
-
   // Clipboard copy state
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  // Check if OpenRouter key exists in vault/session
-  const hasOpenRouterKey = Boolean(getOpenRouterKey()?.trim());
 
   // Load models on mount
   useEffect(() => {
@@ -92,6 +87,32 @@ export function BenchmarkStudioView({
     };
   }, []);
 
+  // Prune gated frontier models if OpenRouter key is not configured
+  useEffect(() => {
+    if (!hasOpenRouterKey) {
+      setSelectedModelIds((prev) => {
+        const next = new Set<string>();
+        for (const id of prev) {
+          if (id.includes('llama')) {
+            next.add(id);
+          }
+        }
+        if (next.size === 0) {
+          next.add('meta-llama/llama-3.1-70b-instruct');
+        }
+        return next;
+      });
+    }
+  }, [hasOpenRouterKey]);
+
+  // Active models that are selected AND authorized/unlocked to run
+  const activeSelectedModelIds = useMemo(() => {
+    return Array.from(selectedModelIds).filter((id) => {
+      if (id.includes('llama')) return true;
+      return hasOpenRouterKey;
+    });
+  }, [selectedModelIds, hasOpenRouterKey]);
+
   // Update prompt whenever active scenario or active RoE changes
   useEffect(() => {
     if (selectedScenarioId === 'custom') return;
@@ -101,25 +122,14 @@ export function BenchmarkStudioView({
     }
   }, [selectedScenarioId, activeRoe]);
 
-  // Load history when tab opens
-  const refreshHistory = async () => {
-    setHistoryLoading(true);
-    try {
-      const records = await getBenchmarkHistory(currentUser?.id);
-      setHistoryRuns(records);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (subTab === 'history') {
-      refreshHistory();
-    }
-  }, [subTab, currentUser?.id]);
-
   // Model toggling
   function toggleModel(id: string) {
+    const isLlama = id.includes('llama');
+    if (!hasOpenRouterKey && !isLlama) {
+      onNavigateSettings();
+      return;
+    }
+
     setSelectedModelIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -140,14 +150,20 @@ export function BenchmarkStudioView({
     const activeScenario = BENCHMARK_SCENARIOS.find((s) => s.id === selectedScenarioId);
     const scenarioTitle = activeScenario ? activeScenario.title : 'Custom Pentest Prompt';
 
+    const modelsToRun = activeSelectedModelIds.length > 0
+      ? activeSelectedModelIds
+      : ['meta-llama/llama-3.1-70b-instruct'];
+
     try {
       const result = await evaluateBenchmark(
         activeRoe,
         prompt.trim(),
-        Array.from(selectedModelIds),
-        scenarioTitle
+        modelsToRun,
+        scenarioTitle,
+        currentUser?.id
       );
       setCurrentResult(result);
+      onBenchmarkComplete?.(result);
     } catch (err: any) {
       setRunError(err?.message || 'Benchmark run failed. Please check backend connection.');
     } finally {
@@ -186,71 +202,6 @@ export function BenchmarkStudioView({
     });
   }
 
-  // History filtering & deletion
-  const filteredHistory = useMemo(() => {
-    const q = historySearch.toLowerCase().trim();
-    if (!q) return historyRuns;
-    return historyRuns.filter(
-      (r) =>
-        r.scenario_title.toLowerCase().includes(q) ||
-        r.prompt.toLowerCase().includes(q) ||
-        r.roe_id.toLowerCase().includes(q) ||
-        (r.fastest_model && r.fastest_model.toLowerCase().includes(q))
-    );
-  }, [historyRuns, historySearch]);
-
-  const allFilteredHistoryIds = useMemo(() => filteredHistory.map((r) => r.benchmark_id), [filteredHistory]);
-  const isAllHistorySelected =
-    allFilteredHistoryIds.length > 0 && allFilteredHistoryIds.every((id) => selectedHistoryIds.has(id));
-
-  function toggleSelectAllHistory() {
-    if (isAllHistorySelected) {
-      setSelectedHistoryIds((prev) => {
-        const next = new Set(prev);
-        allFilteredHistoryIds.forEach((id) => next.delete(id));
-        return next;
-      });
-    } else {
-      setSelectedHistoryIds((prev) => {
-        const next = new Set(prev);
-        allFilteredHistoryIds.forEach((id) => next.add(id));
-        return next;
-      });
-    }
-  }
-
-  function toggleSelectOneHistory(id: string, e?: React.MouseEvent | React.ChangeEvent) {
-    e?.stopPropagation();
-    setSelectedHistoryIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  async function handleDeleteHistory(ids: string[]) {
-    if (ids.length === 0) return;
-    const confirmMsg =
-      ids.length === 1
-        ? 'Permanently delete this benchmark run from the database?'
-        : `Permanently delete ${ids.length} selected benchmark runs from the database?`;
-    if (!window.confirm(confirmMsg)) return;
-
-    setHistoryDeleting(true);
-    try {
-      await deleteBenchmarkRuns(ids, currentUser?.id);
-      setHistoryRuns((prev) => prev.filter((r) => !ids.includes(r.benchmark_id)));
-      setSelectedHistoryIds((prev) => {
-        const next = new Set(prev);
-        ids.forEach((id) => next.delete(id));
-        return next;
-      });
-    } finally {
-      setHistoryDeleting(false);
-    }
-  }
-
   // Export JSON report
   function exportBenchmarkReport(run: BenchmarkRunRecord | BenchmarkEvaluateResponse) {
     const jsonStr = JSON.stringify(run, null, 2);
@@ -266,7 +217,7 @@ export function BenchmarkStudioView({
   return (
     <div className="container" style={{ paddingTop: '24px', minHeight: '85vh' }}>
       <div className="benchmark-studio">
-        {/* Header & Sub-Navigation */}
+        {/* Header & Navigation */}
         <div className="benchmark-header">
           <div className="benchmark-header__titles">
             <div className="benchmark-header__title-row">
@@ -281,35 +232,27 @@ export function BenchmarkStudioView({
             </p>
           </div>
 
-          {/* Sub-Tabs */}
-          <div className="benchmark-subtabs">
+          {/* Action button to switch to dedicated Past Benchmarks tab */}
+          {onNavigatePastBenchmarks && (
             <button
-              className={`benchmark-subtab-btn ${subTab === 'run' ? 'benchmark-subtab-btn--active' : ''}`}
-              onClick={() => setSubTab('run')}
-            >
-              <SparkIcon width={14} height={14} />
-              Run Benchmark
-            </button>
-            <button
-              className={`benchmark-subtab-btn ${subTab === 'history' ? 'benchmark-subtab-btn--active' : ''}`}
-              onClick={() => setSubTab('history')}
+              type="button"
+              className="btn btn--sm btn--ghost"
+              onClick={onNavigatePastBenchmarks}
+              style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px' }}
             >
               <HistoryIcon width={14} height={14} />
-              Past Benchmarks
-              {historyRuns.length > 0 && (
-                <span className="badge badge--neutral font-xs" style={{ marginLeft: 6, padding: '1px 6px' }}>
-                  {historyRuns.length}
+              <span>Past Benchmarks</span>
+              {(pastBenchmarkCount ?? 0) > 0 && (
+                <span className="badge badge--neutral font-xs" style={{ marginLeft: 2, padding: '1px 6px' }}>
+                  {pastBenchmarkCount}
                 </span>
               )}
+              <span style={{ color: 'var(--text-subtle)', marginLeft: 2 }}>→</span>
             </button>
-          </div>
+          )}
         </div>
 
-        {/* ============================================================== */}
-        {/* SUB-VIEW 1: RUN BENCHMARK                                      */}
-        {/* ============================================================== */}
-        {subTab === 'run' && (
-          <div>
+        <div>
             {/* 1. Active Scope Strip */}
             <div className="benchmark-scope-strip" style={{ marginBottom: '20px' }}>
               <div className="benchmark-scope-strip__left">
@@ -530,14 +473,14 @@ export function BenchmarkStudioView({
             {/* 5. Dispatch Action Bar */}
             <div className="benchmark-dispatch-bar">
               <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                Benchmarking <strong style={{ color: 'var(--text)' }}>{selectedModelIds.size} models</strong> in parallel with Zero Host Execution guarantee.
+                Benchmarking <strong style={{ color: 'var(--text)' }}>{activeSelectedModelIds.length} model{activeSelectedModelIds.length === 1 ? '' : 's'}</strong> in parallel with Zero Host Execution guarantee.
               </div>
 
               <button
                 type="button"
                 className="benchmark-dispatch-btn"
                 onClick={handleRunBenchmark}
-                disabled={running || !prompt.trim() || selectedModelIds.size === 0}
+                disabled={running || !prompt.trim() || activeSelectedModelIds.length === 0}
               >
                 {running ? (
                   <>
@@ -547,7 +490,7 @@ export function BenchmarkStudioView({
                 ) : (
                   <>
                     <SparkIcon width={16} height={16} />
-                    <span>Run Benchmark ({selectedModelIds.size} Models) ⚡</span>
+                    <span>Run Benchmark ({activeSelectedModelIds.length} Model{activeSelectedModelIds.length === 1 ? '' : 's'}) ⚡</span>
                   </>
                 )}
               </button>
@@ -955,374 +898,7 @@ export function BenchmarkStudioView({
               </div>
             )}
           </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* SUB-VIEW 2: PAST BENCHMARKS                                    */}
-        {/* ============================================================== */}
-        {subTab === 'history' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Historical Telemetry Cards */}
-            <div className="history-metrics-grid">
-              <div className="metric-card">
-                <span className="metric-label">Total Benchmark Runs</span>
-                <span className="metric-value">{historyRuns.length}</span>
-                <span className="metric-sub">Multi-model test sessions</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">Average Compliance Rate</span>
-                <span className="metric-value" style={{ color: 'var(--ok-fg)' }}>
-                  {historyRuns.length > 0
-                    ? `${(
-                        historyRuns.reduce((acc, r) => acc + (r.compliance_rate || 0), 0) /
-                        historyRuns.length
-                      ).toFixed(1)}%`
-                    : '—'}
-                </span>
-                <span className="metric-sub">Adhering strictly to RoE</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">Average Latency</span>
-                <span className="metric-value mono" style={{ color: 'var(--accent)' }}>
-                  {historyRuns.length > 0
-                    ? `${(
-                        historyRuns.reduce((acc, r) => acc + (r.average_latency_ms || 0), 0) /
-                        historyRuns.length
-                      ).toFixed(0)} ms`
-                    : '—'}
-                </span>
-                <span className="metric-sub">Across successful model inferences</span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">Storage Integrity</span>
-                <span className="metric-value" style={{ color: 'var(--text)' }}>
-                  PostgreSQL
-                </span>
-                <span className="metric-sub">Row-level security encrypted</span>
-              </div>
-            </div>
-
-            {/* Search & Actions Toolbar */}
-            <div className="history-toolbar">
-              <div className="history-search">
-                <SearchIcon width={14} height={14} style={{ color: 'var(--text-subtle)' }} />
-                <input
-                  type="text"
-                  placeholder="Search scenario, prompt, or RoE..."
-                  className="history-search__input"
-                  value={historySearch}
-                  onChange={(e) => setHistorySearch(e.target.value)}
-                />
-              </div>
-
-              <div className="history-actions">
-                {/* Select All Checkbox Button */}
-                {filteredHistory.length > 0 && (
-                  <button
-                    type="button"
-                    className="history-filter-btn"
-                    onClick={toggleSelectAllHistory}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isAllHistorySelected}
-                      onChange={() => {}}
-                      style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
-                    />
-                    <span>Select All ({filteredHistory.length})</span>
-                  </button>
-                )}
-
-                {/* Delete Selected (N) button */}
-                {selectedHistoryIds.size > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn--sm btn--danger"
-                    onClick={() => handleDeleteHistory(Array.from(selectedHistoryIds))}
-                    disabled={historyDeleting}
-                  >
-                    <TrashIcon width={13} height={13} />
-                    <span>
-                      {historyDeleting ? 'Deleting...' : `Delete Selected (${selectedHistoryIds.size})`}
-                    </span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  className="btn btn--sm btn--ghost"
-                  onClick={refreshHistory}
-                  disabled={historyLoading}
-                  title="Refresh benchmarks from database"
-                >
-                  <RefreshIcon width={13} height={13} className={historyLoading ? 'animate-spin' : ''} />
-                  Refresh
-                </button>
-              </div>
-            </div>
-
-            {/* Historical Runs List */}
-            {historyLoading ? (
-              <div className="metric-card" style={{ padding: 48, textAlign: 'center' }}>
-                <span className="btn-spinner" style={{ margin: '0 auto 12px' }} />
-                <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading benchmark history from database...</p>
-              </div>
-            ) : filteredHistory.length === 0 ? (
-              <div className="metric-card" style={{ padding: 48, textAlign: 'center' }}>
-                <BenchmarkIcon width={36} height={36} style={{ margin: '0 auto 12px', color: 'var(--border-strong)' }} />
-                <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-                  No Historical Benchmark Runs Found
-                </h3>
-                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 460, margin: '0 auto' }}>
-                  {historySearch
-                    ? 'No benchmark runs match your search query.'
-                    : 'Run your first multi-LLM benchmark in the "Run Benchmark" tab to record empirical compliance telemetry.'}
-                </p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {filteredHistory.map((run) => {
-                  const isSelected = selectedHistoryIds.has(run.benchmark_id);
-
-                  return (
-                    <div
-                      key={run.benchmark_id}
-                      className={`benchmark-history-row ${isSelected ? 'benchmark-history-row--selected' : ''}`}
-                      onClick={() => setInspectedRun(run)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, flex: 1 }}>
-                        {/* Checkbox */}
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => toggleSelectOneHistory(run.benchmark_id, e)}
-                          style={{ accentColor: 'var(--accent)', width: 16, height: 16, cursor: 'pointer' }}
-                        />
-
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
-                            <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text)' }}>
-                              {run.scenario_title}
-                            </span>
-                            <span className="badge badge--neutral mono font-xs">{run.benchmark_id}</span>
-                            <span className="badge badge--accent font-xs">{run.roe_id}</span>
-                            <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>
-                              {new Date(run.created_at).toLocaleString()}
-                            </span>
-                          </div>
-
-                          <p className="mono font-xs" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {run.prompt}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Score metrics & action buttons */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                        <div style={{ textAlign: 'center', padding: '4px 8px', background: 'var(--ok-bg)', border: '1px solid var(--ok-bd)', borderRadius: 4 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--ok-fg)', display: 'block' }}>CR</span>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--ok-fg)' }}>{run.compliance_rate}%</span>
-                        </div>
-
-                        <div style={{ textAlign: 'center', padding: '4px 8px', background: 'var(--bad-bg)', border: '1px solid var(--bad-bd)', borderRadius: 4 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--bad-fg)', display: 'block' }}>SVR</span>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--bad-fg)' }}>{run.scope_violation_rate}%</span>
-                        </div>
-
-                        <div style={{ textAlign: 'center', padding: '4px 8px', background: 'var(--surface-sunken)', border: '1px solid var(--border)', borderRadius: 4 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-subtle)', display: 'block' }}>Latency</span>
-                          <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                            {run.average_latency_ms.toFixed(0)}ms
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--primary"
-                          onClick={() => setInspectedRun(run)}
-                          style={{ fontSize: 12 }}
-                        >
-                          Inspect Matrix ↗
-                        </button>
-
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--ghost"
-                          onClick={() => handleDeleteHistory([run.benchmark_id])}
-                          title="Delete this benchmark run permanently"
-                          style={{ padding: '6px 8px', color: 'var(--bad-fg)' }}
-                        >
-                          <TrashIcon width={14} height={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* HISTORICAL INSPECTION MODAL */}
-            {inspectedRun && (
-              <div
-                className="modal-backdrop"
-                onClick={() => setInspectedRun(null)}
-              >
-                <div
-                  className="modal-content"
-                  style={{ maxWidth: 960, maxHeight: '88vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* Modal Header */}
-                  <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface-sunken)' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)' }}>
-                          {inspectedRun.scenario_title}
-                        </span>
-                        <span className="badge badge--neutral mono font-xs">{inspectedRun.benchmark_id}</span>
-                        <span className="badge badge--accent font-xs">{inspectedRun.roe_id}</span>
-                      </div>
-                      <span style={{ fontSize: 11.5, color: 'var(--text-subtle)', marginTop: 2, display: 'block' }}>
-                        Executed: {new Date(inspectedRun.created_at).toLocaleString()} • {inspectedRun.total_models} models tested
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost"
-                        onClick={() => exportBenchmarkReport(inspectedRun)}
-                      >
-                        <DownloadIcon width={13} height={13} /> JSON
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--ghost btn--icon"
-                        onClick={() => setInspectedRun(null)}
-                      >
-                        <XIcon width={16} height={16} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Modal Body */}
-                  <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {/* Evaluated Prompt */}
-                    <div style={{ padding: '12px 14px', background: 'var(--surface-sunken)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-                      <span className="metric-label" style={{ display: 'block', marginBottom: 4 }}>
-                        Evaluated Prompt
-                      </span>
-                      <div className="mono font-xs" style={{ whiteSpace: 'pre-wrap', color: 'var(--text)' }}>
-                        {inspectedRun.prompt}
-                      </div>
-                    </div>
-
-                    {/* Score summary grid */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, textAlign: 'center' }}>
-                      <div style={{ padding: 12, background: 'var(--ok-bg)', border: '1px solid var(--ok-bd)', borderRadius: 'var(--radius)' }}>
-                        <span className="metric-label" style={{ color: 'var(--ok-fg)', display: 'block' }}>Compliance</span>
-                        <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--ok-fg)' }}>{inspectedRun.compliance_rate}%</span>
-                      </div>
-                      <div style={{ padding: 12, background: 'var(--bad-bg)', border: '1px solid var(--bad-bd)', borderRadius: 'var(--radius)' }}>
-                        <span className="metric-label" style={{ color: 'var(--bad-fg)', display: 'block' }}>Scope Violation</span>
-                        <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--bad-fg)' }}>{inspectedRun.scope_violation_rate}%</span>
-                      </div>
-                      <div style={{ padding: 12, background: 'rgba(168, 85, 247, 0.1)', border: '1px solid rgba(168, 85, 247, 0.25)', borderRadius: 'var(--radius)' }}>
-                        <span className="metric-label" style={{ color: '#a855f7', display: 'block' }}>Hallucination</span>
-                        <span style={{ fontSize: 20, fontWeight: 800, color: '#a855f7' }}>{inspectedRun.hallucination_rate}%</span>
-                      </div>
-                      <div style={{ padding: 12, background: 'var(--surface-sunken)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-                        <span className="metric-label" style={{ display: 'block' }}>Avg Latency</span>
-                        <span className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>
-                          {inspectedRun.average_latency_ms.toFixed(0)}ms
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Side-by-Side Model Cards */}
-                    <div>
-                      <span className="metric-label" style={{ display: 'block', marginBottom: 12 }}>
-                        Comparative Model Results ({inspectedRun.items?.length || 0})
-                      </span>
-
-                      <div className="benchmark-matrix-grid">
-                        {(inspectedRun.items || []).map((item: BenchmarkEvaluateItem, idx: number) => {
-                          const { model, audit } = item;
-                          const isCorrect = audit?.verdict === 'Correct';
-                          const isUnsafe = audit?.verdict === 'Unsafe';
-
-                          const borderClass = isCorrect
-                            ? 'benchmark-model-res-card--correct'
-                            : isUnsafe
-                            ? 'benchmark-model-res-card--unsafe'
-                            : 'benchmark-model-res-card--incorrect';
-
-                          return (
-                            <div key={idx} className={`benchmark-model-res-card ${borderClass}`}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 8, marginBottom: 10, borderBottom: '1px solid var(--border)' }}>
-                                <div>
-                                  <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text)' }}>
-                                    {model?.model_name || 'Model'}
-                                  </span>
-                                  <span className="mono font-xs" style={{ color: 'var(--text-subtle)', display: 'block' }}>
-                                    {model?.latency_ms?.toFixed(0) || 0}ms • {model?.total_tokens || 0} tokens
-                                  </span>
-                                </div>
-                                <span
-                                  className={`badge font-xs ${
-                                    isCorrect ? 'badge--success' : isUnsafe ? 'badge--danger' : 'badge--warning'
-                                  }`}
-                                >
-                                  {audit?.verdict || 'Unknown'}
-                                </span>
-                              </div>
-
-                              <div style={{ marginBottom: 10 }}>
-                                <span className="metric-label" style={{ fontSize: 10.5, display: 'block', marginBottom: 4 }}>
-                                  Model Recommendation
-                                </span>
-                                <div className="benchmark-cmd-block" style={{ maxHeight: 110 }}>
-                                  {model?.extracted_commands?.length > 0 ? (
-                                    model.extracted_commands.map((c, ci) => (
-                                      <div key={ci} style={{ color: 'var(--ok-fg)' }}>
-                                        $ {c}
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <span style={{ color: 'var(--text-subtle)' }}>{model?.raw_output || '// None'}</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {audit?.safe_sanitized_command && (
-                                <div>
-                                  <span className="metric-label" style={{ fontSize: 10.5, color: 'var(--ok-fg)', display: 'block', marginBottom: 4 }}>
-                                    Self-Sanitized Safe Command
-                                  </span>
-                                  <div className="benchmark-safe-cmd-block">
-                                    {renderSafeCommandLines(audit.safe_sanitized_command)}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Modal Footer */}
-                  <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', background: 'var(--surface-sunken)', display: 'flex', justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn btn--sm btn--primary" onClick={() => setInspectedRun(null)}>
-                      Close Matrix
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }

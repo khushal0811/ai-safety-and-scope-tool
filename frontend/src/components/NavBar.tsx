@@ -3,12 +3,13 @@ import { checkBackendHealth, isLiveMode, subscribeLiveStatus } from '../services
 import type { UserProfile } from '../types/user';
 import { BenchmarkIcon, HistoryIcon, MoonIcon, SettingsIcon, SunIcon, UserIcon, VallumIcon } from './Icons';
 
-export type AppPage = 'studio' | 'history' | 'benchmark' | 'settings';
+export type AppPage = 'studio' | 'history' | 'benchmark' | 'past-benchmarks' | 'settings';
 
 interface Props {
   activePage: AppPage;
   onNavigate: (page: AppPage) => void;
   auditCount: number;
+  benchmarkCount?: number;
   currentUser: UserProfile | null;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
@@ -19,6 +20,7 @@ export function NavBar({
   activePage,
   onNavigate,
   auditCount,
+  benchmarkCount = 0,
   currentUser,
   theme,
   onToggleTheme,
@@ -66,6 +68,14 @@ export function NavBar({
           >
             <BenchmarkIcon width={13} height={13} />
             Benchmark Studio
+          </button>
+          <button
+            className={`nav-tab ${activePage === 'past-benchmarks' ? 'nav-tab--active' : ''}`}
+            onClick={() => onNavigate('past-benchmarks')}
+          >
+            <HistoryIcon width={13} height={13} />
+            Past Benchmarks
+            {benchmarkCount > 0 && <span className="nav-tab__count">{benchmarkCount}</span>}
           </button>
           <button
             className={`nav-tab ${activePage === 'settings' ? 'nav-tab--active' : ''}`}
