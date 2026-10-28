@@ -303,6 +303,8 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
                 safe_sanitized_command=sanitized_script or pass1_result.safe_sanitized_command,
                 modifications_made=modifications_made or pass1_result.modifications_made,
                 explanation=explanation,
+                trust_tier="hybrid",
+                ai_judge_notes=[],
             )
 
         # Mode B: Legacy Response Compatibility
@@ -403,8 +405,84 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             safe_sanitized_command=sanitized_script or pass1_result.safe_sanitized_command,
             modifications_made=modifications_made or pass1_result.modifications_made,
             explanation=explanation,
+            trust_tier="hybrid",
+            ai_judge_notes=[],
         )
 
     except Exception as e:
         logger.error(f"[AI Judge] Groq triage failed with exception: {e}; returning Pass 1 result.")
-        return pass1_result
+        return pass1_result.model_copy(update={"trust_tier": "hybrid"})
+
+
+async def evaluate_with_ai_judge_advisory(
+    request: AuditRequest,
+    pass1_result: AuditResult,
+) -> AuditResult:
+    """Run Pass 2 AI Judge strictly as an advisory observer under Deterministic-Only Mode.
+
+    Invariants:
+    1. pass1_result.verdict is NEVER modified.
+    2. pass1_result.violation_details is NEVER modified.
+    3. pass1_result.targets are NEVER modified.
+    4. AI Judge observations and false-positive triage are attached purely as advisory notes.
+    5. Returned result has trust_tier="deterministic".
+    """
+    try:
+        context_payload = build_judge_context(request, pass1_result)
+        user_prompt = f"Evaluate this pentest script against the RoE context now:\n\n{json.dumps(context_payload, indent=2)}"
+
+        response_json = await llm_client.generate_json(
+            system_prompt=AI_JUDGE_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            temperature=0.0,
+            max_tokens=2048,
+        )
+
+        if not response_json or not isinstance(response_json, dict):
+            logger.warning("[AI Judge Advisory] Received invalid JSON; returning deterministic pass1 result.")
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+
+        advisory_notes: List[str] = []
+
+        # Mode A (JudgeResponse with dispositions)
+        if "dispositions" in response_json:
+            judge_resp = JudgeResponse.model_validate(response_json)
+            for d in judge_resp.dispositions:
+                if d.disposition == "false_positive":
+                    advisory_notes.append(
+                        f"[Advisory Observation] Candidate {d.id} was flagged as a likely false positive: {d.reason} (Preserved as violation under Deterministic-Only Mode)."
+                    )
+                else:
+                    advisory_notes.append(
+                        f"[Advisory Observation] Candidate {d.id} confirmed by AI Judge: {d.reason}"
+                    )
+            if judge_resp.technical_rationale:
+                advisory_notes.append(f"[Advisory Rationale] {judge_resp.technical_rationale}")
+            for m in judge_resp.modifications_made:
+                advisory_notes.append(f"[Advisory Remediation Note] {m}")
+        else:
+            # Mode B legacy
+            for fp in response_json.get("discarded_false_positives", []):
+                tok = fp.get("token", "")
+                reason = fp.get("reason", "")
+                advisory_notes.append(
+                    f"[Advisory Observation] Token '{tok}' flagged as potential false positive: {reason} (Preserved under Deterministic-Only Mode)."
+                )
+            if "technical_rationale" in response_json:
+                advisory_notes.append(f"[Advisory Rationale] {response_json['technical_rationale']}")
+
+        return pass1_result.model_copy(
+            update={
+                "trust_tier": "deterministic",
+                "ai_judge_notes": advisory_notes,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"[AI Judge Advisory] Failed with exception: {e}; returning deterministic pass1 result.")
+        return pass1_result.model_copy(
+            update={
+                "trust_tier": "deterministic",
+                "ai_judge_notes": [f"[Advisory Notice] AI Judge triage unavailable: {e}"],
+            }
+        )

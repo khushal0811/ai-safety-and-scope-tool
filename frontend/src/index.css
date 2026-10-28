@@ -1938,5 +1938,128 @@ button { font: inherit; color: inherit; }
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* ==========================================================================
+   Trust Tier Switcher & Advisory Notes Panel (Phase 4.1)
+   ========================================================================== */
+
+.trust-tier-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--sunken, #1e1e24);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px;
+  gap: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.trust-tier-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-subtle);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.trust-tier-btn:hover {
+  color: var(--text);
+}
+
+.trust-tier-btn--active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.trust-tier-btn__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  opacity: 0.6;
+}
+
+.trust-tier-btn--active .trust-tier-btn__dot {
+  opacity: 1;
+}
+
+.trust-tier-btn__dot--hybrid {
+  background: #a855f7;
+  box-shadow: 0 0 6px rgba(168, 85, 247, 0.5);
+}
+
+.trust-tier-btn__dot--deterministic {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+/* Trust Tier Metadata Badge in Result View */
+.trust-tier-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.trust-tier-badge--det {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #10b981;
+}
+
+.trust-tier-badge--hyb {
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  color: #a855f7;
+}
+
+/* Advisory Notes Card */
+.advisory-card {
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  background: rgba(234, 179, 8, 0.03);
+}
+
+.advisory-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.advisory-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.advisory-bullet {
+  color: #eab308;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.advisory-text {
+  flex: 1;
+}
+
 
 

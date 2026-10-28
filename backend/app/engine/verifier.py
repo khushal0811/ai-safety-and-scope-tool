@@ -355,6 +355,7 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
 
     audit_id = f"AUDIT-{uuid.uuid4().hex[:10].upper()}"
     timestamp = datetime.now(timezone.utc).isoformat()
+    tier = "deterministic" if getattr(request, "deterministic_only", False) else "hybrid"
 
     return AuditResult(
         audit_id=audit_id,
@@ -370,6 +371,8 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
         safe_sanitized_command=safe_sanitized_command,
         modifications_made=unique_mods,
         explanation=explanation,
+        trust_tier=tier,
+        ai_judge_notes=[],
     )
 
 
@@ -385,19 +388,37 @@ def evaluate_deterministic_command(request: DeterministicAuditRequest) -> AuditR
         model_id=request.model_id,
         user_prompt=request.user_prompt,
         model_output=f"```bash\n{request.command}\n```",
+        deterministic_only=request.deterministic_only,
     )
     return evaluate_audit(full_req)
 
 
 async def evaluate_audit_async(request: AuditRequest) -> AuditResult:
-    """Evaluate audit using Dual-Pass Architecture: Pass 1 Deterministic Pre-Parser + Pass 2 Groq AI Judge."""
+    """Evaluate audit using Dual-Pass Architecture: Pass 1 Deterministic Pre-Parser + Pass 2 Groq AI Judge.
+
+    If request.deterministic_only is True, Pass 1 deterministic verdict and violations are strictly
+    authoritative, and Pass 2 AI Judge runs in advisory mode (attaching observations to ai_judge_notes).
+    """
     pass1_result = evaluate_audit(request)
 
-    # If Groq model inference is configured, dispatch to Pass 2 AI Judge Context Layer
+    # 1. Deterministic-Only Mode: Pass 1 verdict and violations are strictly authoritative
+    if request.deterministic_only:
+        pass1_result = pass1_result.model_copy(update={"trust_tier": "deterministic"})
+        if llm_client.is_configured:
+            try:
+                from app.engine.ai_judge import evaluate_with_ai_judge_advisory
+                return await evaluate_with_ai_judge_advisory(request, pass1_result)
+            except Exception as e:
+                logger.error(f"[AI Judge Advisory] Advisory pass failed: {e}")
+                return pass1_result
+        return pass1_result
+
+    # 2. Standard Hybrid Mode: Pass 1 + Pass 2 Groq AI Judge
     if llm_client.is_configured:
         try:
             from app.engine.ai_judge import evaluate_with_ai_judge
-            return await evaluate_with_ai_judge(request, pass1_result)
+            res = await evaluate_with_ai_judge(request, pass1_result)
+            return res.model_copy(update={"trust_tier": "hybrid"})
         except Exception as e:
             logger.error(f"[AI Judge] Fallback to Pass 1 result due to error: {e}")
             return pass1_result

@@ -73,6 +73,15 @@ export default function App() {
   const [queryingModel, setQueryingModel] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
 
+  const [trustTier, setTrustTier] = useState<'hybrid' | 'deterministic'>(() => {
+    return (localStorage.getItem('vallum.trust_tier') as 'hybrid' | 'deterministic') || 'hybrid';
+  });
+
+  function handleSelectTrustTier(tier: 'hybrid' | 'deterministic') {
+    setTrustTier(tier);
+    localStorage.setItem('vallum.trust_tier', tier);
+  }
+
   const [result, setResult] = useState<AuditResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -296,7 +305,16 @@ export default function App() {
     setLoading(true);
     setQueryError(null);
     try {
-      const res = await runAudit({ roe: activeScope, model_id: modelId, user_prompt: prompt, model_output: modelOutput }, user?.id);
+      const res = await runAudit(
+        {
+          roe: activeScope,
+          model_id: modelId,
+          user_prompt: prompt,
+          model_output: modelOutput,
+          deterministic_only: trustTier === 'deterministic',
+        },
+        user?.id
+      );
       setResult(res);
       setStep(3); // Transition into Step 3 (Audit Verdict & Safe Rewriter)
 
@@ -376,6 +394,8 @@ export default function App() {
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
         onOpenAuth={() => setAuthModalOpen(true)}
+        trustTier={trustTier}
+        onSelectTrustTier={handleSelectTrustTier}
       />
 
       {/* PAGE 1: AUDIT STUDIO */}
