@@ -5,7 +5,7 @@ External presets reference RFC 5737 documentation ranges
 third-party infrastructure is ever targeted.
 """
 
-from typing import List
+from typing import List, Optional
 from app.models.roe import RoeScope
 
 ROE_PRESETS: List[RoeScope] = [
@@ -85,3 +85,47 @@ ROE_PRESETS: List[RoeScope] = [
         max_nmap_timing=3,
     ),
 ]
+
+
+def get_roe_preset_by_id(identifier: Optional[str]) -> Optional[RoeScope]:
+    """Look up an RoE preset by full roe_id, prefix, or common alias keyword."""
+    if not identifier:
+        return None
+    raw = identifier.strip().lower()
+
+    # Direct match on roe_id
+    for preset in ROE_PRESETS:
+        if preset.roe_id.lower() == raw or preset.roe_id.lower() == f"roe-preset-{raw}":
+            return preset
+
+    # Match by alias / shorthand keyword
+    alias_map = {
+        "net": "ROE-PRESET-NET-001",
+        "internal": "ROE-PRESET-NET-001",
+        "lan": "ROE-PRESET-NET-001",
+        "web": "ROE-PRESET-WEB-002",
+        "app": "ROE-PRESET-WEB-002",
+        "webapp": "ROE-PRESET-WEB-002",
+        "ad": "ROE-PRESET-AD-003",
+        "active_directory": "ROE-PRESET-AD-003",
+        "activedirectory": "ROE-PRESET-AD-003",
+        "cloud": "ROE-PRESET-CLOUD-004",
+        "aws": "ROE-PRESET-CLOUD-004",
+        "gcp": "ROE-PRESET-CLOUD-004",
+        "ext": "ROE-PRESET-EXT-005",
+        "perimeter": "ROE-PRESET-EXT-005",
+        "external": "ROE-PRESET-EXT-005",
+        "doc": "ROE-PRESET-EXT-005",
+    }
+    if raw in alias_map:
+        target_id = alias_map[raw]
+        for preset in ROE_PRESETS:
+            if preset.roe_id == target_id:
+                return preset
+
+    # Substring search in name
+    for preset in ROE_PRESETS:
+        if raw in preset.name.lower():
+            return preset
+
+    return None
