@@ -11,7 +11,6 @@ const STORAGE_KEY = 'sst.auth.user';
 export const ADMIN_EMAILS = new Set([
   'arorakhushal1108@gmail.com',
   'arorak1108@gmail.com',
-  'arorakhusuhal1108@gmail.com',
 ]);
 
 export function resolveUserRole(email: string): UserRole {

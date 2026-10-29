@@ -223,8 +223,55 @@ def test_rbac_super_admin_assignment():
     from app.db.supabase_client import resolve_user_role
     assert resolve_user_role("arorakhushal1108@gmail.com") == "admin"
     assert resolve_user_role("arorak1108@gmail.com") == "admin"
-    assert resolve_user_role("arorakhusuhal1108@gmail.com") == "admin"
     assert resolve_user_role("AroraKhushal1108@gmail.com") == "admin"
+    # Typo lookalike email must NOT receive admin privileges
+    assert resolve_user_role("arorakhusuhal1108@gmail.com") == "penetration_tester"
+
+
+def test_save_custom_roe_blocks_cross_user_overwrite(monkeypatch):
+    """Verify User B cannot overwrite User A's custom RoE on roe_id collision."""
+    from app.db import supabase_client
+
+    user_a = "11111111-1111-1111-1111-111111111111"
+    user_b = "22222222-2222-2222-2222-222222222222"
+    upserted = []
+
+    class FakeResult:
+        def __init__(self, data):
+            self.data = data
+
+    class FakeQuery:
+        def select(self, *_):
+            return self
+
+        def eq(self, *_):
+            return self
+
+        def limit(self, *_):
+            return self
+
+        def upsert(self, payload, **_):
+            upserted.append(payload)
+            return self
+
+        def execute(self):
+            return FakeResult([{"user_id": user_a}])
+
+    class FakeClient:
+        def table(self, name):
+            assert name == "custom_roes"
+            return FakeQuery()
+
+    monkeypatch.setattr(supabase_client, "get_supabase", lambda: FakeClient())
+
+    # User B attempting to overwrite User A's ROE-SHARED-ID must be rejected
+    assert supabase_client.save_custom_roe({"roe_id": "ROE-SHARED-ID"}, user_id=user_b) is False
+    assert upserted == []
+
+    # User A updating their own ROE-SHARED-ID succeeds
+    assert supabase_client.save_custom_roe({"roe_id": "ROE-SHARED-ID"}, user_id=user_a) is True
+    assert len(upserted) == 1
+
 
 
 

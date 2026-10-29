@@ -37,7 +37,11 @@ def get_supabase():
         return _supabase_client
 
     url = os.getenv("SUPABASE_URL", "").strip()
-    key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")).strip()
+    key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY", "")
+    ).strip()
 
     if not url or not key or "your-project-id" in url:
         return None
@@ -354,6 +358,25 @@ def save_custom_roe(
 
     try:
         roe_id = roe_dict.get("id") or roe_dict.get("roe_id") or "ROE-CUSTOM"
+        # Prevent cross-user overwrite on roe_id collision: if a row already exists
+        # with this roe_id and belongs to a different user (or is a system preset),
+        # refuse to overwrite it.
+        existing = (
+            client.table("custom_roes")
+            .select("user_id")
+            .eq("roe_id", roe_id)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            owner_id = existing.data[0].get("user_id")
+            if owner_id != user_id:
+                logger.warning(
+                    f"[Supabase] Refusing cross-user custom_roes overwrite on roe_id={roe_id} "
+                    f"(owner={owner_id}, caller={user_id})"
+                )
+                return False
+
         payload = {
             "roe_id": roe_id,
             "user_id": user_id,
@@ -379,8 +402,10 @@ def save_custom_roe(
 
 
 def fetch_custom_roes(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve custom RoEs belonging to the given user, plus any public (user_id IS NULL) presets.
+    """Retrieve custom RoEs belonging to the given user, plus any system-seeded public (user_id IS NULL) presets.
 
+    Note: Rows with `user_id IS NULL` are strictly read-only system presets seeded by
+    administrators; `save_custom_roe` rejects any write where `user_id` is not a valid UUID.
     An unauthenticated or invalid caller sees only public RoEs — never another
     user's private custom scope.
     """
@@ -633,7 +658,6 @@ def get_user_vault_status(user_id: str) -> Dict[str, Any]:
 ADMIN_EMAILS = {
     "arorakhushal1108@gmail.com",
     "arorak1108@gmail.com",
-    "arorakhusuhal1108@gmail.com",
 }
 
 

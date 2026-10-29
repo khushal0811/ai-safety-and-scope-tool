@@ -112,9 +112,10 @@ def deterministic_roe_post_validation(parsed_data: dict, fallback_name: str = "U
 async def parse_unstructured_roe(content: str, filename: str = "custom_roe.md") -> RoeScope:
     """Parse an unstructured RoE document using LLM with deterministic validation."""
     clean_text = sanitize_raw_document(content)
+    safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", (filename or "custom_roe.md"))[:64]
 
     user_prompt = f"""Extract the Rules of Engagement from the following document:
-<untrusted_document_content filename="{filename}">
+<untrusted_document_content filename="{safe_filename}">
 {clean_text}
 </untrusted_document_content>"""
 

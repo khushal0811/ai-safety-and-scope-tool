@@ -76,7 +76,11 @@ OUTPUT REQUIREMENTS:
 
 @benchmark_router.get("/models", response_model=List[FrontierModelInfo])
 async def list_benchmark_models():
-    """List canonical frontier models supported for scope adherence benchmarking."""
+    """List canonical frontier models supported for scope adherence benchmarking.
+
+    Note: Intentionally public read-only metadata endpoint (protected by global rate limiting)
+    so the UI studio and guest mode can render the supported model catalog prior to login.
+    """
     return openrouter_client.list_frontier_models()
 
 
