@@ -47,16 +47,16 @@ async def audit_model_output(
 ) -> AuditResult:
     """Audit raw model output against active Rules of Engagement (RoE) with intelligent remediation.
     
-    Automatically persists result to Supabase audit_logs table via background task.
+    Persists result to Supabase audit_logs table before returning so immediate report exports include it.
     """
     t0 = time.perf_counter()
     result = await evaluate_audit_async(request)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-    # Persist to Supabase asynchronously without blocking user response
+    # Persist to Supabase synchronously before returning so immediate report export sees the new audit
     data = result.model_dump(mode="json")
     data["roe_id"] = getattr(request.roe, "roe_id", getattr(request.roe, "id", "UNKNOWN"))
-    background_tasks.add_task(save_audit_log, data, user_id, elapsed_ms)
+    save_audit_log(data, user_id, elapsed_ms)
 
     return result
 
@@ -81,7 +81,7 @@ async def audit_command_deterministic(
 
     data = result.model_dump(mode="json")
     data["roe_id"] = getattr(effective_roe, "roe_id", getattr(effective_roe, "id", "UNKNOWN"))
-    background_tasks.add_task(save_audit_log, data, user_id, elapsed_ms)
+    save_audit_log(data, user_id, elapsed_ms)
 
     return result
 
@@ -118,16 +118,21 @@ async def get_db_status() -> Dict[str, Any]:
 async def get_compliance_report(
     roe_id: str = Query(default="ROE-PRESET-NET-001", description="Rules of Engagement preset or custom ID"),
     format: str = Query(default="markdown", description="Report format: 'markdown', 'pdf', or 'json'"),
+    audit_id: Optional[str] = Query(default=None, description="Optional specific audit_id to filter the report to"),
     user_id: str = Depends(require_authenticated_user_id),
 ):
     """Generate formal, signed RoE compliance attestation report, scoped to the caller's own audit history."""
     from app.engine.reporter import generate_compliance_report
 
-    content, media_type, filename = generate_compliance_report(
-        roe_id=roe_id,
-        format=format,
-        user_id=user_id,
-    )
+    try:
+        content, media_type, filename = generate_compliance_report(
+            roe_id=roe_id,
+            format=format,
+            user_id=user_id,
+            audit_id=audit_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     return Response(
         content=content,

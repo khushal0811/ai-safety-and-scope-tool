@@ -126,6 +126,7 @@ def fetch_audit_logs_for_roe(
     roe_id: str,
     user_id: Optional[str] = None,
     limit: int = 500,
+    audit_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Retrieve audit logs for a specific RoE ID, scoped strictly to the given user.
 
@@ -140,15 +141,15 @@ def fetch_audit_logs_for_roe(
         return []
 
     try:
-        res = (
+        query = (
             client.table("audit_logs")
             .select("*")
             .eq("roe_id", roe_id)
             .eq("user_id", user_id)
-            .order("created_at", desc=False)
-            .limit(limit)
-            .execute()
         )
+        if audit_id:
+            query = query.eq("audit_id", audit_id)
+        res = query.order("created_at", desc=False).limit(limit).execute()
         return res.data or []
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch audit logs for RoE {roe_id} (user {user_id}): {e}")
@@ -398,6 +399,25 @@ def fetch_custom_roes(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch custom RoEs: {e}")
         return []
+
+
+def fetch_custom_roe_by_id(roe_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve a single custom RoE by its roe_id, scoped to the given user (or public)."""
+    client = get_supabase()
+    if not client:
+        return None
+    try:
+        query = client.table("custom_roes").select("*").eq("roe_id", roe_id)
+        if user_id and is_valid_uuid(user_id):
+            query = query.or_(f"user_id.eq.{user_id},user_id.is.null")
+        else:
+            query = query.is_("user_id", "null")
+        res = query.limit(1).execute()
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as e:
+        logger.error(f"[Supabase] Failed to fetch custom RoE {roe_id}: {e}")
+        return None
 
 
 def save_user_vault_keys(

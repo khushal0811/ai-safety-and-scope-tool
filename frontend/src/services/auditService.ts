@@ -248,14 +248,15 @@ export async function queryLiveModel(
 export async function downloadComplianceReport(
   roeId: string,
   format: 'pdf' | 'markdown' | 'json' = 'pdf',
-  userId?: string
+  _userId?: string,
+  auditId?: string
 ): Promise<void> {
   const params = new URLSearchParams({
     roe_id: roeId,
     format: format,
   });
-  if (userId) {
-    params.set('user_id', userId);
+  if (auditId) {
+    params.set('audit_id', auditId);
   }
 
   const url = `${API_BASE_URL}/api/audit/report?${params.toString()}`;

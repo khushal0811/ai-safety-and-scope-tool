@@ -311,14 +311,14 @@ function ResultBody({
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <strong style={{ fontSize: 13.5, letterSpacing: '-0.01em' }}>
-                      Formal RoE Compliance Attestation
+                      Engagement Compliance Attestation Ledger
                     </strong>
                     <span className="tag tag--ok" style={{ fontSize: 10, padding: '1px 6px' }}>
                       SHA-256 Chained
                     </span>
                   </div>
                   <p className="muted" style={{ fontSize: 12, margin: '2px 0 0' }}>
-                    SOC 2 (CC6.1/7.2), ISO 27001, and CREST-certified engagement non-repudiation report.
+                    SOC 2 (CC6.1/7.2), ISO 27001, and CREST-aligned engagement audit ledger for this scope.
                   </p>
                 </div>
               </div>
