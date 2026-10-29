@@ -294,6 +294,75 @@ def test_api_audit_report_json_endpoint():
         assert "root_hash" in data
 
 
+def test_generate_compliance_report_custom_roe():
+    """Verify custom RoEs are resolved via fetch_custom_roe_by_id instead of falling back to ROE-PRESET-NET-001."""
+    custom_roe_row = {
+        "roe_id": "ROE-CUSTOM-APEX-001",
+        "name": "Apex Financial Core Banking Assessment",
+        "engagement_type": "Enterprise Red Team",
+        "summary": "Authorized assessment of 10.240.16.0/24.",
+        "allowed_cidrs": ["10.240.16.0/24"],
+        "allowed_domains": ["portal.apexfin-corp.com"],
+        "target_hosts": ["10.240.16.10"],
+        "prohibited_ips": ["10.240.16.1"],
+        "allowed_tools": ["nmap", "nikto"],
+        "prohibited_tools": ["hydra"],
+        "prohibited_flags": ["--flood"],
+        "prohibited_actions": ["dos"],
+        "max_nmap_timing": 3,
+    }
+    with (
+        patch("app.engine.reporter.fetch_custom_roe_by_id", return_value=custom_roe_row),
+        patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS) as mock_logs,
+    ):
+        md_content, media_type, filename = generate_compliance_report(
+            roe_id="ROE-CUSTOM-APEX-001",
+            format="markdown",
+            user_id=TEST_REPORT_USER_ID,
+        )
+        assert "Apex Financial Core Banking Assessment" in md_content
+        assert "10.240.16.0/24" in md_content
+        assert "10.240.16.10" in md_content
+        assert "192.168.1.0/24" not in md_content
+        assert filename == "vallum_attestation_roe_custom_apex_001.md"
+        mock_logs.assert_called_once_with(
+            roe_id="ROE-CUSTOM-APEX-001",
+            user_id=TEST_REPORT_USER_ID,
+            limit=500,
+            audit_id=None,
+        )
+
+
+def test_api_audit_report_unknown_roe_returns_404():
+    """Verify requesting a report for a non-existent roe_id returns 404 instead of substituting ROE_PRESETS[0]."""
+    with patch("app.engine.reporter.fetch_custom_roe_by_id", return_value=None):
+        response = client.get(
+            "/api/audit/report?roe_id=ROE-NONEXISTENT-999&format=markdown",
+            headers={"X-User-Id": TEST_REPORT_USER_ID},
+        )
+        assert response.status_code == 404
+        assert "ROE-NONEXISTENT-999" in response.json()["detail"]
+
+
+def test_hash_chain_root_matches_across_markdown_and_json():
+    """Verify Markdown and JSON exports produce the exact same SHA-256 root_hash for the same RoE and records."""
+    with patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS):
+        md_content, _, _ = generate_compliance_report(
+            roe_id="ROE-PRESET-NET-001",
+            format="markdown",
+            user_id=TEST_REPORT_USER_ID,
+        )
+        json_content, _, _ = generate_compliance_report(
+            roe_id="ROE-PRESET-NET-001",
+            format="json",
+            user_id=TEST_REPORT_USER_ID,
+        )
+        parsed_json = json.loads(json_content)
+        root_hash = parsed_json["root_hash"]
+        assert len(root_hash) == 64
+        assert root_hash in md_content
+
+
 # ==============================================================================
 # 6. CLI Report Generation (vallum-cli report)
 # ==============================================================================

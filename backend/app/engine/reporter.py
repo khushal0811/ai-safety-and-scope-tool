@@ -18,10 +18,15 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
-from app.db import fetch_audit_logs_for_roe
+from app.db import fetch_audit_logs_for_roe, fetch_custom_roe_by_id
 from app.models.roe import RoeScope
 
 logger = logging.getLogger(__name__)
+
+
+def _attestation_seed(roe: RoeScope) -> str:
+    """Compute canonical initial seed for SHA-256 hash chain across all export formats."""
+    return f"{roe.roe_id}|{roe.name}|{','.join(sorted(roe.allowed_cidrs))}|{','.join(sorted(roe.allowed_domains))}"
 
 
 def compute_hash_chain(
@@ -71,7 +76,7 @@ def generate_compliance_report_markdown(
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     report_id = f"ATTEST-{hashlib.sha256(f'{roe.roe_id}:{now_utc}'.encode()).hexdigest()[:12].upper()}"
 
-    initial_seed = f"{roe.roe_id}|{roe.name}|{','.join(sorted(roe.allowed_cidrs))}|{','.join(sorted(roe.allowed_domains))}"
+    initial_seed = _attestation_seed(roe)
     chained_records, root_hash = compute_hash_chain(records, initial_seed)
 
     total_ops = len(chained_records)
@@ -325,7 +330,7 @@ def generate_compliance_report_pdf(
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     report_id = f"ATTEST-{hashlib.sha256(f'{roe.roe_id}:{now_utc}'.encode()).hexdigest()[:12].upper()}"
 
-    initial_seed = f"{roe.roe_id}|{roe.name}|{','.join(sorted(roe.allowed_cidrs))}|{','.join(sorted(roe.allowed_domains))}"
+    initial_seed = _attestation_seed(roe)
     chained_records, root_hash = compute_hash_chain(records, initial_seed)
 
     total_ops = len(chained_records)
@@ -494,27 +499,49 @@ def generate_compliance_report(
     roe_id: str,
     format: str = "markdown",
     user_id: Optional[str] = None,
+    audit_id: Optional[str] = None,
 ) -> Tuple[Union[str, bytes], str, str]:
     """Top-level reporting entry point. Resolves RoE, loads audit logs, and renders report.
 
     Returns:
         (content_bytes_or_string, media_type, download_filename)
     """
-    # 1. Resolve RoE
+    # 1. Resolve RoE — check static presets first, then the user's own custom RoEs,
+    #    and fail loudly rather than silently substituting the wrong scope.
     roe = get_roe_preset_by_id(roe_id)
     if not roe:
-        # Check presets directly
         for p in ROE_PRESETS:
             if p.roe_id.lower() == roe_id.lower():
                 roe = p
                 break
 
     if not roe:
-        # Fallback to default net preset
-        roe = ROE_PRESETS[0]
+        custom_row = fetch_custom_roe_by_id(roe_id, user_id=user_id)
+        if custom_row:
+            roe = RoeScope(
+                roe_id=custom_row.get("roe_id"),
+                name=custom_row.get("name", "Custom Scope"),
+                engagement_type=custom_row.get("engagement_type", "Custom Assessment"),
+                summary=custom_row.get("summary", ""),
+                allowed_cidrs=custom_row.get("allowed_cidrs") or [],
+                allowed_domains=custom_row.get("allowed_domains") or [],
+                target_hosts=custom_row.get("target_hosts") or [],
+                prohibited_ips=custom_row.get("prohibited_ips") or [],
+                allowed_tools=custom_row.get("allowed_tools") or [],
+                prohibited_tools=custom_row.get("prohibited_tools") or [],
+                prohibited_flags=custom_row.get("prohibited_flags") or [],
+                prohibited_actions=custom_row.get("prohibited_actions") or [],
+                max_nmap_timing=custom_row.get("max_nmap_timing", 3),
+            )
 
-    # 2. Fetch Audit Logs for this RoE
-    records = fetch_audit_logs_for_roe(roe_id=roe.roe_id, user_id=user_id, limit=500)
+    if not roe:
+        raise ValueError(
+            f"No preset or custom Rules of Engagement found for roe_id='{roe_id}'. "
+            "Cannot generate a compliance report for an unknown scope."
+        )
+
+    # 2. Fetch Audit Logs for this RoE (now guaranteed to use the REQUESTED roe_id, not a substitute)
+    records = fetch_audit_logs_for_roe(roe_id=roe.roe_id, user_id=user_id, limit=500, audit_id=audit_id)
 
     fmt = format.lower().strip()
     clean_id = roe.roe_id.lower().replace("-", "_")
@@ -523,7 +550,7 @@ def generate_compliance_report(
         pdf_bytes = generate_compliance_report_pdf(roe=roe, records=records, user_id=user_id)
         return pdf_bytes, "application/pdf", f"vallum_attestation_{clean_id}.pdf"
     elif fmt == "json":
-        initial_seed = f"{roe.roe_id}|{roe.name}"
+        initial_seed = _attestation_seed(roe)
         chained_records, root_hash = compute_hash_chain(records, initial_seed)
         data = {
             "report_id": f"ATTEST-{hashlib.sha256(root_hash.encode()).hexdigest()[:12].upper()}",
