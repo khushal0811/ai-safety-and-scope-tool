@@ -5,6 +5,7 @@ and securely derives the authenticated user_id, preventing client-side user impe
 """
 
 import logging
+import os
 from typing import Optional
 from fastapi import Header, HTTPException, Query, status
 
@@ -43,15 +44,29 @@ async def get_authenticated_user_id(
         )
 
     # Unauthenticated identity fallback is permitted ONLY in local development,
-    # and only ever for manual testing — never reachable in a deployed environment.
+    # and never against a live remote Supabase instance unless explicitly opted in
+    # (or running automated unit tests).
     if settings.ENVIRONMENT == "development":
-        candidate_uid = user_id or x_user_id
-        if candidate_uid and is_valid_uuid(candidate_uid):
+        supabase_url = os.getenv("SUPABASE_URL", "").strip().lower()
+        is_remote_supabase = ".supabase.co" in supabase_url and "your-project-id" not in supabase_url
+        allow_dev_fallback = (
+            not is_remote_supabase
+            or bool(os.getenv("PYTEST_CURRENT_TEST"))
+            or os.getenv("ALLOW_DEV_UID_FALLBACK", "").strip().lower() in ("1", "true", "yes")
+        )
+        if allow_dev_fallback:
+            candidate_uid = user_id or x_user_id
+            if candidate_uid and is_valid_uuid(candidate_uid):
+                logger.warning(
+                    f"[Auth] DEV-ONLY unauthenticated uid fallback used: {candidate_uid}. "
+                    "This path is disabled whenever ENVIRONMENT != 'development' or against remote cloud DBs."
+                )
+                return candidate_uid
+        elif user_id or x_user_id:
             logger.warning(
-                f"[Auth] DEV-ONLY unauthenticated uid fallback used: {candidate_uid}. "
-                "This path is disabled whenever ENVIRONMENT != 'development'."
+                "[Auth] Blocked unauthenticated dev UID fallback because SUPABASE_URL points to a remote "
+                ".supabase.co project. Set ALLOW_DEV_UID_FALLBACK=true to override locally."
             )
-            return candidate_uid
 
     return None
 

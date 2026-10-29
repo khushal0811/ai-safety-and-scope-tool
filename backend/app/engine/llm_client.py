@@ -92,8 +92,9 @@ class LLMClient:
                             raw_content = "\n".join(lines).strip()
                         return json.loads(raw_content)
                 else:
+                    truncated_err = (res.text or "")[:120]
                     logger.error(
-                        f"[LLMClient] Error {res.status_code} from {self.base_url}: {res.text}"
+                        f"[LLMClient] Error {res.status_code} from {self.base_url}: {truncated_err}"
                     )
         except Exception as e:
             logger.error(f"[LLMClient] Exception during generation: {e}")

@@ -12,12 +12,16 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: CORS_ORIGINS
-        value: "http://localhost:5173"
+        value: "https://vallum.vercel.app,http://localhost:5173"
+      - key: KEY_VAULT_MASTER_KEY
+        sync: false
       - key: OPENROUTER_API_KEY
         sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SUPABASE_KEY
         sync: false

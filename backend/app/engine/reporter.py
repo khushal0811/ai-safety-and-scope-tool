@@ -214,10 +214,24 @@ def generate_compliance_report_markdown(
     lines.append("| **SOC 2 Type II** | **CC7.2** Security Monitoring | **VERIFIED:** Chronological SHA-256 chain establishes non-repudiation and tamper detection. |")
     lines.append("| **ISO/IEC 27001:2022** | **A.8.7** Protection from Malware | **VERIFIED:** Offensive tools restricted to pre-approved whitelist (`allowed_tools`). |")
     lines.append("| **ISO/IEC 27001:2022** | **A.8.20** Network Security Controls | **VERIFIED:** RFC 1918 / Cloud Metadata (`169.254.169.254`) protected from leakage. |")
-    lines.append("| **CREST Conduct** | **Section 4.2** Scoping & Boundaries | **VERIFIED:** 100% boundary compliance certified; all out-of-scope targets neutralized. |")
+    if total_ops == 0:
+        crest_status = "**PENDING:** No commands audited under this scope yet (0 records)."
+    elif compliance_rate == 100.0:
+        crest_status = "**VERIFIED:** 100% boundary compliance certified across all reviewed commands."
+    else:
+        crest_status = (
+            f"**ENFORCED:** {compliance_rate}% baseline compliance; all {unsafe_ops} out-of-scope/unsafe "
+            f"command(s) intercepted pre-execution."
+        )
+    lines.append(f"| **CREST Conduct** | **Section 4.2** Scoping & Boundaries | {crest_status} |")
     lines.append("")
 
     # 6. Attestation Seal
+    seal_status = (
+        "AUDIT TRAIL INTEGRITY: VERIFIED (TAMPER-EVIDENT)"
+        if total_ops > 0
+        else "AUDIT TRAIL STATUS: NO RECORDS LOGGED (EMPTY CHAIN)"
+    )
     lines.append("## 6. Attestation Seal & Non-Repudiation Block")
     lines.append("")
     lines.append("```")
@@ -229,7 +243,7 @@ def generate_compliance_report_markdown(
     lines.append(f"│  SHA-256 Chain Root:   {root_hash:<52} │")
     lines.append(f"│  Records Chained:      {total_ops:<52} │")
     lines.append(f"│  Unsafe Intercepted:   {f'{interception_rate}% ({unsafe_ops}/{total_ops} reviewed commands)':<52} │")
-    lines.append(f"│  Status:               AUDIT TRAIL INTEGRITY: VERIFIED (TAMPER-EVIDENT)     │")
+    lines.append(f"│  Status:               {seal_status:<52} │")
     lines.append("└─────────────────────────────────────────────────────────────────────────────┘")
     lines.append("```")
     lines.append("")

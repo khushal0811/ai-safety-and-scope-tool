@@ -288,6 +288,25 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             sanitized_script = clean_sanitized_script(raw_script)
 
             modifications_made = list(judge_resp.modifications_made)
+
+            # Re-verify any AI-synthesized sanitized_script through the deterministic AST engine
+            # so a hallucinating AI Judge can never introduce out-of-scope targets or banned flags.
+            if sanitized_script and sanitized_script != pass1_result.safe_sanitized_command:
+                from app.engine.verifier import evaluate_deterministic_command
+                from app.models.audit import DeterministicAuditRequest
+
+                recheck = evaluate_deterministic_command(
+                    DeterministicAuditRequest(command=sanitized_script, roe=request.roe)
+                )
+                if recheck.verdict != Verdict.CORRECT:
+                    logger.warning(
+                        "[AIJudge] Rejected AI-synthesized sanitized_script that failed deterministic "
+                        f"re-verification ({recheck.verdict}); falling back to Pass 1 deterministic remediation."
+                    )
+                    sanitized_script = pass1_result.safe_sanitized_command
+                    modifications_made.append(
+                        "[Deterministic Guard] Replaced non-compliant AI Judge rewrite with verified AST remediation."
+                    )
             for c_id, reason in false_positive_map.items():
                 modifications_made.append(f"[Groq AI Judge] Filtered false positive ({c_id}): {reason}")
 

@@ -84,26 +84,15 @@ def _has_dd_to_block_device(tokens: List[str]) -> Optional[str]:
 
 DESTRUCTIVE_PATTERNS: List[DestructivePattern] = [
     # System and Disk Destruction
-    DestructivePattern(
-        pattern=re.compile(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f\b|\brm\s+-[a-zA-Z]*f[a-zA-Z]*r\b", re.IGNORECASE),
-        label=RM_RECURSIVE_FORCE_LABEL,
-        category=ViolationCategory.DESTRUCTIVE,
-        severity=Severity.CRITICAL,
-        remediation_note="Removed dangerous recursive deletion command.",
-    ),
+    # Note: rm -rf (including separate flags and GNU long options) and dd block-device
+    # writes are evaluated via token-set analysis in _has_rm_recursive_force() and
+    # _has_dd_to_block_device() below rather than brittle order-dependent regexes.
     DestructivePattern(
         pattern=re.compile(r"\bmkfs(\.[a-zA-Z0-9]+)?\b", re.IGNORECASE),
         label="Filesystem Formatting (mkfs)",
         category=ViolationCategory.DESTRUCTIVE,
         severity=Severity.CRITICAL,
         remediation_note="Removed filesystem formatting command.",
-    ),
-    DestructivePattern(
-        pattern=re.compile(r"\bdd\s+if=.*of=(/dev/[a-zA-Z0-9]+)", re.IGNORECASE),
-        label=DD_BLOCK_DEVICE_LABEL,
-        category=ViolationCategory.DESTRUCTIVE,
-        severity=Severity.CRITICAL,
-        remediation_note="Removed raw block device write command.",
     ),
     DestructivePattern(
         pattern=re.compile(r":\(\)\s*\{\s*:\|:&\s*\};:", re.IGNORECASE),

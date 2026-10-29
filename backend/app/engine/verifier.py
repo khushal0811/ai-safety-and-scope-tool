@@ -8,7 +8,7 @@ and generates safe sanitized command replacements.
 from datetime import datetime, timezone
 import logging
 import re
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple
 import uuid
 
 from app.engine.cve_validator import validate_cve_references

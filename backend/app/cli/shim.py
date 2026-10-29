@@ -495,9 +495,20 @@ def cmd_report(args: argparse.Namespace) -> int:
     config = get_config()
     roe_id = args.roe or config.get("active_roe_id", DEFAULT_ROE_ID)
     fmt = args.format or "markdown"
+    user_id = getattr(args, "user_id", None) or config.get("user_id") or os.getenv("VALLUM_USER_ID")
+
+    if not user_id:
+        sys.stderr.write(
+            f"{Colors.YELLOW}[!] Warning: No --user-id (or VALLUM_USER_ID) supplied. "
+            f"Cloud audit logs are strictly isolated by user UUID; report will contain 0 cloud records.{Colors.RESET}\n"
+        )
 
     try:
-        content, media_type, filename = generate_compliance_report(roe_id=roe_id, format=fmt)
+        content, media_type, filename = generate_compliance_report(
+            roe_id=roe_id,
+            format=fmt,
+            user_id=user_id,
+        )
         out_path = args.output or filename
         if isinstance(content, str):
             with open(out_path, "w", encoding="utf-8") as f:
@@ -624,6 +635,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 7. report
     p_report = subparsers.add_parser("report", help="Generate formal signed RoE compliance attestation (PDF/Markdown)")
     p_report.add_argument("--roe", default=None, help="Preset ID or custom RoE ID")
+    p_report.add_argument("--user-id", dest="user_id", default=None, help="Authenticated user UUID to scope audit logs")
     p_report.add_argument("--format", choices=["markdown", "pdf", "json"], default="markdown", help="Report format")
     p_report.add_argument("-o", "--output", default=None, help="Output destination file path")
 

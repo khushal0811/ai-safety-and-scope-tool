@@ -1,11 +1,13 @@
 /**
  * User-supplied API keys for OpenRouter and Groq.
- * Security invariant: keys are NEVER persisted to database tables,
- * NEVER written to permanent localStorage and NEVER logged.
- *   - 'session': sessionStorage, wiped when the browser tab closes
- *   - 'memory' : module variable, wiped on page reload
+ * Security invariant: Raw API keys are NEVER written to localStorage or sessionStorage,
+ * and NEVER logged. Client-side keys live strictly in volatile in-memory variables
+ * for the active tab lifecycle; durable storage goes strictly through the FastAPI
+ * backend's AES-256-GCM encrypted vault (`POST /api/vault/keys`).
  */
-export type KeyStorageMode = 'session' | 'memory';
+import { supabase, getAuthHeaders } from './supabaseClient';
+
+export type KeyStorageMode = 'memory' | 'session';
 
 const OPENROUTER_KEY_NAME = 'sst.openrouter_key';
 const GROQ_KEY_NAME = 'sst.groq_key';
@@ -15,6 +17,21 @@ const VAULT_OR_HINT_NAME = 'sst.vault_openrouter_hint';
 
 let memoryOpenRouterKey: string | null = null;
 let memoryGroqKey: string | null = null;
+
+// One-time migration cleanup: purge any legacy plaintext keys that earlier builds
+// may have written to browser storage.
+try {
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(OPENROUTER_KEY_NAME);
+    localStorage.removeItem(OPENROUTER_KEY_NAME);
+    sessionStorage.removeItem(GROQ_KEY_NAME);
+    localStorage.removeItem(GROQ_KEY_NAME);
+    sessionStorage.removeItem(MODE_NAME);
+    localStorage.removeItem(MODE_NAME);
+  }
+} catch {
+  // ignore storage errors in restricted environments
+}
 
 export function hasVaultOpenRouterKey(): boolean {
   try {
@@ -48,37 +65,31 @@ export function setVaultOpenRouterKeyStatus(hasKey: boolean, hint?: string | nul
 }
 
 export function getStorageMode(): KeyStorageMode {
-  const mode = sessionStorage.getItem(MODE_NAME) || localStorage.getItem(MODE_NAME);
-  return mode === 'memory' ? 'memory' : 'session';
+  return 'memory';
 }
 
-export function setStorageMode(mode: KeyStorageMode): void {
-  sessionStorage.setItem(MODE_NAME, mode);
-  localStorage.setItem(MODE_NAME, mode);
+export function setStorageMode(_mode: KeyStorageMode): void {
+  // No-op: raw key storage is strictly memory-only on the client.
 }
 
 // --- OpenRouter Key ---
 export function getOpenRouterKey(): string | null {
-  if (getStorageMode() === 'memory') return memoryOpenRouterKey;
-  return sessionStorage.getItem(OPENROUTER_KEY_NAME) || localStorage.getItem(OPENROUTER_KEY_NAME) || memoryOpenRouterKey;
+  return memoryOpenRouterKey;
 }
 
-export function saveOpenRouterKey(key: string, mode?: KeyStorageMode): void {
-  const currentMode = mode || getStorageMode();
-  setStorageMode(currentMode);
-  clearOpenRouterKey();
-  if (currentMode === 'session') {
-    sessionStorage.setItem(OPENROUTER_KEY_NAME, key);
-    localStorage.setItem(OPENROUTER_KEY_NAME, key);
-  } else {
-    memoryOpenRouterKey = key;
-  }
+export function saveOpenRouterKey(key: string, _mode?: KeyStorageMode): void {
+  const trimmed = key.trim();
+  memoryOpenRouterKey = trimmed || null;
 }
 
 export function clearOpenRouterKey(): void {
   memoryOpenRouterKey = null;
-  sessionStorage.removeItem(OPENROUTER_KEY_NAME);
-  localStorage.removeItem(OPENROUTER_KEY_NAME);
+  try {
+    sessionStorage.removeItem(OPENROUTER_KEY_NAME);
+    localStorage.removeItem(OPENROUTER_KEY_NAME);
+  } catch {
+    // ignore
+  }
 }
 
 // Backward-compatible aliases for existing callers
@@ -88,26 +99,22 @@ export const clearApiKey = clearOpenRouterKey;
 
 // --- Groq Key ---
 export function getGroqKey(): string | null {
-  if (getStorageMode() === 'memory') return memoryGroqKey;
-  return sessionStorage.getItem(GROQ_KEY_NAME) || localStorage.getItem(GROQ_KEY_NAME) || memoryGroqKey;
+  return memoryGroqKey;
 }
 
-export function saveGroqKey(key: string, mode?: KeyStorageMode): void {
-  const currentMode = mode || getStorageMode();
-  setStorageMode(currentMode);
-  clearGroqKey();
-  if (currentMode === 'session') {
-    sessionStorage.setItem(GROQ_KEY_NAME, key);
-    localStorage.setItem(GROQ_KEY_NAME, key);
-  } else {
-    memoryGroqKey = key;
-  }
+export function saveGroqKey(key: string, _mode?: KeyStorageMode): void {
+  const trimmed = key.trim();
+  memoryGroqKey = trimmed || null;
 }
 
 export function clearGroqKey(): void {
   memoryGroqKey = null;
-  sessionStorage.removeItem(GROQ_KEY_NAME);
-  localStorage.removeItem(GROQ_KEY_NAME);
+  try {
+    sessionStorage.removeItem(GROQ_KEY_NAME);
+    localStorage.removeItem(GROQ_KEY_NAME);
+  } catch {
+    // ignore
+  }
 }
 
 // --- Unified Methods ---
@@ -123,20 +130,20 @@ export function getAllApiKeys(): ApiKeys {
   };
 }
 
-import { supabase, getAuthHeaders } from './supabaseClient';
-
-export function saveAllApiKeys(keys: { openRouterKey?: string; groqKey?: string }, mode: KeyStorageMode = 'session'): void {
-  setStorageMode(mode);
+export function saveAllApiKeys(
+  keys: { openRouterKey?: string; groqKey?: string },
+  _mode?: KeyStorageMode
+): void {
   if (keys.openRouterKey !== undefined) {
     if (keys.openRouterKey.trim()) {
-      saveOpenRouterKey(keys.openRouterKey.trim(), mode);
+      saveOpenRouterKey(keys.openRouterKey.trim());
     } else {
       clearOpenRouterKey();
     }
   }
   if (keys.groqKey !== undefined) {
     if (keys.groqKey.trim()) {
-      saveGroqKey(keys.groqKey.trim(), mode);
+      saveGroqKey(keys.groqKey.trim());
     } else {
       clearGroqKey();
     }
@@ -170,7 +177,7 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
     };
   }
 
-  // 1. Check Supabase Auth user metadata / app_metadata first (instant, works even during Render cold start)
+  // 1. Check Supabase Auth user metadata / app_metadata first (non-sensitive presence & masked hint only)
   let metaHasOr = false;
   let metaOrHint: string | null = null;
   let metaHasGroq = false;
@@ -196,18 +203,18 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
     }
   }
 
-  // 2. Check backend encrypted database vault status
+  // 2. Check backend encrypted database vault status (authenticated via Bearer JWT)
   try {
     const authHeaders = await getAuthHeaders();
-    const res = await fetch(`${BACKEND_BASE}/api/vault/status?user_id=${encodeURIComponent(userId)}`, {
+    const res = await fetch(`${BACKEND_BASE}/api/vault/status`, {
       headers: { ...authHeaders },
     });
     if (!res.ok) throw new Error('Status check failed');
     const data = await res.json();
-    const hasOr = Boolean(data.has_openrouter_key || metaHasOr || getOpenRouterKey());
-    const orHint = data.openrouter_hint || metaOrHint || (getOpenRouterKey() ? maskKey(getOpenRouterKey() || '') : null);
-    const hasGroq = Boolean(data.has_groq_key || metaHasGroq || getGroqKey());
-    const groqHint = data.groq_hint || metaGroqHint || (getGroqKey() ? maskKey(getGroqKey() || '') : null);
+    const hasOr = Boolean(data.has_openrouter_key || metaHasOr);
+    const orHint = data.openrouter_hint || metaOrHint || null;
+    const hasGroq = Boolean(data.has_groq_key || metaHasGroq);
+    const groqHint = data.groq_hint || metaGroqHint || null;
 
     setVaultOpenRouterKeyStatus(hasOr, orHint);
     return {
@@ -218,10 +225,10 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
       groqHint,
     };
   } catch {
-    const hasOr = Boolean(metaHasOr || getOpenRouterKey() || hasVaultOpenRouterKey());
-    const orHint = metaOrHint || maskKey(getOpenRouterKey() || '') || null;
-    const hasGroq = Boolean(metaHasGroq || getGroqKey());
-    const groqHint = metaGroqHint || maskKey(getGroqKey() || '') || null;
+    const hasOr = Boolean(metaHasOr || hasVaultOpenRouterKey());
+    const orHint = metaOrHint || null;
+    const hasGroq = Boolean(metaHasGroq);
+    const groqHint = metaGroqHint || null;
     if (hasOr) {
       setVaultOpenRouterKeyStatus(true, orHint);
     }
@@ -236,16 +243,16 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
 }
 
 export async function saveKeysToVault(
-  userId: string,
+  _userId: string,
   keys: { openRouterKey?: string; groqKey?: string }
 ): Promise<boolean> {
-  // Save locally in transient session memory
-  saveAllApiKeys(keys, 'session');
+  // Hold in volatile in-memory variable for immediate session requests
+  saveAllApiKeys(keys);
   if (keys.openRouterKey?.trim()) {
     setVaultOpenRouterKeyStatus(true, maskKey(keys.openRouterKey.trim()));
   }
 
-  // Sync key presence status to Supabase user_metadata so future logins on any domain detect it immediately
+  // Sync non-sensitive key presence hint to Supabase Auth user_metadata
   if (supabase) {
     try {
       await supabase.auth.updateUser({
@@ -263,14 +270,13 @@ export async function saveKeysToVault(
     }
   }
 
-  // Encrypt with server-side AES-256-GCM and persist to database vault
+  // Encrypt with server-side AES-256-GCM and persist to database vault via backend
   try {
     const authHeaders = await getAuthHeaders();
     const res = await fetch(`${BACKEND_BASE}/api/vault/keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
-        user_id: userId,
         openrouter_key: keys.openRouterKey || null,
         groq_key: keys.groqKey || null,
       }),
@@ -283,13 +289,10 @@ export async function saveKeysToVault(
 }
 
 /**
- * Completely wipe API keys from client session and delete the row from the Supabase database vault.
+ * Completely wipe API keys from client memory and delete the row from the backend database vault.
  */
-export async function revokeAndWipeUserKeys(userId?: string): Promise<{ success: boolean; error?: string }> {
+export async function revokeAndWipeUserKeys(_userId?: string): Promise<{ success: boolean; error?: string }> {
   clearAllKeys();
-  if (!userId) {
-    return { success: true };
-  }
 
   if (supabase) {
     try {
@@ -301,24 +304,27 @@ export async function revokeAndWipeUserKeys(userId?: string): Promise<{ success:
     }
   }
 
-  // 1. Call backend vault deletion endpoint
   try {
     const authHeaders = await getAuthHeaders();
-    await fetch(`${BACKEND_BASE}/api/vault/keys?user_id=${encodeURIComponent(userId)}`, {
+    if (Object.keys(authHeaders).length === 0) {
+      return { success: true };
+    }
+    const res = await fetch(`${BACKEND_BASE}/api/vault/keys`, {
       method: 'DELETE',
       headers: { ...authHeaders },
     });
-  } catch (err) {
-    console.warn('Backend vault delete warning:', err);
-  }
-
-  // 2. Direct Supabase fallback
-  if (supabase) {
-    try {
-      await supabase.from('user_api_vault').delete().eq('user_id', userId);
-    } catch {
-      // Ignored if offline
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        error: err.detail || `Failed to revoke keys (HTTP ${res.status})`,
+      };
     }
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Failed to reach backend to revoke keys.',
+    };
   }
 
   return { success: true };
@@ -351,7 +357,6 @@ export async function testApiKeys(keys: {
       body: JSON.stringify({
         openrouter_key: keys.openRouterKey?.trim() || null,
         groq_key: keys.groqKey?.trim() || null,
-        user_id: keys.userId || null,
       }),
     });
 

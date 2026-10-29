@@ -101,8 +101,8 @@ export async function fetchRoePresets(): Promise<RoeScope[]> {
 /**
  * Audit model output against RoE rules.
  */
-export async function runAudit(req: AuditRequest, userId?: string): Promise<AuditResult> {
-  const url = `${API_BASE_URL}/api/audit${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
+export async function runAudit(req: AuditRequest, _userId?: string): Promise<AuditResult> {
+  const url = `${API_BASE_URL}/api/audit`;
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -129,8 +129,8 @@ export async function runAudit(req: AuditRequest, userId?: string): Promise<Audi
 /**
  * Parse raw pasted RoE text using backend LLM extraction.
  */
-export async function parseRoeText(content: string, filename?: string, userId?: string): Promise<RoeScope> {
-  const url = `${API_BASE_URL}/api/roe/parse-text${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
+export async function parseRoeText(content: string, filename?: string, _userId?: string): Promise<RoeScope> {
+  const url = `${API_BASE_URL}/api/roe/parse-text`;
   const res = await fetch(url, {
     method: 'POST',
     headers: getApiHeaders(),
@@ -150,11 +150,11 @@ export async function parseRoeText(content: string, filename?: string, userId?: 
 /**
  * Upload and parse an RoE file (.md or .txt) using backend LLM extraction.
  */
-export async function parseRoeFile(file: File, userId?: string): Promise<RoeScope> {
+export async function parseRoeFile(file: File, _userId?: string): Promise<RoeScope> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const url = `${API_BASE_URL}/api/roe/parse-document${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`;
+  const url = `${API_BASE_URL}/api/roe/parse-document`;
   const fileHeaders: Record<string, string> = {};
   const openRouter = getOpenRouterKey();
   if (openRouter) fileHeaders['X-OpenRouter-Key'] = openRouter;
@@ -186,12 +186,9 @@ export async function parseRoeFile(file: File, userId?: string): Promise<RoeScop
 export async function queryLiveModel(
   prompt: string,
   modelId: string,
-  userId?: string
+  _userId?: string
 ): Promise<{ text: string; latencyMs: number; error?: string }> {
   const headers = getApiHeaders();
-  if (userId) {
-    headers['X-User-Id'] = userId;
-  }
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/benchmark/query`, {
