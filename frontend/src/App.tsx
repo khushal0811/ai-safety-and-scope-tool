@@ -128,17 +128,13 @@ export default function App() {
           }
         })
         .catch(() => {
-          if (active && !getOpenRouterKey() && !hasVaultOpenRouterKey()) {
-            setHasOpenRouterKey(false);
-            let alreadyBypassed = false;
-            try {
-              alreadyBypassed = localStorage.getItem(`sst.initial_setup_completed_${user.id}`) === 'true';
-            } catch {
-              // ignore
-            }
-            if (!alreadyBypassed) {
-              setInitialSetupOpen(true);
-            }
+          // If the vault status check fails (e.g. backend cold start, network error,
+          // or auth token not yet established on a new device), do NOT open the setup
+          // modal — we can't distinguish "no key" from a transient error.
+          // The auth listener will re-trigger this effect once the session is ready,
+          // giving the vault check a second chance before we bother the user.
+          if (active) {
+            setHasOpenRouterKey(Boolean(getOpenRouterKey() || hasVaultOpenRouterKey()));
           }
         });
     } else if (guestMode) {
