@@ -12,56 +12,56 @@
 DELETE FROM public.audit_logs 
 WHERE user_id IN (
     SELECT id FROM auth.users 
-    WHERE email ILIKE '%@pentest.local' 
-       OR email ILIKE 'demo@%' 
-       OR email ILIKE 'test@%' 
-       OR email ILIKE 'dummy@%'
-       OR email ILIKE 'guest@%'
+    WHERE email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid'
+       OR email = 'purge-disabled@invalid.invalid'
 );
 
 DELETE FROM public.benchmark_runs 
 WHERE user_id IN (
     SELECT id FROM auth.users 
-    WHERE email ILIKE '%@pentest.local' 
-       OR email ILIKE 'demo@%' 
-       OR email ILIKE 'test@%' 
-       OR email ILIKE 'dummy@%'
-       OR email ILIKE 'guest@%'
+    WHERE email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid'
+       OR email = 'purge-disabled@invalid.invalid'
 );
 
 DELETE FROM public.custom_roes 
 WHERE user_id IN (
     SELECT id FROM auth.users 
-    WHERE email ILIKE '%@pentest.local' 
-       OR email ILIKE 'demo@%' 
-       OR email ILIKE 'test@%' 
-       OR email ILIKE 'dummy@%'
-       OR email ILIKE 'guest@%'
+    WHERE email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid'
+       OR email = 'purge-disabled@invalid.invalid'
 );
 
 DELETE FROM public.user_api_vault 
 WHERE user_id IN (
     SELECT id FROM auth.users 
-    WHERE email ILIKE '%@pentest.local' 
-       OR email ILIKE 'demo@%' 
-       OR email ILIKE 'test@%' 
-       OR email ILIKE 'dummy@%'
-       OR email ILIKE 'guest@%'
+    WHERE email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid' 
+       OR email = 'purge-disabled@invalid.invalid'
+       OR email = 'purge-disabled@invalid.invalid'
 );
 
 DELETE FROM public.profiles 
-WHERE email ILIKE '%@pentest.local' 
-   OR email ILIKE 'demo@%' 
-   OR email ILIKE 'test@%' 
-   OR email ILIKE 'dummy@%'
-   OR email ILIKE 'guest@%';
+WHERE email = 'purge-disabled@invalid.invalid' 
+   OR email = 'purge-disabled@invalid.invalid' 
+   OR email = 'purge-disabled@invalid.invalid' 
+   OR email = 'purge-disabled@invalid.invalid'
+   OR email = 'purge-disabled@invalid.invalid';
 
 DELETE FROM auth.users 
-WHERE email ILIKE '%@pentest.local' 
-   OR email ILIKE 'demo@%' 
-   OR email ILIKE 'test@%' 
-   OR email ILIKE 'dummy@%'
-   OR email ILIKE 'guest@%';
+WHERE email = 'purge-disabled@invalid.invalid' 
+   OR email = 'purge-disabled@invalid.invalid' 
+   OR email = 'purge-disabled@invalid.invalid' 
+   OR email = 'purge-disabled@invalid.invalid'
+   OR email = 'purge-disabled@invalid.invalid';
 
 -- 2. RBAC SCHEMA RECONFIGURATION
 ALTER TABLE public.profiles 
