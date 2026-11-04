@@ -69,14 +69,56 @@ def is_database_connected() -> bool:
         return False
 
 
+class UnscopedQueryError(ValueError):
+    """Raised when a tenant-owned table is queried without a user scope."""
+
+
+# Tables that hold per-tenant rows. Reads must go through _user_scoped_query()
+# so tenant isolation does not depend on each caller remembering a filter.
+_USER_SCOPED_TABLES = frozenset(
+    {"audit_logs", "custom_roes", "user_api_vault", "benchmark_runs"}
+)
+
+
+def _user_scoped_query(
+    client: Any,
+    table: str,
+    user_id: Optional[str],
+    *,
+    columns: str = "*",
+    include_public: bool = False,
+    public_only: bool = False,
+):
+    """Build the only sanctioned read query for a tenant-owned table.
+
+    - A valid user_id scopes the query to that user. include_public=True widens
+      it to the user's rows plus public (user_id IS NULL) rows.
+    - A missing or invalid user_id raises unless public_only=True, in which case
+      only public rows are returned. There is no way to read tenant rows without
+      a valid user_id.
+    """
+    if table not in _USER_SCOPED_TABLES:
+        raise UnscopedQueryError(f"{table!r} is not a user-scoped table.")
+
+    query = client.table(table).select(columns)
+
+    if is_valid_uuid(user_id):
+        if include_public:
+            return query.or_(f"user_id.eq.{user_id},user_id.is.null")
+        return query.eq("user_id", user_id)
+
+    if public_only:
+        return query.is_("user_id", "null")
+
+    raise UnscopedQueryError(f"Refusing unscoped read of {table!r}.")
+
+
 def _previous_chain_head(client: Any, user_id: str, roe_id: str) -> tuple[str, int]:
     """Return (prev_hash, chain_index) for the next record in a user+RoE chain."""
     from app.engine.attestation import genesis_hash
 
     res = (
-        client.table("audit_logs")
-        .select("chain_index, chain_hash")
-        .eq("user_id", user_id)
+        _user_scoped_query(client, "audit_logs", user_id, columns="chain_index, chain_hash")
         .eq("roe_id", roe_id)
         .order("chain_index", desc=True)
         .limit(1)
@@ -173,9 +215,7 @@ def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[
 
     try:
         res = (
-            client.table("audit_logs")
-            .select("*")
-            .eq("user_id", user_id)
+            _user_scoped_query(client, "audit_logs", user_id)
             .is_("deleted_at", "null")
             .order("created_at", desc=True)
             .limit(limit)
@@ -210,10 +250,8 @@ def fetch_audit_logs_for_roe(
 
     try:
         query = (
-            client.table("audit_logs")
-            .select("*")
+            _user_scoped_query(client, "audit_logs", user_id)
             .eq("roe_id", roe_id)
-            .eq("user_id", user_id)
         )
         if audit_id:
             query = query.eq("audit_id", audit_id)
@@ -388,7 +426,12 @@ def fetch_benchmark_history(user_id: Optional[str] = None, limit: int = 50) -> L
     client = get_supabase()
     if client:
         try:
-            res = client.table("benchmark_runs").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+            res = (
+                _user_scoped_query(client, "benchmark_runs", user_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
             if res.data and len(res.data) > 0:
                 return res.data
         except Exception as e:
@@ -449,6 +492,28 @@ def fetch_roe_presets() -> List[Dict[str, Any]]:
         return []
 
 
+_MISSING_ROW = object()
+
+
+def _custom_roe_owner(client: Any, roe_id: str) -> Any:
+    """Return the owner of an existing roe_id, or _MISSING_ROW if none exists.
+
+    This is a write-path integrity probe for save_custom_roe(). It deliberately
+    looks up a roe_id across all tenants so a caller cannot overwrite another
+    user's scope. It selects only user_id and never returns scope contents, so
+    it is allowlisted separately in tests/test_db_scoping.py.
+    """
+    res = (
+        client.table("custom_roes")
+        .select("user_id")
+        .eq("roe_id", roe_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    return rows[0].get("user_id") if rows else _MISSING_ROW
+
+
 def save_custom_roe(
     roe_dict: Dict[str, Any],
     user_id: Optional[str] = None,
@@ -471,21 +536,13 @@ def save_custom_roe(
         # Prevent cross-user overwrite on roe_id collision: if a row already exists
         # with this roe_id and belongs to a different user (or is a system preset),
         # refuse to overwrite it.
-        existing = (
-            client.table("custom_roes")
-            .select("user_id")
-            .eq("roe_id", roe_id)
-            .limit(1)
-            .execute()
-        )
-        if existing.data:
-            owner_id = existing.data[0].get("user_id")
-            if owner_id != user_id:
-                logger.warning(
-                    f"[Supabase] Refusing cross-user custom_roes overwrite on roe_id={roe_id} "
-                    f"(owner={owner_id}, caller={user_id})"
-                )
-                return False
+        owner_id = _custom_roe_owner(client, roe_id)
+        if owner_id is not _MISSING_ROW and owner_id != user_id:
+            logger.warning(
+                f"[Supabase] Refusing cross-user custom_roes overwrite on roe_id={roe_id} "
+                f"(owner={owner_id}, caller={user_id})"
+            )
+            return False
 
         payload = {
             "roe_id": roe_id,
@@ -524,12 +581,14 @@ def fetch_custom_roes(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         return []
 
     try:
-        query = client.table("custom_roes").select("*").order("created_at", desc=True)
-        if user_id and is_valid_uuid(user_id):
-            query = query.or_(f"user_id.eq.{user_id},user_id.is.null")
-        else:
-            query = query.is_("user_id", "null")
-        res = query.execute()
+        query = _user_scoped_query(
+            client,
+            "custom_roes",
+            user_id,
+            include_public=True,
+            public_only=True,
+        )
+        res = query.order("created_at", desc=True).execute()
         return res.data or []
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch custom RoEs: {e}")
@@ -542,11 +601,13 @@ def fetch_custom_roe_by_id(roe_id: str, user_id: Optional[str] = None) -> Option
     if not client:
         return None
     try:
-        query = client.table("custom_roes").select("*").eq("roe_id", roe_id)
-        if user_id and is_valid_uuid(user_id):
-            query = query.or_(f"user_id.eq.{user_id},user_id.is.null")
-        else:
-            query = query.is_("user_id", "null")
+        query = _user_scoped_query(
+            client,
+            "custom_roes",
+            user_id,
+            include_public=True,
+            public_only=True,
+        ).eq("roe_id", roe_id)
         res = query.limit(1).execute()
         rows = res.data or []
         return rows[0] if rows else None
@@ -614,9 +675,15 @@ def _get_vault_row_for_user(client: Any, user_id: str) -> Optional[Dict[str, Any
     """Fetch encrypted vault record from user_api_vault table or auth.users app_metadata fallback."""
     try:
         res = (
-            client.table("user_api_vault")
-            .select("key_hint_openrouter, key_hint_groq, encrypted_openrouter_key, encrypted_groq_key")
-            .eq("user_id", user_id)
+            _user_scoped_query(
+                client,
+                "user_api_vault",
+                user_id,
+                columns=(
+                    "key_hint_openrouter, key_hint_groq, "
+                    "encrypted_openrouter_key, encrypted_groq_key"
+                ),
+            )
             .limit(1)
             .execute()
         )
