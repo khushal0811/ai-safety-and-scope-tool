@@ -56,3 +56,7 @@ Thumbs.db
 *.log
 experiments/raw_outputs/
 data/cache/
+
+# Local Working Directories
+audits/
+plan/
