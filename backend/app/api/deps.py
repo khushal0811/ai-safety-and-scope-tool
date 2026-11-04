@@ -7,7 +7,8 @@ and securely derives the authenticated user_id, preventing client-side user impe
 import logging
 import os
 from typing import Optional
-from fastapi import Header, HTTPException, Query, status
+from fastapi import Header, HTTPException, Query, Request, status
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.db.supabase_client import get_supabase, is_valid_uuid, verify_supabase_jwt
@@ -27,7 +28,8 @@ async def get_authenticated_user_id(
     or user_id query param as identity outside of local development.
     """
     if authorization and authorization.strip().lower().startswith("bearer "):
-        verified = verify_supabase_jwt(authorization)
+        # Blocking network call to Supabase: run off the event loop
+        verified = await run_in_threadpool(verify_supabase_jwt, authorization)
         if not verified:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -43,32 +45,31 @@ async def get_authenticated_user_id(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Unauthenticated identity fallback is permitted ONLY in local development,
-    # and never against a live remote Supabase instance unless explicitly opted in
-    # (or running automated unit tests).
-    if settings.ENVIRONMENT == "development":
-        supabase_url = os.getenv("SUPABASE_URL", "").strip().lower()
-        is_remote_supabase = ".supabase.co" in supabase_url and "your-project-id" not in supabase_url
-        allow_dev_fallback = (
-            not is_remote_supabase
-            or bool(os.getenv("PYTEST_CURRENT_TEST"))
-            or os.getenv("ALLOW_DEV_UID_FALLBACK", "").strip().lower() in ("1", "true", "yes")
-        )
-        if allow_dev_fallback:
-            candidate_uid = user_id or x_user_id
-            if candidate_uid and is_valid_uuid(candidate_uid):
-                logger.warning(
-                    f"[Auth] DEV-ONLY unauthenticated uid fallback used: {candidate_uid}. "
-                    "This path is disabled whenever ENVIRONMENT != 'development' or against remote cloud DBs."
-                )
-                return candidate_uid
-        elif user_id or x_user_id:
-            logger.warning(
-                "[Auth] Blocked unauthenticated dev UID fallback because SUPABASE_URL points to a remote "
-                ".supabase.co project. Set ALLOW_DEV_UID_FALLBACK=true to override locally."
-            )
-
+    # No Authorization header: never derive identity from a client-controlled
+    # X-User-Id header or user_id query parameter. Guests are anonymous (None).
     return None
+
+
+async def get_local_dev_user_id(
+    request: Request,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+) -> str:
+    """Opt-in local-development identity, for routes that explicitly depend on it.
+
+    Only active when ENVIRONMENT=development, ALLOW_DEV_UID_FALLBACK is set, and the
+    request comes from loopback. Never used by require_authenticated_user_id().
+    """
+    if (
+        settings.ENVIRONMENT != "development"
+        or os.getenv("ALLOW_DEV_UID_FALLBACK", "").strip().lower() not in ("1", "true", "yes")
+        or request.client is None
+        or request.client.host not in ("127.0.0.1", "::1")
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    if not x_user_id or not is_valid_uuid(x_user_id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="A valid development user UUID is required.")
+    logger.warning("[Auth] DEV-ONLY local UID identity used.")
+    return x_user_id
 
 
 async def require_authenticated_user_id(

@@ -107,7 +107,7 @@ def test_api_audit_deterministic_only_flag():
         "model_output": "```bash\nnmap -sS 192.168.1.100\n```",
         "deterministic_only": True,
     }
-    resp = client.post("/api/audit", json=payload)
+    resp = client.post("/api/audit", json=payload, headers={"Authorization": "Bearer " + "11111111-1111-1111-1111-111111111111"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["trust_tier"] == "deterministic"

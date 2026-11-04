@@ -29,3 +29,25 @@ def web_pentest_roe() -> RoeScope:
 def client() -> TestClient:
     """Synchronous FastAPI TestClient fixture."""
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _uuid_bearer_tokens_for_tests(monkeypatch):
+    """Test identity: 'Authorization: Bearer <uuid>' resolves to that user.
+
+    Identity is only ever taken from a verified token; tests that need a signed-in user
+    send a bearer token whose value is the user UUID. Any other token is verified normally.
+    """
+    from app.api import deps
+    from app.db.supabase_client import is_valid_uuid
+
+    real_verify = deps.verify_supabase_jwt
+
+    def fake_verify(authorization):
+        parts = authorization.strip().split(" ", 1)
+        token = parts[1].strip() if len(parts) == 2 else ""
+        if is_valid_uuid(token):
+            return {"id": token}
+        return real_verify(authorization)
+
+    monkeypatch.setattr(deps, "verify_supabase_jwt", fake_verify)
