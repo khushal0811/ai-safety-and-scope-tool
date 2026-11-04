@@ -12,10 +12,13 @@ Aligned with:
 
 from datetime import datetime, timezone
 import hashlib
+import hmac
 import io
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple, Union
+from xml.sax.saxutils import escape as _xml_escape
 
 from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
 from app.db import fetch_audit_logs_for_roe, fetch_custom_roe_by_id
@@ -29,16 +32,60 @@ def _attestation_seed(roe: RoeScope) -> str:
     return f"{roe.roe_id}|{roe.name}|{','.join(sorted(roe.allowed_cidrs))}|{','.join(sorted(roe.allowed_domains))}"
 
 
+def _md(value: object) -> str:
+    """Escape an untrusted value for plain Markdown text (tables, paragraphs, list items)."""
+    s = str(value)
+    return (
+        s.replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("`", "\\`")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", " ")
+    )
+
+
+def _code(value: object) -> str:
+    """Render an untrusted value inside a Markdown inline code span without letting it break out."""
+    s = str(value)
+    return s.replace("|", "\\|").replace("`", "'").replace("\n", " ")
+
+
+_EPHEMERAL_ATTESTATION_KEY: Optional[bytes] = None
+
+
+def _attestation_key() -> bytes:
+    """Server-side secret used to key the attestation chain (HMAC-SHA256).
+
+    Without a secret, anyone with write access to audit_logs could recompute every hash.
+    """
+    global _EPHEMERAL_ATTESTATION_KEY
+    from app.config import settings
+
+    if settings.ATTESTATION_HMAC_KEY:
+        return settings.ATTESTATION_HMAC_KEY.encode("utf-8")
+    if _EPHEMERAL_ATTESTATION_KEY is None:
+        import secrets
+
+        logger.warning(
+            "[Reporter] ATTESTATION_HMAC_KEY is not configured; using a per-process random key. "
+            "Attestations cannot be verified after a restart."
+        )
+        _EPHEMERAL_ATTESTATION_KEY = secrets.token_bytes(32)
+    return _EPHEMERAL_ATTESTATION_KEY
+
+
 def compute_hash_chain(
     records: List[Dict[str, Any]],
     initial_seed: str,
 ) -> Tuple[List[Dict[str, Any]], str]:
-    """Build a tamper-evident SHA-256 hash chain over chronological audit records.
+    """Build a tamper-evident keyed hash chain over chronological audit records.
 
     Each block links the previous block's digest with:
-    H_i = SHA256(H_{i-1} || audit_id || timestamp || command || verdict || violations || sanitized)
+    H_i = HMAC-SHA256(key, H_{i-1} || audit_id || timestamp || command || verdict || violations || sanitized)
     """
-    prev_hash = hashlib.sha256(initial_seed.encode("utf-8")).hexdigest()
+    key = _attestation_key()
+    prev_hash = hmac.new(key, initial_seed.encode("utf-8"), hashlib.sha256).hexdigest()
     chained_records: List[Dict[str, Any]] = []
 
     for idx, rec in enumerate(records):
@@ -51,7 +98,7 @@ def compute_hash_chain(
         viols = json.dumps(rec.get("violation_details") or [], sort_keys=True)
 
         block_payload = f"{prev_hash}|{audit_id}|{ts}|{cmd_str}|{verdict}|{sanitized}|{viols}"
-        curr_hash = hashlib.sha256(block_payload.encode("utf-8")).hexdigest()
+        curr_hash = hmac.new(key, block_payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
         rec_copy = dict(rec)
         rec_copy["chain_index"] = idx + 1
@@ -83,8 +130,10 @@ def generate_compliance_report_markdown(
     compliant_ops = sum(1 for r in chained_records if r.get("verdict") == "Correct")
     unsafe_ops = sum(1 for r in chained_records if r.get("verdict") == "Unsafe")
     review_ops = sum(1 for r in chained_records if r.get("verdict") == "Incorrect")
-    compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
-    interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
+    compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else None
+    interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else None
+    compliance_display = f"{compliance_rate}%" if total_ops > 0 else "N/A (no records)"
+    interception_display = f"{interception_rate}%" if total_ops > 0 else "N/A (no records)"
 
     lines: List[str] = []
     lines.append("# FORMAL RULES OF ENGAGEMENT COMPLIANCE & SAFETY ATTESTATION")
@@ -108,7 +157,7 @@ def generate_compliance_report_markdown(
     lines.append("")
     lines.append(
         f"This document records that all penetration testing commands and model recommendations submitted "
-        f"under engagement **\"{roe.name}\"** (ID: `{roe.roe_id}`) were pre-screened "
+        f"under engagement **\"{_md(roe.name)}\"** (ID: `{_code(roe.roe_id)}`) were pre-screened "
         f"and audited by the **Vallum AI Safety & Scope Boundary Engine** prior to being returned to the operator."
     )
     lines.append("")
@@ -125,19 +174,19 @@ def generate_compliance_report_markdown(
     lines.append("")
     lines.append(f"| Scope Dimension | Contracted Policy Parameter |")
     lines.append(f"| :--- | :--- |")
-    lines.append(f"| **Engagement Name** | {roe.name} |")
-    lines.append(f"| **Engagement Type** | {roe.engagement_type} |")
-    lines.append(f"| **Authorized Subnets (CIDRs)** | `{', '.join(roe.allowed_cidrs) or 'None'}` |")
-    lines.append(f"| **Authorized Domains** | `{', '.join(roe.allowed_domains) or 'None'}` |")
-    lines.append(f"| **Target Hosts** | `{', '.join(roe.target_hosts) or 'None'}` |")
-    lines.append(f"| **Explicitly Prohibited IPs** | `{', '.join(roe.prohibited_ips) or 'None'}` |")
-    lines.append(f"| **Authorized Tools Whitelist** | `{', '.join(roe.allowed_tools) or 'All non-prohibited'}` |")
-    lines.append(f"| **Prohibited Tools** | `{', '.join(roe.prohibited_tools) or 'None'}` |")
-    lines.append(f"| **Prohibited Action Flags** | `{', '.join(roe.prohibited_flags) or 'None'}` |")
-    lines.append(f"| **Banned Actions** | `{', '.join(roe.prohibited_actions) or 'None'}` |")
+    lines.append(f"| **Engagement Name** | {_md(roe.name)} |")
+    lines.append(f"| **Engagement Type** | {_md(roe.engagement_type)} |")
+    lines.append(f"| **Authorized Subnets (CIDRs)** | `{_code(', '.join(roe.allowed_cidrs) or 'None')}` |")
+    lines.append(f"| **Authorized Domains** | `{_code(', '.join(roe.allowed_domains) or 'None')}` |")
+    lines.append(f"| **Target Hosts** | `{_code(', '.join(roe.target_hosts) or 'None')}` |")
+    lines.append(f"| **Explicitly Prohibited IPs** | `{_code(', '.join(roe.prohibited_ips) or 'None')}` |")
+    lines.append(f"| **Authorized Tools Whitelist** | `{_code(', '.join(roe.allowed_tools) or 'All non-prohibited')}` |")
+    lines.append(f"| **Prohibited Tools** | `{_code(', '.join(roe.prohibited_tools) or 'None')}` |")
+    lines.append(f"| **Prohibited Action Flags** | `{_code(', '.join(roe.prohibited_flags) or 'None')}` |")
+    lines.append(f"| **Banned Actions** | `{_code(', '.join(roe.prohibited_actions) or 'None')}` |")
     lines.append(f"| **Max Nmap Timing** | `-T{roe.max_nmap_timing}` |")
     lines.append("")
-    lines.append(f"> **Engagement Summary:** {roe.summary}")
+    lines.append(f"> **Engagement Summary:** {_md(roe.summary)}")
     lines.append("")
 
     # 3. Executive Metrics
@@ -150,11 +199,11 @@ def generate_compliance_report_markdown(
     lines.append(f"| **Breaches Intercepted (Unsafe)** | **{unsafe_ops}** | Out-of-scope or destructive payloads halted |")
     lines.append(f"| **Warnings Reviewed (Incorrect)** | **{review_ops}** | Non-critical policy observations |")
     lines.append(
-        f"| **Unsafe Commands Intercepted Pre-Execution** | **{interception_rate}%** | "
+        f"| **Unsafe Commands Intercepted Pre-Execution** | **{interception_display}** | "
         f"Of commands submitted to Vallum for review, this fraction were flagged Unsafe and blocked "
         f"before being returned to the operator. |"
     )
-    lines.append(f"| **Autonomous Compliance Rate** | **{compliance_rate}%** | Baseline model accuracy within boundary |")
+    lines.append(f"| **Autonomous Compliance Rate** | **{compliance_display}** | Baseline model accuracy within boundary |")
     lines.append("")
 
     # 4. Itemized Audit Trail with Cryptographic Hash Chain
@@ -183,24 +232,27 @@ def generate_compliance_report_markdown(
 
             badge = "✅ PASS" if verdict == "Correct" else "⚠️ WARNING" if verdict == "Incorrect" else "🛑 BLOCKED & SANITIZED"
 
-            lines.append(f"### Entry #{idx}: `{a_id}` — {badge}")
-            lines.append(f"- **Timestamp:** `{ts}`")
-            lines.append(f"- **Model/Source:** `{model}`")
-            lines.append(f"- **Proposed Command:** `{cmd}`")
-            lines.append(f"- **Cumulative Hash Digest:** `{ch_hash}`")
+            lines.append(f"### Entry #{idx}: `{_code(a_id)}` — {badge}")
+            lines.append(f"- **Timestamp:** `{_code(ts)}`")
+            lines.append(f"- **Model/Source:** `{_code(model)}`")
+            lines.append(f"- **Proposed Command:** `{_code(cmd)}`")
+            lines.append(f"- **Cumulative Hash Digest:** `{_code(ch_hash)}`")
 
             if violations:
                 lines.append(f"- **Violations Intercepted:**")
                 for v in violations:
-                    r_name = v.get("rule", "Violation")
-                    sev = v.get("severity", "WARNING")
-                    cat = v.get("category", "POLICY")
-                    det = v.get("detail", "")
+                    r_name = _md(v.get("rule", "Violation"))
+                    sev = _code(v.get("severity", "WARNING"))
+                    cat = _code(v.get("category", "POLICY"))
+                    det = _md(v.get("detail", ""))
                     lines.append(f"  - `[{sev} | {cat}]` **{r_name}:** {det}")
 
             if sanitized and verdict != "Correct":
+                # Fence must be longer than any backtick run in the content so it cannot be closed early
+                longest_run = max((len(m) for m in re.findall(r"`+", str(sanitized))), default=0)
+                fence = "`" * max(3, longest_run + 1)
                 lines.append(f"- **Compliant Remediation (Synthesized by Vallum):**")
-                lines.append(f"  ```bash\n  {sanitized}\n  ```")
+                lines.append(f"  {fence}bash\n  {sanitized}\n  {fence}")
 
             lines.append("")
 
@@ -220,7 +272,7 @@ def generate_compliance_report_markdown(
         crest_status = "**VERIFIED:** 100% boundary compliance certified across all reviewed commands."
     else:
         crest_status = (
-            f"**ENFORCED:** {compliance_rate}% baseline compliance; all {unsafe_ops} out-of-scope/unsafe "
+            f"**ENFORCED:** {compliance_display} baseline compliance; all {unsafe_ops} out-of-scope/unsafe "
             f"command(s) intercepted pre-execution."
         )
     lines.append(f"| **CREST Conduct** | **Section 4.2** Scoping & Boundaries | {crest_status} |")
@@ -242,7 +294,7 @@ def generate_compliance_report_markdown(
     lines.append(f"│  Engagement ID:        {roe.roe_id:<52} │")
     lines.append(f"│  SHA-256 Chain Root:   {root_hash:<52} │")
     lines.append(f"│  Records Chained:      {total_ops:<52} │")
-    lines.append(f"│  Unsafe Intercepted:   {f'{interception_rate}% ({unsafe_ops}/{total_ops} reviewed commands)':<52} │")
+    lines.append(f"│  Unsafe Intercepted:   {f'{interception_display} ({unsafe_ops}/{total_ops} reviewed commands)':<52} │")
     lines.append(f"│  Status:               {seal_status:<52} │")
     lines.append("└─────────────────────────────────────────────────────────────────────────────┘")
     lines.append("```")
@@ -351,8 +403,10 @@ def generate_compliance_report_pdf(
     compliant_ops = sum(1 for r in chained_records if r.get("verdict") == "Correct")
     unsafe_ops = sum(1 for r in chained_records if r.get("verdict") == "Unsafe")
     review_ops = sum(1 for r in chained_records if r.get("verdict") == "Incorrect")
-    compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
-    interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else 100.0
+    compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else None
+    interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else None
+    compliance_display = f"{compliance_rate}%" if total_ops > 0 else "N/A (no records)"
+    interception_display = f"{interception_rate}%" if total_ops > 0 else "N/A (no records)"
 
     story = []
 
@@ -369,7 +423,7 @@ def generate_compliance_report_pdf(
     # Executive Certification Block
     cert_text = (
         f"<b>SCOPE OF THIS ATTESTATION:</b> This report certifies that all commands submitted to the Vallum "
-        f"engine for review under engagement <b>{roe.name}</b> (<code>{roe.roe_id}</code>) were parsed into "
+        f"engine for review under engagement <b>{_xml_escape(roe.name)}</b> (<code>{_xml_escape(roe.roe_id)}</code>) were parsed into "
         f"Abstract Syntax Trees (ASTs) and evaluated against the contracted scope boundaries below, and that "
         f"any flagged as unsafe were intercepted before being returned to the operator. It does not — and "
         f"cannot — certify that no commands were executed outside of Vallum's review process."
@@ -381,12 +435,12 @@ def generate_compliance_report_pdf(
     story.append(Paragraph("1. Contracted Scope Boundaries", h2_style))
     scope_data = [
         [Paragraph("<b>Scope Parameter</b>", body_style), Paragraph("<b>Contracted Specification</b>", body_style)],
-        [Paragraph("Engagement Type", body_style), Paragraph(roe.engagement_type, body_style)],
-        [Paragraph("Authorized CIDRs", body_style), Paragraph(f"<code>{', '.join(roe.allowed_cidrs) or 'None'}</code>", mono_style)],
-        [Paragraph("Target Hosts", body_style), Paragraph(f"<code>{', '.join(roe.target_hosts) or 'None'}</code>", mono_style)],
-        [Paragraph("Prohibited Targets", body_style), Paragraph(f"<code>{', '.join(roe.prohibited_ips) or 'None'}</code>", mono_style)],
-        [Paragraph("Tool Whitelist", body_style), Paragraph(f"<code>{', '.join(roe.allowed_tools) or 'Unrestricted'}</code>", mono_style)],
-        [Paragraph("Prohibited Flags", body_style), Paragraph(f"<code>{', '.join(roe.prohibited_flags) or 'None'}</code>", mono_style)],
+        [Paragraph("Engagement Type", body_style), Paragraph(_xml_escape(roe.engagement_type), body_style)],
+        [Paragraph("Authorized CIDRs", body_style), Paragraph(f"<code>{_xml_escape(', '.join(roe.allowed_cidrs) or 'None')}</code>", mono_style)],
+        [Paragraph("Target Hosts", body_style), Paragraph(f"<code>{_xml_escape(', '.join(roe.target_hosts) or 'None')}</code>", mono_style)],
+        [Paragraph("Prohibited Targets", body_style), Paragraph(f"<code>{_xml_escape(', '.join(roe.prohibited_ips) or 'None')}</code>", mono_style)],
+        [Paragraph("Tool Whitelist", body_style), Paragraph(f"<code>{_xml_escape(', '.join(roe.allowed_tools) or 'Unrestricted')}</code>", mono_style)],
+        [Paragraph("Prohibited Flags", body_style), Paragraph(f"<code>{_xml_escape(', '.join(roe.prohibited_flags) or 'None')}</code>", mono_style)],
     ]
     t_scope = Table(scope_data, colWidths=[140, 390])
     t_scope.setStyle(
@@ -404,7 +458,7 @@ def generate_compliance_report_pdf(
     story.append(Paragraph("2. Engagement Compliance Metrics", h2_style))
     metrics_data = [
         ["Total Audited", "Compliant (Pass)", "Blocked (Unsafe)", "Unsafe Intercepted", "Compliance Rate"],
-        [str(total_ops), str(compliant_ops), str(unsafe_ops), f"{interception_rate}%", f"{compliance_rate}%"],
+        [str(total_ops), str(compliant_ops), str(unsafe_ops), interception_display, compliance_display],
     ]
     t_metrics = Table(metrics_data, colWidths=[100, 110, 110, 110, 100])
     t_metrics.setStyle(
@@ -435,10 +489,10 @@ def generate_compliance_report_pdf(
         ]
     ]
 
-    for rec in chained_records[:20]:  # Cap first 20 records in print PDF table
+    for rec in chained_records:  # Render every chained record so the table matches the root hash
         v = rec.get("verdict", "Unsafe")
         v_color = "#059669" if v == "Correct" else "#d97706" if v == "Incorrect" else "#dc2626"
-        v_label = f"<font color='{v_color}'><b>{v}</b></font>"
+        v_label = f"<font color='{v_color}'><b>{_xml_escape(v)}</b></font>"
 
         cmd_snippet = rec.get("command_display", "")[:45]
         if len(rec.get("command_display", "")) > 45:
@@ -446,8 +500,8 @@ def generate_compliance_report_pdf(
 
         audit_table_data.append([
             str(rec.get("chain_index")),
-            Paragraph(f"<code>{rec.get('audit_id')[:12]}</code>", mono_style),
-            Paragraph(f"<code>{cmd_snippet}</code>", mono_style),
+            Paragraph(f"<code>{_xml_escape(str(rec.get('audit_id'))[:12])}</code>", mono_style),
+            Paragraph(f"<code>{_xml_escape(cmd_snippet)}</code>", mono_style),
             Paragraph(v_label, body_style),
             Paragraph(f"<code>{rec.get('chain_hash')[:12]}...</code>", mono_style),
         ])
@@ -489,7 +543,7 @@ def generate_compliance_report_pdf(
     seal_data = [
         [Paragraph("<b>VALLUM CRYPTOGRAPHIC SCOPE ATTESTATION SEAL</b>", ParagraphStyle("SealHead", fontName="Helvetica-Bold", fontSize=9, textColor=colors.white, alignment=1))],
         [Paragraph(f"<b>Root Hash:</b> <code>{root_hash}</code>", ParagraphStyle("SealBody", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#0f172a")))],
-        [Paragraph(f"<b>Chained Records:</b> {total_ops} &nbsp;|&nbsp; <b>Unsafe Intercepted:</b> {interception_rate}% &nbsp;|&nbsp; <b>Status:</b> AUDIT TRAIL INTEGRITY: VERIFIED (TAMPER-EVIDENT)", ParagraphStyle("SealMeta", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#334155")))],
+        [Paragraph(f"<b>Chained Records:</b> {total_ops} &nbsp;|&nbsp; <b>Unsafe Intercepted:</b> {interception_display} &nbsp;|&nbsp; <b>Status:</b> AUDIT TRAIL INTEGRITY: VERIFIED (TAMPER-EVIDENT)", ParagraphStyle("SealMeta", fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#334155")))],
     ]
     t_seal = Table(seal_data, colWidths=[530])
     t_seal.setStyle(

@@ -261,7 +261,7 @@ def test_api_audit_report_markdown_endpoint():
     with patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS):
         response = client.get(
             "/api/audit/report?roe_id=ROE-PRESET-NET-001&format=markdown",
-            headers={"X-User-Id": TEST_REPORT_USER_ID},
+            headers={"Authorization": "Bearer " + TEST_REPORT_USER_ID},
         )
         assert response.status_code == 200
         assert "text/markdown" in response.headers.get("content-type", "")
@@ -273,7 +273,7 @@ def test_api_audit_report_pdf_endpoint():
     with patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS):
         response = client.get(
             "/api/audit/report?roe_id=ROE-PRESET-NET-001&format=pdf",
-            headers={"X-User-Id": TEST_REPORT_USER_ID},
+            headers={"Authorization": "Bearer " + TEST_REPORT_USER_ID},
         )
         assert response.status_code == 200
         assert "application/pdf" in response.headers.get("content-type", "")
@@ -285,7 +285,7 @@ def test_api_audit_report_json_endpoint():
     with patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS):
         response = client.get(
             "/api/audit/report?roe_id=ROE-PRESET-NET-001&format=json",
-            headers={"X-User-Id": TEST_REPORT_USER_ID},
+            headers={"Authorization": "Bearer " + TEST_REPORT_USER_ID},
         )
         assert response.status_code == 200
         assert "application/json" in response.headers.get("content-type", "")
@@ -338,7 +338,7 @@ def test_api_audit_report_unknown_roe_returns_404():
     with patch("app.engine.reporter.fetch_custom_roe_by_id", return_value=None):
         response = client.get(
             "/api/audit/report?roe_id=ROE-NONEXISTENT-999&format=markdown",
-            headers={"X-User-Id": TEST_REPORT_USER_ID},
+            headers={"Authorization": "Bearer " + TEST_REPORT_USER_ID},
         )
         assert response.status_code == 404
         assert "ROE-NONEXISTENT-999" in response.json()["detail"]
