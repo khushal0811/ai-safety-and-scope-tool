@@ -87,6 +87,17 @@ Synthesize the compliant remediation JSON now:"""
     llm_explanation = response.get("explanation")
     llm_mods = response.get("modifications_made", [])
 
+    # Double-verification: an LLM rewrite is only accepted if the deterministic engine finds it CORRECT
+    if llm_sanitized:
+        from app.engine.verifier import evaluate_deterministic_command
+        from app.models.audit import DeterministicAuditRequest, Verdict
+
+        recheck = evaluate_deterministic_command(
+            DeterministicAuditRequest(command=str(llm_sanitized), roe=roe)
+        )
+        if recheck.verdict != Verdict.CORRECT:
+            return fallback_safe_cmd, fallback_mods or [], None
+
     if not isinstance(llm_mods, list):
         llm_mods = [str(llm_mods)]
 

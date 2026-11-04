@@ -132,7 +132,6 @@ class OpenRouterClient:
         prompt: str,
         system_prompt: Optional[str] = None,
         api_key: Optional[str] = None,
-        groq_key: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 2048,
         timeout: float = 40.0,
@@ -267,92 +266,7 @@ class OpenRouterClient:
                 provider=model_meta.provider,
                 latency_ms=latency_ms,
                 status="error",
-                error_message=str(e),
-            )
-
-    async def _query_groq_system(
-        self,
-        resolved_id: str,
-        model_meta: FrontierModelInfo,
-        prompt: str,
-        system_prompt: Optional[str],
-        groq_key: str,
-        temperature: float,
-        max_tokens: int,
-        timeout: float,
-    ) -> ModelBenchmarkResult:
-        """Execute inference using backend server-side Groq system key."""
-        start_time = time.perf_counter()
-        headers = {
-            "Authorization": f"Bearer {groq_key}",
-            "Content-Type": "application/json",
-        }
-        groq_model = settings.LLAMA_MODEL or "openai/gpt-oss-120b"
-        payload = {
-            "model": groq_model,
-            "messages": [
-                {"role": "system", "content": system_prompt or DEFAULT_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                res = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
-
-                if res.status_code == 200:
-                    data = res.json()
-                    choices = data.get("choices", [])
-                    raw_content = ""
-                    if choices:
-                        msg = choices[0].get("message", {})
-                        raw_content = msg.get("content") or msg.get("refusal") or ""
-                        if not isinstance(raw_content, str):
-                            raw_content = ""
-
-                    usage = data.get("usage", {})
-                    prompt_tokens = usage.get("prompt_tokens", 0)
-                    completion_tokens = usage.get("completion_tokens", 0)
-                    total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
-                    extracted = extract_command_blocks(raw_content)
-
-                    return ModelBenchmarkResult(
-                        model_id=resolved_id,
-                        model_name=f"{model_meta.name} (via System Groq)",
-                        provider="Groq (System Key)",
-                        latency_ms=latency_ms,
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=total_tokens,
-                        raw_output=raw_content,
-                        extracted_commands=extracted,
-                        status="success",
-                    )
-                else:
-                    return ModelBenchmarkResult(
-                        model_id=resolved_id,
-                        model_name=model_meta.name,
-                        provider="Groq (System Key)",
-                        latency_ms=latency_ms,
-                        status="error",
-                        error_message=f"Groq HTTP {res.status_code}: {res.text[:200]}",
-                    )
-        except Exception as e:
-            latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
-            return ModelBenchmarkResult(
-                model_id=resolved_id,
-                model_name=model_meta.name,
-                provider="Groq (System Key)",
-                latency_ms=latency_ms,
-                status="error",
-                error_message=str(e),
+                error_message="Upstream model request failed.",
             )
 
     async def benchmark_frontier_models(
@@ -361,7 +275,6 @@ class OpenRouterClient:
         models: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
         api_key: Optional[str] = None,
-        groq_key: Optional[str] = None,
         temperature: float = 0.0,
         max_tokens: int = 2048,
         timeout: float = 40.0,
@@ -374,7 +287,6 @@ class OpenRouterClient:
                 prompt=prompt,
                 system_prompt=system_prompt,
                 api_key=api_key,
-                groq_key=groq_key,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout,

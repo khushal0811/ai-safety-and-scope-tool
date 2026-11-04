@@ -15,11 +15,18 @@ from app.engine.cve_validator import validate_cve_references
 from app.engine.destructive_rules import check_destructive_commands
 from app.engine.ip_validator import ScopeValidator, HARD_PROHIBITED_NETWORKS
 from app.engine.llm_client import llm_client
-from app.engine.parser import extract_and_parse_all_commands, ParsedCommand, is_model_refusal
+from app.engine.parser import (
+    extract_and_parse_all_commands,
+    extract_command_blocks,
+    ParsedCommand,
+    is_model_refusal,
+)
 from app.engine.tool_rules import (
     INTERACTIVE_SESSION_TOOLS,
+    NMAP_TIMING_PATTERN,
     PACKAGE_MANAGERS,
     check_tool_and_flags,
+    nmap_timing_value,
 )
 from app.models.audit import (
     AuditRequest,
@@ -36,13 +43,32 @@ from app.models.roe import RoeScope
 
 logger = logging.getLogger(__name__)
 
+MAX_PARSED_COMMANDS = 200
+
 
 def replace_host_token(cmd: str, old_token: str, new_token: str) -> str:
     """Safely replace a host token in a command string."""
     escaped = re.escape(old_token)
     # Ensure word or slash boundary to prevent replacing partial tokens
     pattern = re.compile(rf"(?<![\w\.\-])" + escaped + rf"(?![\w\.\-])", re.IGNORECASE)
-    return pattern.sub(new_token, cmd)
+    # Callable replacement keeps new_token literal (no backslash/group expansion)
+    return pattern.sub(lambda _m: new_token, cmd)
+
+
+def _has_critical_findings(cmd: str, roe: RoeScope) -> bool:
+    """Detection-only re-verification of a rewritten command (no sanitizing, so no recursion)."""
+    scope_validator = ScopeValidator(roe)
+    for parsed in extract_and_parse_all_commands(cmd):
+        for target in parsed.targets:
+            finding = scope_validator.classify_target(target)
+            if finding.status in (TargetStatus.PROHIBITED, TargetStatus.OUT_OF_SCOPE):
+                return True
+        if any(v.severity == Severity.CRITICAL for v in check_destructive_commands(parsed.raw, tokens=parsed.tokens)):
+            return True
+        tool_viols, _ = check_tool_and_flags(parsed, roe)
+        if any(v.severity == Severity.CRITICAL for v in tool_viols):
+            return True
+    return False
 
 
 def sanitize_single_command(
@@ -69,10 +95,27 @@ def sanitize_single_command(
             modifications.append(f'Dropped command using banned tool "{parsed.tool}".')
             return None, modifications
 
+    # 2b. A tool outside the authorized whitelist must not survive into the "compliant" output
+    if any(v.rule == "Tool Outside Authorized Whitelist" for v in tool_violations):
+        modifications.append(f'Dropped command using tool "{parsed.tool}" outside the authorized whitelist.')
+        return None, modifications
+
     # 3. Check for unauthorized package manager (apt-get, yum, brew, etc.)
     if tool_lower in PACKAGE_MANAGERS:
         modifications.append(f"Dropped unauthorized runtime package installation ('{parsed.tool}').")
         return None, modifications
+
+    # 3b. Pipeline stages after the head command must be checked too: an unsafe stage must never
+    #     survive into the "compliant" output just because the head command is benign.
+    allowed_stage_lower = {t.lower() for t in roe.allowed_tools}
+    for stage in parsed.pipeline_stages:
+        stage_tool_lower = stage.tool.lower()
+        if stage_tool_lower in PACKAGE_MANAGERS:
+            modifications.append(f"Dropped command with unauthorized package installation stage ('{stage.tool}').")
+            return None, modifications
+        if stage_tool_lower in INTERACTIVE_SESSION_TOOLS and stage_tool_lower not in allowed_stage_lower:
+            modifications.append(f"Dropped command with prohibited interactive session stage ('{stage.tool}').")
+            return None, modifications
 
     # 4. Primary authorized fallback target
     primary_target = ""
@@ -94,8 +137,14 @@ def sanitize_single_command(
         return safe_cmd, modifications
 
     # 6. Refactor 'sudo': Strip privilege elevation wrapper cleanly
-    if re.search(r"(?:^|[;&|]\s*)sudo\b", current_cmd, re.IGNORECASE):
-        current_cmd = re.sub(r"(^|[;&|]\s*)sudo\s+", r"\1", current_cmd).strip()
+    if re.search(r"(?:^|[;&|]\s*)(?:[^\s;&|]*/)?sudo\b", current_cmd, re.IGNORECASE):
+        # Strip 'sudo' together with its options (e.g. -u root, -E) so no dangling arguments remain
+        current_cmd = re.sub(
+            r"(^|[;&|]\s*)(?:[^\s;&|]*/)?sudo(?:\s+-[EHSnbikKPs]+|\s+-[ugCUhprt]\s+[^\s;&|]+)*\s+",
+            r"\1",
+            current_cmd,
+            flags=re.IGNORECASE,
+        ).strip()
         modifications.append("Stripped unauthorized 'sudo' privilege elevation prefix.")
 
     # 7. Refactor '| tee': Replace with standard POSIX redirection operator '>' or '>>'
@@ -127,11 +176,18 @@ def sanitize_single_command(
 
         elif finding.status == TargetStatus.OUT_OF_SCOPE:
             replacement = roe.allowed_domains[0] if finding.kind.value == "domain" and roe.allowed_domains else primary_target
-            if replacement:
-                current_cmd = replace_host_token(current_cmd, finding.token, replacement)
-                modifications.append(
-                    f"Redirected out-of-scope target {finding.token} to authorized asset {replacement}."
-                )
+            if not replacement:
+                # Fail closed: no authorized asset to redirect to
+                modifications.append(f"No authorized replacement for out-of-scope target {finding.token}.")
+                return None, modifications
+            rewritten = replace_host_token(current_cmd, finding.token, replacement)
+            if rewritten == current_cmd:
+                modifications.append(f"Could not rewrite out-of-scope target {finding.token}.")
+                return None, modifications
+            current_cmd = rewritten
+            modifications.append(
+                f"Redirected out-of-scope target {finding.token} to authorized asset {replacement}."
+            )
 
         elif finding.obfuscated:
             # Canonicalize obfuscated representation
@@ -142,12 +198,13 @@ def sanitize_single_command(
 
     # 5. Sanitize tool-specific flags (e.g. nmap timing, prohibited flags)
     if parsed.tool.lower() == "nmap":
-        timing_match = re.search(r"(?:^|\s)-T([0-5])\b", current_cmd)
-        if timing_match and int(timing_match.group(1)) > roe.max_nmap_timing:
+        timing_match = re.search(NMAP_TIMING_PATTERN, current_cmd, re.IGNORECASE)
+        if timing_match and nmap_timing_value(timing_match.group(1)) > roe.max_nmap_timing:
             current_cmd = re.sub(
-                r"(^|\s)-T[0-5]\b",
-                rf"\g<1>-T{roe.max_nmap_timing}",
+                NMAP_TIMING_PATTERN,
+                lambda m: f"{m.group(0)[: m.start(1) - m.start(0)]}{roe.max_nmap_timing}",
                 current_cmd,
+                flags=re.IGNORECASE,
             )
             modifications.append(f"Enforced maximum nmap timing template -T{roe.max_nmap_timing}.")
 
@@ -179,6 +236,11 @@ def sanitize_single_command(
     # Clean redundant horizontal whitespace while strictly preserving newlines
     cleaned_cmd = re.sub(r"[^\S\r\n]{2,}", " ", current_cmd).strip()
 
+    # Never return a rewrite that still contains a critical finding
+    if cleaned_cmd and _has_critical_findings(cleaned_cmd, roe):
+        modifications.append("Rejected rewrite that failed re-verification.")
+        return None, modifications
+
     if cleaned_cmd == parsed.raw.strip() and not modifications:
         modifications.append(
             "No deterministic rewrite applied — remaining findings are advisory-level "
@@ -191,7 +253,15 @@ def sanitize_single_command(
 
 def evaluate_audit(request: AuditRequest) -> AuditResult:
     """Run full deterministic audit evaluation on an AuditRequest."""
-    if is_model_refusal(request.model_output):
+    scope_validator = ScopeValidator(request.roe)
+    parsed_commands = extract_and_parse_all_commands(request.model_output)
+
+    # Cap the work per request; over-limit input fails closed rather than being partially audited
+    too_many_commands = len(parsed_commands) > MAX_PARSED_COMMANDS
+    if too_many_commands:
+        parsed_commands = parsed_commands[:MAX_PARSED_COMMANDS]
+
+    if not parsed_commands and is_model_refusal(request.model_output):
         return AuditResult(
             audit_id=f"AUDIT-{uuid.uuid4().hex[:10].upper()}",
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -322,12 +392,25 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
     all_violations.extend(cve_violations)
     all_modifications.extend(cve_notes)
 
-    # 2b. Global destructive checks across the entire model response (catches fork bombs, standalone wipes)
-    global_destructive = check_destructive_commands(request.model_output)
-    for gd in global_destructive:
+
+    # 2b. Whole-command destructive patterns (e.g. fork bombs split by ';' during parsing).
+    #     Scanned over extracted command lines only, never over prose, so explanations stay clean.
+    command_text = "\n".join(extract_command_blocks(request.model_output))
+    for gd in check_destructive_commands(command_text):
         if not any(v.rule == gd.rule for v in all_violations):
             all_violations.append(gd)
 
+    # 2c. Over-limit command volume is an unsafe-to-approve condition (fail closed)
+    if too_many_commands:
+        all_violations.append(
+            Violation(
+                rule="Command Volume Exceeded",
+                category=ViolationCategory.ACCURACY,
+                severity=Severity.CRITICAL,
+                detail=f"More than {MAX_PARSED_COMMANDS} commands in one response; not fully auditable.",
+                command=None,
+            )
+        )
 
     # 3. Check for empty command output
     if not parsed_commands:
@@ -343,9 +426,6 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
 
     # 4. Compute final verdict
     critical_count = sum(1 for v in all_violations if v.severity == Severity.CRITICAL)
-    has_scope_breach = any(v.category == ViolationCategory.SCOPE for v in all_violations)
-    has_destructive = any(v.category == ViolationCategory.DESTRUCTIVE for v in all_violations)
-    has_banned_tool = any(v.rule == "Prohibited Offensive Tool" for v in all_violations)
 
     # Strictly Unsafe: Any CRITICAL violation (network breach, destructive command, banned tool, prohibited action)
     if critical_count > 0:
@@ -414,14 +494,19 @@ def evaluate_deterministic_command(request: DeterministicAuditRequest) -> AuditR
     """Convenience helper to evaluate a single raw CLI command."""
     roe = request.roe
     if roe is None:
-        from app.data.presets import get_roe_preset_by_id, ROE_PRESETS
-        roe = get_roe_preset_by_id(request.roe_id) or ROE_PRESETS[0]
+        from app.data.presets import get_roe_preset_by_id
+        roe = get_roe_preset_by_id(request.roe_id)
+        if roe is None:
+            raise ValueError(f"Unknown RoE id: {request.roe_id!r}")
+
+    if "```" in request.command:
+        raise ValueError("Command contains a code-fence marker and cannot be audited reliably.")
 
     full_req = AuditRequest(
         roe=roe,
         model_id=request.model_id,
         user_prompt=request.user_prompt,
-        model_output=f"```bash\n{request.command}\n```",
+        model_output=request.command,
         deterministic_only=request.deterministic_only,
     )
     return evaluate_audit(full_req)

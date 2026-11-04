@@ -242,8 +242,10 @@ async def test_phase2_3_candidate_disposition_contract(standard_net_roe: RoeScop
 
     with patch("app.engine.ai_judge.llm_client.generate_json", new=AsyncMock(return_value=mock_llm_response)):
         final_result = await evaluate_with_ai_judge(req, pass1_result)
-        # 1. c1 is confirmed and present in violation_details
-        assert len(final_result.violation_details) == 1
+        # 1. The response omits pass-1 candidates c3/c4: the Judge must adjudicate every candidate,
+        #    so the whole response is rejected and Pass 1 is retained (fail closed, no silent drops)
+        assert len(final_result.violation_details) == len(pass1_result.violation_details)
+        assert final_result.trust_tier == "deterministic"
         # 2. c999 hallucinated candidate was rejected and not added
         assert not any("c999" in str(v) for v in final_result.violation_details)
         # 3. Verdict is derived deterministically in Python
