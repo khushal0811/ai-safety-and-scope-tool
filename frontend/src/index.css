@@ -40,6 +40,7 @@
   --ok-bg: rgba(42, 122, 82, 0.10);  --ok-fg: #2a7a52;  --ok-bd: rgba(42, 122, 82, 0.25);
   --warn-bg: #fffbeb; --warn-fg: #b45309; --warn-bd: #fde68a;
   --bad-bg: #fff1f2; --bad-fg: #be123c; --bad-bd: #fecdd3;
+  --unsafe: #be123c;
   --diff-add: #dcfce7; --diff-del: #fee2e2;
 
   --radius-sm: 4px;
@@ -86,6 +87,7 @@
   --ok-bg: rgba(74, 170, 120, 0.14);  --ok-fg: #6ee7b7;  --ok-bd: rgba(74, 170, 120, 0.35);
   --warn-bg: rgba(245, 158, 11, 0.12); --warn-fg: #fcd34d; --warn-bd: rgba(245, 158, 11, 0.32);
   --bad-bg: rgba(244, 63, 94, 0.12);  --bad-fg: #fda4af;  --bad-bd: rgba(244, 63, 94, 0.32);
+  --unsafe: #f87171;
   --diff-add: rgba(74, 170, 120, 0.24); --diff-del: rgba(244, 63, 94, 0.24);
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(180, 180, 185, 0.10);
   --shadow-lg: 0 12px 40px rgba(98, 114, 240, 0.15), 0 4px 16px rgba(98, 114, 240, 0.08), 0 0 0 1px rgba(98, 114, 240, 0.18);
@@ -529,6 +531,10 @@ button { font: inherit; color: inherit; }
 }
 .note--warn { background: var(--warn-bg); border-color: var(--warn-bd); color: var(--warn-fg); }
 .note--bad { background: var(--bad-bg); border-color: var(--bad-bd); color: var(--bad-fg); }
+.note--info { background: rgba(139, 92, 246, 0.08); border-color: rgba(139, 92, 246, 0.3); color: #a78bfa; }
+.spin { animation: spin 1s linear infinite; }
+.alert { padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--border-s); font-size: 12.5px; }
+.alert--bad { background: var(--bad-bg); border-color: var(--bad-bd); color: var(--bad-fg); }
 
 /* ---------- Example chips ---------- */
 
@@ -568,6 +574,12 @@ button { font: inherit; color: inherit; }
 .verdict--Unsafe .verdict__badge { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-bd); }
 .verdict--Refused .verdict__badge { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
 .badge--refused { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
+.badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 3px; border: 1px solid var(--border-s); font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; }
+.badge--success { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
+.badge--danger { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-bd); }
+.badge--warning { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bd); }
+.badge--accent { background: var(--accent-glow); color: var(--accent); border-color: var(--accent); }
+.badge--neutral { background: var(--surface-sunken); color: var(--text-muted); }
 .benchmark-model-res-card--refused { border-color: rgba(139, 92, 246, 0.35); }
 .verdict__text { color: var(--text-muted); font-size: 13px; }
 .verdict__meta { margin-left: auto; text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-subtle); white-space: nowrap; }

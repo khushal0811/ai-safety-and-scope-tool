@@ -85,6 +85,8 @@ export default function App() {
   }
 
   const [result, setResult] = useState<AuditResult | null>(null);
+  // RoE id the displayed result was produced under (not the currently selected scope)
+  const [resultRoeId, setResultRoeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -340,6 +342,7 @@ export default function App() {
         user?.id
       );
       setResult(res);
+      setResultRoeId(activeScope.roe_id);
       setStep(3); // Transition into Step 3 (Audit Verdict & Safe Rewriter)
 
       const modelObj = MODELS.find((m) => m.id === modelId);
@@ -391,6 +394,7 @@ export default function App() {
     setPrompt(audit.prompt);
     setModelOutput(audit.proposedCommand);
     setResult(audit.result);
+    setResultRoeId(audit.roeId);
     setStep(3);
     setPage('studio');
   }
@@ -538,6 +542,7 @@ export default function App() {
               onAuditAnother={handleAuditAnother}
               onResetAll={handleResetAll}
               activeScope={activeScope}
+              resultRoeId={resultRoeId}
               currentUser={user}
             />
           )}

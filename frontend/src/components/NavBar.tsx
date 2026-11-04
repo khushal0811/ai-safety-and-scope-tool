@@ -40,7 +40,19 @@ export function NavBar({
     <header className="nav">
       <div className="container nav__inner">
         {/* Brand */}
-        <div className="brand" onClick={() => onNavigate('studio')} style={{ cursor: 'pointer', gap: 10 }}>
+        <div
+          className="brand"
+          role="button"
+          tabIndex={0}
+          onClick={() => onNavigate('studio')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onNavigate('studio');
+            }
+          }}
+          style={{ cursor: 'pointer', gap: 10 }}
+        >
           <span className="brand__mark" style={{ width: 34, height: 34, padding: 4 }}>
             <VallumIcon width={25} height={25} />
           </span>
@@ -116,7 +128,15 @@ export function NavBar({
           <span
             className="status-pill"
             title={live ? 'Connected to FastAPI backend engine (click to refresh status)' : 'Running client-side demo engine (click to probe backend)'}
+            role="button"
+            tabIndex={0}
             onClick={() => checkBackendHealth()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                checkBackendHealth();
+              }
+            }}
             style={{ cursor: 'pointer' }}
           >
             <span className={`status-pill__dot ${live ? 'status-pill__dot--live' : ''}`} />
@@ -131,7 +151,19 @@ export function NavBar({
               title={`Logged in as ${currentUser.email} (${currentUser.role === 'admin' ? 'Super Admin' : 'Penetration Tester'})`}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              <img src={currentUser.avatarUrl} alt={currentUser.name} className="user-nav-pill__avatar" />
+              <img
+                src={/^https:\/\//i.test(currentUser.avatarUrl || '')
+                  ? currentUser.avatarUrl
+                  : `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(currentUser.email || currentUser.name)}`}
+                alt={currentUser.name}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  // Switch to the generated avatar once; never loop if the fallback also fails
+                  const fallback = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(currentUser.email || currentUser.name)}`;
+                  if (!e.currentTarget.src.startsWith(fallback)) e.currentTarget.src = fallback;
+                }}
+                className="user-nav-pill__avatar"
+              />
               <span className="user-nav-pill__name">{currentUser.name.split(' ')[0]}</span>
               {currentUser.role === 'admin' ? (
                 <span style={{

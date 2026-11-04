@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RoeScope } from '../types/audit';
 import type {
   BenchmarkEvaluateResponse,
@@ -71,12 +71,32 @@ export function BenchmarkStudioView({
 
   // Clipboard copy state
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+  const runSeq = useRef(0);
+  useEffect(() => {
+    // Invalidate any in-flight run when the view unmounts so it cannot update state afterwards
+    return () => {
+      runSeq.current++;
+    };
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   // Load models on mount
   useEffect(() => {
     let mounted = true;
     getBenchmarkModels().then((models) => {
-      if (mounted) setAvailableModels(models);
+      if (!mounted) return;
+      setAvailableModels(models);
+      // Only keep selections that are visible and removable; never dispatch to hidden models
+      setSelectedModelIds((prev) => {
+        const visible = new Set(models.map((m) => m.id));
+        const next = new Set([...prev].filter((id) => visible.has(id)));
+        return next.size > 0 ? next : new Set([models[0]?.id ?? 'anthropic/claude-sonnet-4.6']);
+      });
     });
     return () => {
       mounted = false;
@@ -128,6 +148,7 @@ export function BenchmarkStudioView({
       ? activeSelectedModelIds
       : ['anthropic/claude-sonnet-4.6'];
 
+    const runId = ++runSeq.current;
     try {
       const result = await evaluateBenchmark(
         activeRoe,
@@ -136,20 +157,29 @@ export function BenchmarkStudioView({
         scenarioTitle,
         currentUser?.id
       );
+      // A superseded or abandoned run must not overwrite state or persist a stale result
+      if (runId !== runSeq.current) return;
       setCurrentResult(result);
       onBenchmarkComplete?.(result);
     } catch (err: any) {
+      if (runId !== runSeq.current) return;
       setRunError(err?.message || 'Benchmark run failed. Please check backend connection.');
     } finally {
-      setRunning(false);
+      if (runId === runSeq.current) setRunning(false);
     }
   }
 
   // Copy helper
-  function copyText(id: string, text: string) {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  async function copyText(id: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      // Re-copying restarts the feedback window instead of being cut short by a stale timer
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      setCopiedId(null);
+    }
   }
 
   // Helper to cleanly render safe sanitized command lines without breaking terminal copy-paste
@@ -181,11 +211,15 @@ export function BenchmarkStudioView({
     const jsonStr = JSON.stringify(run, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
+    const safeId = String(run.benchmark_id || 'run').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `vallum-benchmark-${run.benchmark_id || 'run'}.json`;
+    a.download = `vallum-benchmark-${safeId}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    // Defer revoke so the download can start in browsers that read the URL asynchronously
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return (
@@ -264,6 +298,10 @@ export function BenchmarkStudioView({
                     if (target) onSelectRoe(target);
                   }}
                 >
+                  {!allRoes.some((r) => r.roe_id === activeRoe.roe_id) && (
+                    // A custom scope is not a preset: show it as the current selection so the select stays truthful
+                    <option value={activeRoe.roe_id}>{activeRoe.name}</option>
+                  )}
                   {allRoes.map((r) => (
                     <option key={r.roe_id} value={r.roe_id}>
                       Switch to: {r.name}
@@ -709,6 +747,10 @@ export function BenchmarkStudioView({
                       const isUnsafe = audit.verdict === 'Unsafe';
                       const isRefused = audit.verdict === 'Refused';
                       const isUnauthorized = model.status === 'unauthorized';
+                      // Computed once per item per render; both side-by-side panes reuse it
+                      const diffRows = audit.safe_sanitized_command
+                        ? computeSplitDiff(model.extracted_commands.join('\n'), audit.safe_sanitized_command)
+                        : [];
 
                       const borderClass = isCorrect
                         ? 'benchmark-model-res-card--correct'
@@ -807,8 +849,8 @@ export function BenchmarkStudioView({
 
                             {/* Violations breakdown partitioned into Scope vs Policy */}
                             {audit.violation_details.length > 0 && (() => {
-                              const scopeViolations = audit.violation_details.filter(v => (v.category as string).toLowerCase() === 'scope');
-                              const policyViolations = audit.violation_details.filter(v => (v.category as string).toLowerCase() !== 'scope');
+                              const scopeViolations = audit.violation_details.filter(v => String(v.category ?? '').toLowerCase() === 'scope');
+                              const policyViolations = audit.violation_details.filter(v => String(v.category ?? '').toLowerCase() !== 'scope');
 
                               return (
                                 <div style={{ marginBottom: 12 }}>
@@ -893,7 +935,7 @@ export function BenchmarkStudioView({
                                             Original
                                           </div>
                                           <div className="split-diff__body" style={{ padding: '4px 0' }}>
-                                            {computeSplitDiff(model.extracted_commands.join('\n'), audit.safe_sanitized_command).map((r, ri) => (
+                                            {diffRows.map((r, ri) => (
                                               <div key={ri} className={r.type === 'deleted' || r.type === 'modified' ? 'split-diff__row split-diff__row--del' : 'split-diff__row'}>
                                                 <span className="split-diff__gutter" style={{ width: 22 }}>{r.lineNumLeft ?? ' '}</span>
                                                 <span className="split-diff__content">
@@ -916,7 +958,7 @@ export function BenchmarkStudioView({
                                             Sanitized
                                           </div>
                                           <div className="split-diff__body" style={{ padding: '4px 0' }}>
-                                            {computeSplitDiff(model.extracted_commands.join('\n'), audit.safe_sanitized_command).map((r, ri) => (
+                                            {diffRows.map((r, ri) => (
                                               <div key={ri} className={r.type === 'added' || r.type === 'modified' ? 'split-diff__row split-diff__row--add' : 'split-diff__row'}>
                                                 <span className="split-diff__gutter" style={{ width: 22 }}>{r.lineNumRight ?? ' '}</span>
                                                 <span className="split-diff__content">

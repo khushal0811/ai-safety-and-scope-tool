@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { PastAudit } from '../types/history';
 import type { UserProfile } from '../types/user';
 import {
@@ -40,14 +40,39 @@ export function PastAuditsView({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [exportingReport, setExportingReport] = useState<'pdf' | 'markdown' | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+
+  // Escape closes the detail modal (keyboard parity with the backdrop click)
+  useEffect(() => {
+    if (!selectedAudit) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedAudit(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedAudit]);
+
+  // A selection made under one filter must not silently carry over to another
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setPage(0);
+  }, [search, filterVerdict]);
 
   async function handleDownloadAttestation(format: 'pdf' | 'markdown', roeIdOverride?: string) {
+    // Only ever attest the RoE of an audit the user explicitly selected
+    const roeId = roeIdOverride || selectedAudit?.roeId;
+    if (!roeId) {
+      setExportError('Select an audit before exporting its RoE attestation.');
+      return;
+    }
+    setExportError(null);
     setExportingReport(format);
     try {
-      const roeId = roeIdOverride || (selectedAudit?.roeId) || (filteredAudits[0]?.roeId) || 'ROE-PRESET-NET-001';
       await downloadComplianceReport(roeId, format, currentUser?.id);
-    } catch (err) {
-      console.error('Failed to export compliance attestation:', err);
+    } catch (err: any) {
+      setExportError(err?.message || 'Failed to export compliance attestation');
     } finally {
       setExportingReport(null);
     }
@@ -56,10 +81,13 @@ export function PastAuditsView({
   async function handleCloudSync() {
     if (!onSyncCloud) return;
     setSyncing(true);
+    setActionError(null);
     try {
       await onSyncCloud();
+    } catch (err: any) {
+      setActionError(err?.message || 'Cloud sync failed.');
     } finally {
-      setTimeout(() => setSyncing(false), 500);
+      setSyncing(false);
     }
   }
 
@@ -80,6 +108,12 @@ export function PastAuditsView({
   }, [audits, filterVerdict, search]);
 
   const allFilteredIds = useMemo(() => filteredAudits.map((a) => a.id), [filteredAudits]);
+
+  // Render one page at a time so large histories stay responsive
+  const PAGE_SIZE = 50;
+  const pageCount = Math.max(1, Math.ceil(filteredAudits.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageItems = filteredAudits.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   const isAllSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedIds.has(id));
 
   function toggleSelectAll() {
@@ -121,6 +155,7 @@ export function PastAuditsView({
     if (!window.confirm(confirmMsg)) return;
 
     setDeleting(true);
+    setActionError(null);
     try {
       await onDeleteAudits(ids);
       setSelectedIds((prev) => {
@@ -131,6 +166,9 @@ export function PastAuditsView({
       if (selectedAudit && ids.includes(selectedAudit.id)) {
         setSelectedAudit(null);
       }
+    } catch (err: any) {
+      // The rows remain: say so instead of failing silently after a confirmed destructive action
+      setActionError(err?.message || 'Delete failed. The selected audits were not removed.');
     } finally {
       setDeleting(false);
     }
@@ -151,11 +189,16 @@ export function PastAuditsView({
 
   function exportJSON() {
     const toExport = selectedIds.size > 0 ? audits.filter((a) => selectedIds.has(a.id)) : audits;
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(toExport, null, 2));
+    // Blob URL instead of a data: URL: data URLs are size-capped and triple-encoded
+    const blob = new Blob([JSON.stringify(toExport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
     const dl = document.createElement('a');
-    dl.setAttribute('href', dataStr);
-    dl.setAttribute('download', `vallum_audit_history_${new Date().toISOString().slice(0, 10)}.json`);
+    dl.href = url;
+    dl.download = `vallum_audit_history_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(dl);
     dl.click();
+    dl.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return (
@@ -263,7 +306,7 @@ export function PastAuditsView({
                 id="delete-selected-btn"
                 className="btn btn--sm btn--danger row"
                 style={{ gap: 6 }}
-                onClick={() => handleDelete(Array.from(selectedIds))}
+                onClick={() => handleDelete(allFilteredIds.filter((id) => selectedIds.has(id)))}
                 disabled={deleting}
                 title="Permanently delete selected audits from database"
               >
@@ -323,6 +366,30 @@ export function PastAuditsView({
         </div>
       </div>
 
+      {exportError ? (
+        <div className="note note--bad" style={{ marginTop: 10 }} role="alert">
+          <AlertIcon /> {exportError}
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <div className="note note--bad" style={{ marginTop: 10 }} role="alert">
+          <AlertIcon /> {actionError}
+        </div>
+      ) : null}
+
+      {filteredAudits.length > PAGE_SIZE ? (
+        <div className="row" style={{ justifyContent: 'flex-end', gap: 8, margin: '8px 0' }}>
+          <button type="button" className="btn btn--sm btn--ghost" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+            Previous
+          </button>
+          <span className="muted mono font-xs">Page {currentPage + 1} of {pageCount}</span>
+          <button type="button" className="btn btn--sm btn--ghost" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
+            Next
+          </button>
+        </div>
+      ) : null}
+
       {/* Table / List */}
       {filteredAudits.length === 0 ? (
         <div className="empty" style={{ marginTop: 24 }}>
@@ -370,7 +437,7 @@ export function PastAuditsView({
                 </tr>
               </thead>
               <tbody>
-                {filteredAudits.map((item) => {
+                {pageItems.map((item) => {
                   const v = item.result.verdict;
                   const violations = item.result.violation_details || [];
                   const isSelected = selectedIds.has(item.id);
@@ -481,6 +548,9 @@ export function PastAuditsView({
         <div className="modal-backdrop" onClick={() => setSelectedAudit(null)}>
           <div
             className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="audit-detail-title"
             style={{ maxWidth: 760, width: '100%', maxHeight: '88vh', overflowY: 'auto' }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -497,7 +567,7 @@ export function PastAuditsView({
                 >
                   {selectedAudit.result.verdict}
                 </span>
-                <span className="mono font-xs text-muted">ID: {selectedAudit.id}</span>
+                <span id="audit-detail-title" className="mono font-xs text-muted">ID: {selectedAudit.id}</span>
               </div>
               <button
                 className="btn btn--ghost btn--icon"
@@ -527,11 +597,11 @@ export function PastAuditsView({
                 <pre className="code-block">{selectedAudit.proposedCommand}</pre>
               </div>
 
-              {selectedAudit.result.violation_details.length > 0 && (
+              {(selectedAudit.result.violation_details?.length ?? 0) > 0 && (
                 <div>
                   <span className="section-label">Violations Detected</span>
                   <div style={{ display: 'grid', gap: 8 }}>
-                    {selectedAudit.result.violation_details.map((rb, idx) => (
+                    {(selectedAudit.result.violation_details ?? []).map((rb, idx) => (
                       <div key={idx} className="note note--bad" style={{ flexDirection: 'column' }}>
                         <div className="row between" style={{ width: '100%' }}>
                           <strong>{rb.rule}</strong>

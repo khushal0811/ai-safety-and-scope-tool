@@ -118,6 +118,8 @@ export async function evaluateBenchmark(
     method: 'POST',
     headers: getBenchmarkHeaders(),
     body: JSON.stringify(payload),
+    // Bound the wait so a stalled backend cannot leave the run spinning forever
+    signal: AbortSignal.timeout(180_000),
   });
 
   if (!res.ok) {

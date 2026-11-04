@@ -23,13 +23,15 @@ const STATUS_LABEL: Record<TargetFinding['status'], { cls: string; label: string
   out_of_scope: { cls: 'tag--bad', label: 'out of scope' },
   prohibited: { cls: 'tag--bad', label: 'prohibited' },
 };
+// Persisted results can carry values this build does not know; render them instead of crashing
+const UNKNOWN_STATUS = { cls: 'tag--warn', label: 'unknown' };
 
 export function AuditResultView({
   result,
   loading,
   onAuditAnother,
   onResetAll,
-  activeScope,
+  resultRoeId,
   currentUser,
 }: {
   result: AuditResult | null;
@@ -37,6 +39,7 @@ export function AuditResultView({
   onAuditAnother?: () => void;
   onResetAll?: () => void;
   activeScope?: RoeScope | null;
+  resultRoeId?: string | null;
   currentUser?: UserProfile | null;
 }) {
   if (loading) return <LoadingState />;
@@ -46,7 +49,7 @@ export function AuditResultView({
       result={result}
       onAuditAnother={onAuditAnother}
       onResetAll={onResetAll}
-      activeScope={activeScope}
+      resultRoeId={resultRoeId ?? null}
       currentUser={currentUser}
     />
   );
@@ -79,16 +82,16 @@ function ResultBody({
   result,
   onAuditAnother,
   onResetAll,
-  activeScope,
+  resultRoeId,
   currentUser,
 }: {
   result: AuditResult;
   onAuditAnother?: () => void;
   onResetAll?: () => void;
-  activeScope?: RoeScope | null;
+  resultRoeId: string | null;
   currentUser?: UserProfile | null;
 }) {
-  const Icon = VERDICT_ICON[result.verdict];
+  const Icon = VERDICT_ICON[result.verdict] ?? AlertIcon;
   const modelLabel = MODELS.find((m) => m.id === result.selected_model)?.label ?? result.selected_model;
   const [exportingFormat, setExportingFormat] = useState<'pdf' | 'markdown' | 'json' | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -97,8 +100,12 @@ function ResultBody({
     setExportingFormat(format);
     setExportError(null);
     try {
-      const targetRoeId = activeScope?.roe_id || 'ROE-PRESET-NET-001';
-      await downloadComplianceReport(targetRoeId, format, currentUser?.id);
+      // Use the RoE this result was produced under; never substitute another scope
+      if (!resultRoeId) {
+        setExportError('No Rules of Engagement is associated with this result.');
+        return;
+      }
+      await downloadComplianceReport(resultRoeId, format, currentUser?.id);
     } catch (err: any) {
       setExportError(err?.message || 'Failed to download compliance report');
     } finally {
@@ -165,7 +172,7 @@ function ResultBody({
         </section>
       ) : null}
 
-      {result.verdict !== 'Correct' ? <SanitizedBox result={result} roeId={activeScope?.roe_id} /> : null}
+      {result.verdict !== 'Correct' ? <SanitizedBox result={result} roeId={resultRoeId ?? undefined} /> : null}
 
       <section className="card" aria-labelledby="findings-title">
         <div className="card__header">
@@ -208,7 +215,7 @@ function ResultBody({
             {sandboxCommand && (
               <MicroSandboxConsole
                 command={sandboxCommand}
-                roeId={activeScope?.roe_id}
+                roeId={resultRoeId ?? undefined}
                 onClose={() => setSandboxCommand(null)}
               />
             )}
@@ -219,8 +226,8 @@ function ResultBody({
               <p className="section-label">Targets</p>
               <div className="tag-row">
                 {uniqueTargets.map((t) => (
-                  <span key={`${t.kind}:${t.token}`} className={`tag ${STATUS_LABEL[t.status].cls}`} title={t.obfuscated ? `Obfuscated: ${t.token}` : undefined}>
-                    {t.obfuscated ? `${t.token} → ${t.normalized}` : t.normalized} · {STATUS_LABEL[t.status].label}
+                  <span key={`${t.kind}:${t.token}`} className={`tag ${(STATUS_LABEL[t.status] ?? UNKNOWN_STATUS).cls}`} title={t.obfuscated ? `Obfuscated: ${t.token}` : undefined}>
+                    {t.obfuscated ? `${t.token} → ${t.normalized}` : t.normalized} · {(STATUS_LABEL[t.status] ?? UNKNOWN_STATUS).label}
                   </span>
                 ))}
               </div>
@@ -472,8 +479,11 @@ function SanitizedBox({ result, roeId }: { result: AuditResult; roeId?: string }
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const original = result.extracted_commands.join('\n');
   const safe = result.safe_sanitized_command;
-  const parts = useMemo(() => (safe ? diffWords(original, safe) : []), [original, safe]);
-  const splitRows = useMemo(() => (safe ? computeSplitDiff(original, safe) : []), [original, safe]);
+  // Diff allocates O(n*m) matrices over untrusted model output: cap the input size
+  const DIFF_CHAR_LIMIT = 4000;
+  const diffable = original.length <= DIFF_CHAR_LIMIT && (safe ?? '').length <= DIFF_CHAR_LIMIT;
+  const parts = useMemo(() => (safe && diffable ? diffWords(original, safe) : []), [original, safe, diffable]);
+  const splitRows = useMemo(() => (safe && diffable ? computeSplitDiff(original, safe) : []), [original, safe, diffable]);
 
   useEffect(() => {
     if (!copied) return;
@@ -570,7 +580,11 @@ function SanitizedBox({ result, roeId }: { result: AuditResult; roeId?: string }
           <MicroSandboxConsole command={safe} roeId={roeId} onClose={() => setSandboxOpen(false)} />
         )}
 
-        {showDiff ? (
+        {showDiff && !diffable ? (
+          <p className="muted" style={{ fontSize: 12 }}>Diff too large to display.</p>
+        ) : null}
+
+        {showDiff && diffable ? (
           <div>
             <p className="section-label" style={{ marginBottom: 8 }}>
               {diffMode === 'split' ? 'Git Split Diff (Original vs Sanitized)' : 'Inline Word Diff (Original → Sanitized)'}

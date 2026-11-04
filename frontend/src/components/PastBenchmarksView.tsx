@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BenchmarkRunRecord } from '../types/benchmark';
 import type { UserProfile } from '../types/user';
 import {
@@ -35,25 +35,55 @@ export function PastBenchmarksView({
   const handleNav = onNavigateBenchmarkStudio || onNavigateToStudio || (() => {});
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(0);
+  // A selection made under one filter must not silently carry over to another
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setPage(0);
+  }, [search]);
   const [inspectedRun, setInspectedRun] = useState<BenchmarkRunRecord | null>(null);
+  // Escape closes the inspect modal (keyboard parity with the backdrop click)
+  useEffect(() => {
+    if (!inspectedRun) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setInspectedRun(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [inspectedRun]);
   const [syncing, setSyncing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   async function handleCloudSync() {
     if (!onSyncCloud) return;
     setSyncing(true);
+    setActionError(null);
     try {
       await onSyncCloud();
+    } catch (err: any) {
+      setActionError(err?.message || 'Cloud sync failed.');
     } finally {
-      setTimeout(() => setSyncing(false), 500);
+      setSyncing(false);
     }
   }
 
-  function copyText(id: string, text: string) {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  async function copyText(id: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      setCopiedId(null);
+    }
   }
 
   function renderSafeCommandLines(commandStr: string) {
@@ -93,6 +123,12 @@ export function PastBenchmarksView({
   }, [benchmarks, search]);
 
   const allFilteredIds = useMemo(() => filteredBenchmarks.map((b) => b.benchmark_id), [filteredBenchmarks]);
+
+  // Render one page at a time so large histories stay responsive
+  const PAGE_SIZE = 50;
+  const pageCount = Math.max(1, Math.ceil(filteredBenchmarks.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageItems = filteredBenchmarks.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   const isAllSelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedIds.has(id));
 
   function toggleSelectAll() {
@@ -134,6 +170,7 @@ export function PastBenchmarksView({
     if (!window.confirm(confirmMsg)) return;
 
     setDeleting(true);
+    setActionError(null);
     try {
       await onDeleteBenchmarks(ids);
       setSelectedIds((prev) => {
@@ -144,6 +181,9 @@ export function PastBenchmarksView({
       if (inspectedRun && ids.includes(inspectedRun.benchmark_id)) {
         setInspectedRun(null);
       }
+    } catch (err: any) {
+      // The rows remain: say so instead of failing silently after a confirmed destructive action
+      setActionError(err?.message || 'Delete failed. The selected runs were not removed.');
     } finally {
       setDeleting(false);
     }
@@ -158,8 +198,10 @@ export function PastBenchmarksView({
     const a = document.createElement('a');
     a.href = url;
     a.download = `vallum_benchmark_history_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   // Aggregate metrics
@@ -211,7 +253,7 @@ export function PastBenchmarksView({
 
       {/* Global Telemetry Score Cards */}
       {benchmarks.length > 0 && (
-        <div className="benchmark-score-grid" style={{ marginBottom: 24 }}>
+        <div className="benchmark-scorecard-grid" style={{ marginBottom: 24 }}>
           <div className="benchmark-score-card">
             <div className="benchmark-score-card__top">
               <span className="metric-label">Total Benchmarks</span>
@@ -351,7 +393,7 @@ export function PastBenchmarksView({
                 <button
                   type="button"
                   className="btn btn--sm btn--danger"
-                  onClick={() => handleDelete(Array.from(selectedIds))}
+                  onClick={() => handleDelete(allFilteredIds.filter((id) => selectedIds.has(id)))}
                   disabled={deleting}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
                 >
@@ -363,6 +405,24 @@ export function PastBenchmarksView({
           </div>
         )}
       </div>
+
+      {actionError ? (
+        <div className="note note--bad" style={{ marginTop: 10 }} role="alert">
+          <AlertIcon /> {actionError}
+        </div>
+      ) : null}
+
+      {filteredBenchmarks.length > PAGE_SIZE ? (
+        <div className="row" style={{ justifyContent: 'flex-end', gap: 8, margin: '8px 0' }}>
+          <button type="button" className="btn btn--sm btn--ghost" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+            Previous
+          </button>
+          <span className="muted mono font-xs">Page {currentPage + 1} of {pageCount}</span>
+          <button type="button" className="btn btn--sm btn--ghost" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
+            Next
+          </button>
+        </div>
+      ) : null}
 
       {/* Benchmark Runs List */}
       {filteredBenchmarks.length === 0 ? (
@@ -380,7 +440,7 @@ export function PastBenchmarksView({
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filteredBenchmarks.map((run) => {
+          {pageItems.map((run) => {
             const isSelected = selectedIds.has(run.benchmark_id);
             const dateStr = new Date(run.created_at).toLocaleString(undefined, {
               month: 'short',
@@ -496,14 +556,17 @@ export function PastBenchmarksView({
       {inspectedRun && (
         <div className="modal-backdrop" onClick={() => setInspectedRun(null)}>
           <div
-            className="modal-card benchmark-inspect-modal"
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="benchmark-inspect-title"
             onClick={(e) => e.stopPropagation()}
             style={{ maxWidth: 1100, width: '95vw', maxHeight: '90vh', overflowY: 'auto', padding: 0 }}
           >
             {/* Modal Header */}
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--surface-raised)' }}>
               <div>
-                <span className="metric-label" style={{ display: 'block', marginBottom: 2 }}>
+                <span id="benchmark-inspect-title" className="metric-label" style={{ display: 'block', marginBottom: 2 }}>
                   Historical Comparative Evaluation Matrix
                 </span>
                 <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
@@ -576,10 +639,10 @@ export function PastBenchmarksView({
                       : 'benchmark-model-res-card--incorrect';
 
                     const scopeViolations = (audit?.violation_details || []).filter(
-                      (v) => (v.category as string).toLowerCase() === 'scope'
+                      (v) => String(v.category ?? '').toLowerCase() === 'scope'
                     );
                     const policyViolations = (audit?.violation_details || []).filter(
-                      (v) => (v.category as string).toLowerCase() !== 'scope'
+                      (v) => String(v.category ?? '').toLowerCase() !== 'scope'
                     );
 
                     return (

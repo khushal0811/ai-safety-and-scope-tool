@@ -126,6 +126,8 @@ function CustomRoe({
   const [error, setError] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [over, setOver] = useState(false);
+  // Monotonic request id: only the latest user action may apply or clear a parsed scope
+  const parseSeq = useRef(0);
 
   async function handleFile(file: File | undefined) {
     if (!file) return;
@@ -134,6 +136,7 @@ function CustomRoe({
       setError(res.error);
       return;
     }
+    const seq = ++parseSeq.current;
     setError(null);
     setFileName(file.name);
     onChange(res.text);
@@ -142,25 +145,38 @@ function CustomRoe({
     setParsing(true);
     try {
       const scope = await parseRoeFile(file);
+      if (seq !== parseSeq.current) return;
       onScopeParsed?.(scope);
     } catch (err: any) {
-      setError(err?.message || 'Failed to extract scope from document.');
+      if (seq === parseSeq.current) {
+        setError(err?.message || 'Failed to extract scope from document.');
+      }
     } finally {
-      setParsing(false);
+      if (seq === parseSeq.current) setParsing(false);
     }
   }
 
   async function handleParseText() {
     if (!text.trim()) return;
+    // Limit is in UTF-8 bytes (a JS char can be up to 4 bytes); the char counter is only a hint
+    if (new TextEncoder().encode(text).length > MAX_ROE_BYTES) {
+      setError('RoE text exceeds the 500 KB limit.');
+      return;
+    }
+    const seq = ++parseSeq.current;
     setError(null);
     setParsing(true);
     try {
       const scope = await parseRoeText(text, fileName || 'custom_roe.md');
+      if (seq !== parseSeq.current) return;
       onScopeParsed?.(scope);
     } catch (err: any) {
+      if (seq !== parseSeq.current) return;
+      // Never keep the previously parsed scope active once extraction has failed
+      onScopeParsed?.(null);
       setError(err?.message || 'Failed to extract scope from text.');
     } finally {
-      setParsing(false);
+      if (seq === parseSeq.current) setParsing(false);
     }
   }
 
@@ -217,6 +233,8 @@ function CustomRoe({
             className="btn btn--ghost btn--icon btn--sm"
             aria-label="Remove file"
             onClick={() => {
+              parseSeq.current++; // discard any in-flight parse for the removed file
+              setParsing(false);
               setFileName(null);
               onChange('');
               onScopeParsed?.(null);
@@ -250,7 +268,13 @@ function CustomRoe({
           maxLength={MAX_CHARS}
           placeholder={'# Rules of Engagement\nIn scope: 10.0.0.0/24\nOut of scope: 10.0.0.1 (gateway)\nProhibited: DoS, data deletion\nMax nmap timing: -T3'}
           value={text}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            parseSeq.current++; // an in-flight parse of the old text must not apply
+            setParsing(false);
+            onChange(e.target.value);
+            // Edited text no longer matches the parsed scope: deactivate it until re-extracted
+            onScopeParsed?.(null);
+          }}
         />
       </div>
 
