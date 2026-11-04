@@ -61,9 +61,36 @@ def sanitize_raw_document(content: str) -> str:
     return content.strip()
 
 
+_DOMAIN_RE = re.compile(
+    r"^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
+)
+
+
+def _valid_allowed_domain(d: str) -> bool:
+    """Accept only multi-label registrable-style domains; reject single labels such as 'com' or 'internal'."""
+    d = d.strip().lower().lstrip(".")
+    return bool(_DOMAIN_RE.fullmatch(d)) and d.count(".") >= 1
+
+
+_LIST_FIELDS = (
+    "allowed_cidrs", "allowed_domains", "target_hosts", "prohibited_ips",
+    "allowed_tools", "prohibited_tools", "prohibited_flags", "prohibited_actions",
+)
+
+
+def _list_field(parsed_data: dict, key: str) -> list:
+    """Return an LLM-extracted list field; null/missing becomes [], any other non-list is rejected."""
+    value = parsed_data.get(key) or []
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be a JSON array")
+    return value
+
+
 def deterministic_roe_post_validation(parsed_data: dict, fallback_name: str = "Uploaded Custom RoE") -> RoeScope:
     """Sanitize and validate extracted RoE data through deterministic invariants."""
-    raw_cidrs = parsed_data.get("allowed_cidrs", [])
+    lists = {key: _list_field(parsed_data, key) for key in _LIST_FIELDS}
+
+    raw_cidrs = lists["allowed_cidrs"]
     valid_cidrs = []
     for c in raw_cidrs:
         c_clean = str(c).strip()
@@ -77,16 +104,16 @@ def deterministic_roe_post_validation(parsed_data: dict, fallback_name: str = "U
             pass
 
     # Ensure prohibited IPs contain metadata and default gateway
-    prohibited = set(str(p).strip() for p in parsed_data.get("prohibited_ips", []))
+    prohibited = set(str(p).strip() for p in lists["prohibited_ips"])
     prohibited.add("169.254.169.254")
 
-    raw_target_hosts = [str(h).strip() for h in parsed_data.get("target_hosts", []) if h]
+    raw_target_hosts = [str(h).strip() for h in lists["target_hosts"] if h]
     target_hosts = [h for h in raw_target_hosts if h not in prohibited]
 
     # Timing template cap
     timing = parsed_data.get("max_nmap_timing", 3)
     try:
-        timing_int = max(0, min(5, int(timing)))
+        timing_int = max(1, min(4, int(timing)))
     except (ValueError, TypeError):
         timing_int = 3
 
@@ -98,13 +125,16 @@ def deterministic_roe_post_validation(parsed_data: dict, fallback_name: str = "U
         engagement_type=parsed_data.get("engagement_type") or "Custom Scope",
         summary=parsed_data.get("summary") or "Custom Rules of Engagement scope parsed from client document.",
         allowed_cidrs=valid_cidrs,
-        allowed_domains=[str(d).strip().lower() for d in parsed_data.get("allowed_domains", []) if d],
+        allowed_domains=[
+            d for d in (str(x).strip().lower() for x in lists["allowed_domains"] if x)
+            if _valid_allowed_domain(d)
+        ],
         target_hosts=target_hosts,
         prohibited_ips=sorted(list(prohibited)),
-        allowed_tools=[str(t).strip().lower() for t in parsed_data.get("allowed_tools", []) if t],
-        prohibited_tools=[str(t).strip().lower() for t in parsed_data.get("prohibited_tools", []) if t],
-        prohibited_flags=[str(f).strip() for f in parsed_data.get("prohibited_flags", []) if f],
-        prohibited_actions=[str(a).strip().lower() for a in parsed_data.get("prohibited_actions", []) if a],
+        allowed_tools=[str(t).strip().lower() for t in lists["allowed_tools"] if t],
+        prohibited_tools=[str(t).strip().lower() for t in lists["prohibited_tools"] if t],
+        prohibited_flags=[str(f).strip() for f in lists["prohibited_flags"] if f],
+        prohibited_actions=[str(a).strip().lower() for a in lists["prohibited_actions"] if a],
         max_nmap_timing=timing_int,
     )
 
@@ -114,9 +144,11 @@ async def parse_unstructured_roe(content: str, filename: str = "custom_roe.md") 
     clean_text = sanitize_raw_document(content)
     safe_filename = re.sub(r"[^a-zA-Z0-9._-]", "_", (filename or "custom_roe.md"))[:64]
 
+    # Escape angle brackets so the document cannot close or forge the boundary tags
+    escaped_text = clean_text.replace("<", "&lt;").replace(">", "&gt;")
     user_prompt = f"""Extract the Rules of Engagement from the following document:
 <untrusted_document_content filename="{safe_filename}">
-{clean_text}
+{escaped_text}
 </untrusted_document_content>"""
 
     extracted_json = await llm_client.generate_json(
@@ -126,8 +158,12 @@ async def parse_unstructured_roe(content: str, filename: str = "custom_roe.md") 
     )
 
     if not extracted_json:
-        # Fallback to local regex-based heuristic extractor if LLM is unreachable
-        return fallback_regex_roe_extractor(clean_text, filename)
+        # Fail closed: the regex fallback cannot understand negation ("out of scope")
+        # and would authorize every address in the document.
+        raise ValueError(
+            "RoE extraction is unavailable (LLM error/timeout). "
+            "Refusing to infer authorized scope from the uploaded document."
+        )
 
     return deterministic_roe_post_validation(extracted_json, fallback_name=filename)
 

@@ -18,6 +18,7 @@ HARD_PROHIBITED_NETWORKS = [
     ipaddress.ip_network("0.0.0.0/32"),          # Unspecified / Default route target
     ipaddress.ip_network("224.0.0.0/4"),          # Multicast
     ipaddress.ip_network("240.0.0.0/4"),          # Reserved / Class E
+    ipaddress.ip_network("fd00:ec2::254/128"),    # AWS Instance Metadata over IPv6
 ]
 
 # Standard public DNS servers frequently targeted by hallucinating models
@@ -256,7 +257,8 @@ class ScopeValidator:
                 if "/" in p_clean:
                     self.prohibited_networks.append(ipaddress.ip_network(p_clean, strict=False))
                 else:
-                    self.prohibited_networks.append(ipaddress.ip_network(f"{p_clean}/32", strict=False))
+                    # Let ip_network choose the host prefix (/32 for IPv4, /128 for IPv6)
+                    self.prohibited_networks.append(ipaddress.ip_network(p_clean))
             except ValueError:
                 pass
 
@@ -316,6 +318,29 @@ class ScopeValidator:
         # CIDR classification
         if target.kind == TargetKind.CIDR and target.net_obj:
             net = target.net_obj
+            # Unwrap IPv4-mapped IPv6 CIDRs (e.g. ::ffff:169.254.169.254/128) so IPv4 prohibitions apply
+            if (
+                isinstance(net, ipaddress.IPv6Network)
+                and net.prefixlen >= 96
+                and net.network_address.ipv4_mapped is not None
+            ):
+                net = ipaddress.ip_network(
+                    f"{net.network_address.ipv4_mapped}/{net.prefixlen - 96}", strict=False
+                )
+            # A single-address CIDR (e.g. 192.168.1.1/32) is a host: route it through the
+            # single-IP classifier so gateway/broadcast/public-DNS checks also apply.
+            if isinstance(net, ipaddress.IPv4Network) and net.num_addresses == 1:
+                return self.classify_target(
+                    NormalizedTarget(
+                        raw_token=target.raw_token,
+                        canonical=str(net.network_address),
+                        kind=TargetKind.IP,
+                        is_valid=True,
+                        is_obfuscated=target.is_obfuscated,
+                        format_type="ipv4_host_cidr",
+                        ip_obj=net.network_address,
+                    )
+                )
             # Check hard prohibitions
             for hard_net in HARD_PROHIBITED_NETWORKS:
                 if net.overlaps(hard_net):
@@ -369,6 +394,9 @@ class ScopeValidator:
         # Single IP classification
         if target.kind == TargetKind.IP and target.ip_obj:
             ip = target.ip_obj
+            # Unwrap IPv4-mapped IPv6 structurally (any spelling) so IPv4 prohibitions apply
+            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+                ip = ip.ipv4_mapped
 
             # 1. Hard Prohibited networks (Cloud Metadata, Link-Local, Multicast, Reserved)
             for hard_net in HARD_PROHIBITED_NETWORKS:

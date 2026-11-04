@@ -6,10 +6,13 @@ Flags fabricated or hallucinated identifiers without relying on external network
 
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 import re
 from typing import Dict, List, Optional, Set, Tuple
 from app.models.audit import Severity, Violation, ViolationCategory
+
+logger = logging.getLogger(__name__)
 
 CVE_REGEX = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
 
@@ -18,13 +21,23 @@ _CACHED_CVE_DB: Optional[Dict[str, dict]] = None
 
 
 def load_cve_database() -> Dict[str, dict]:
-    """Load the bundled offline CVE database into memory."""
+    """Load the bundled offline CVE database into memory, degrading gracefully on bad data."""
     global _CACHED_CVE_DB
     if _CACHED_CVE_DB is None:
-        if _CVE_DB_PATH.exists():
+        try:
+            if not _CVE_DB_PATH.exists():
+                _CACHED_CVE_DB = {}
+                return _CACHED_CVE_DB
             with open(_CVE_DB_PATH, "r", encoding="utf-8") as f:
-                _CACHED_CVE_DB = json.load(f)
-        else:
+                data = json.load(f)
+            if not isinstance(data, dict) or not all(
+                isinstance(k, str) and isinstance(v, dict)
+                for k, v in data.items() if k != "_metadata"
+            ):
+                raise ValueError("invalid CVE database schema")
+            _CACHED_CVE_DB = data
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            logger.error("[CVE] Failed to load %s: %s", _CVE_DB_PATH, e)
             _CACHED_CVE_DB = {}
     return _CACHED_CVE_DB
 
