@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Pre-push checks mirroring .github/workflows/ci.yml.
+# Enable once per clone with: git config core.hooksPath .githooks
+# Bypass with: git push --no-verify
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Test-only fixed value, not a production secret. The vault refuses to operate
+# without a 64-hex master key, so the checks supply a dummy one.
+export KEY_VAULT_MASTER_KEY="${KEY_VAULT_MASTER_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+
+echo "[pre-push] Backend test suite..."
+if [ -x backend/.venv/bin/python ]; then
+  (cd backend && ./.venv/bin/python -m pytest -q -p no:cacheprovider)
+elif command -v python3 >/dev/null 2>&1; then
+  (cd backend && python3 -m pytest -q -p no:cacheprovider)
+else
+  echo "[pre-push] ERROR: Python 3 is not available." >&2
+  exit 1
+fi
+
+echo "[pre-push] Frontend production build..."
+if [ ! -d frontend/node_modules ]; then
+  echo "[pre-push] ERROR: frontend/node_modules is missing. Run 'npm ci' in frontend/." >&2
+  exit 1
+fi
+(cd frontend && npm run build)
+
+echo "[pre-push] All checks passed."

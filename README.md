@@ -172,6 +172,16 @@ npm run build
 npm run dev
 ```
 
+### Local pre-push checks
+
+CI runs the backend test suite and frontend production build on every push and pull request (`.github/workflows/ci.yml`). To run the same checks before a push leaves your machine, enable the bundled hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook blocks the push when either check fails. `git push --no-verify` bypasses it when necessary.
+
 ---
 
 ## 📄 License
