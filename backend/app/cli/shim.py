@@ -148,13 +148,14 @@ def resolve_roe_locally(roe_id_or_file: Optional[str]) -> Any:
                     except Exception:
                         pass
         except Exception as e:
-            sys.stderr.write(f"{Colors.YELLOW}[!] Could not parse custom RoE file: {e}. Falling back to preset.{Colors.RESET}\n")
+            # Fail closed: never audit or execute against a scope the user did not request
+            raise SystemExit(f"Could not parse custom RoE file '{roe_id_or_file}': {e}")
 
     preset = preset_lookup(roe_id_or_file)
     if preset:
         return preset
 
-    return ROE_PRESETS[0]
+    raise SystemExit(f"Unknown RoE id or unreadable file: {roe_id_or_file}")
 
 
 def query_daemon_audit(
@@ -182,11 +183,17 @@ def query_daemon_audit(
         headers={"Content-Type": "application/json", "User-Agent": "Vallum-CLI-Shim/1.0"},
         method="POST",
     )
+    from app.engine.daemon_auth import SIGNATURE_HEADER, verify_body
+
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.status == 200:
-                body = resp.read().decode("utf-8")
-                return json.loads(body)
+                raw = resp.read()
+                # A daemon verdict authorizes host execution: trust it only with a valid signature
+                if not verify_body(raw, resp.headers.get(SIGNATURE_HEADER)):
+                    sys.stderr.write("[!] Ignoring unverified daemon response; using local engine.\n")
+                    return None
+                return json.loads(raw.decode("utf-8"))
     except Exception:
         return None
     return None
@@ -456,9 +463,9 @@ vallum() {
         vallum-cli --help
         return 0
     fi
-    local cmd="$*"
-    if vallum-cli check "$cmd"; then
-        eval "$cmd"
+    if vallum-cli check "$@"; then
+        # Execute the exact argv that was checked (no joined string, no eval)
+        command "$@"
     else
         local rc=$?
         return $rc

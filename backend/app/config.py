@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     DEFAULT_MODEL: str = "anthropic/claude-sonnet-4.6"
     LLAMA_MODEL: str = "anthropic/claude-sonnet-4.6"
     KEY_VAULT_MASTER_KEY: str = ""
+    ATTESTATION_HMAC_KEY: str = ""
 
     @property
     def llm_provider(self) -> str:

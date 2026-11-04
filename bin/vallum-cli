@@ -48,11 +48,9 @@ if [ "$1" = "run" ]; then
 
     # First: evaluate command using pure Python static inspection
     if "$PYTHON_BIN" -m app.cli check "$@"; then
-        # Authorized: Execute command in host shell
-        CMD="$*"
+        # Authorized: execute the exact argv that was checked. No shell re-parsing (no eval).
         echo -e "\033[38;2;16;185;129m[+] Authorization verified. Executing on host...\033[0m\n"
-        eval "$CMD"
-        exit $?
+        exec "$@"
     else
         # Breached: Halt host execution immediately
         echo -e "\033[38;2;239;68;68m[!] Host execution halted: Command rejected by Vallum.\033[0m" >&2
