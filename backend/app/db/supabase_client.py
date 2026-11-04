@@ -69,50 +69,101 @@ def is_database_connected() -> bool:
         return False
 
 
+def _previous_chain_head(client: Any, user_id: str, roe_id: str) -> tuple[str, int]:
+    """Return (prev_hash, chain_index) for the next record in a user+RoE chain."""
+    from app.engine.attestation import genesis_hash
+
+    res = (
+        client.table("audit_logs")
+        .select("chain_index, chain_hash")
+        .eq("user_id", user_id)
+        .eq("roe_id", roe_id)
+        .order("chain_index", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+    if rows and rows[0].get("chain_hash") and rows[0].get("chain_index") is not None:
+        return str(rows[0]["chain_hash"]), int(rows[0]["chain_index"]) + 1
+    return genesis_hash(roe_id), 1
+
+
 def save_audit_log(
     audit_data: Dict[str, Any],
     user_id: Optional[str] = None,
     execution_time_ms: int = 0,
 ) -> bool:
-    """Save an evaluated audit result to the PostgreSQL audit_logs table.
-    
+    """Save an evaluated audit result with a server-signed, write-time chain link.
+
     Strict Privacy Rule: Only persists when user_id is a valid UUID. Guest audits are never stored.
+    An audit without a bound RoE snapshot/hash is refused: an unattested row must
+    never enter the attestation ledger (AUDIT_005 High 5).
     """
     if not is_valid_uuid(user_id):
         return False
 
+    roe_hash = audit_data.get("roe_hash")
+    roe_snapshot = audit_data.get("roe_snapshot")
+    if not roe_hash or not isinstance(roe_snapshot, dict):
+        logger.error("[Supabase] Refusing audit log insert without RoE snapshot/hash binding.")
+        return False
+
     client = get_supabase()
     if not client:
         return False
 
-    try:
-        payload = {
-            "audit_id": audit_data.get("audit_id"),
-            "user_id": user_id,
-            "roe_id": audit_data.get("roe_id") or "UNKNOWN",
-            "mode": audit_data.get("mode", "live"),
-            "selected_model": audit_data.get("selected_model", "unknown"),
-            "user_prompt": audit_data.get("user_prompt", ""),
-            "raw_model_output": audit_data.get("raw_model_output", ""),
-            "extracted_commands": audit_data.get("extracted_commands", []),
-            "targets": audit_data.get("targets", []),
-            "verdict": audit_data.get("verdict", "Unsafe"),
-            "violation_details": audit_data.get("violation_details", []),
-            "safe_sanitized_command": audit_data.get("safe_sanitized_command"),
-            "modifications_made": audit_data.get("modifications_made", []),
-            "explanation": audit_data.get("explanation", ""),
-            "execution_time_ms": execution_time_ms,
-        }
+    created_at = audit_data.get("created_at") or datetime.now(timezone.utc).isoformat()
+    roe_id = audit_data.get("roe_id") or roe_snapshot.get("roe_id") or "UNKNOWN"
 
-        client.table("audit_logs").insert(payload).execute()
-        return True
-    except Exception as e:
-        logger.error(f"[Supabase] Failed to persist audit log: {e}")
-        return False
+    base_payload = {
+        "audit_id": audit_data.get("audit_id"),
+        "user_id": user_id,
+        "roe_id": roe_id,
+        "roe_hash": roe_hash,
+        "roe_snapshot": roe_snapshot,
+        "mode": audit_data.get("mode", "live"),
+        "selected_model": audit_data.get("selected_model", "unknown"),
+        "user_prompt": audit_data.get("user_prompt", ""),
+        "raw_model_output": audit_data.get("raw_model_output", ""),
+        "extracted_commands": audit_data.get("extracted_commands", []),
+        "targets": audit_data.get("targets", []),
+        "verdict": audit_data.get("verdict", "Unsafe"),
+        "violation_details": audit_data.get("violation_details", []),
+        "safe_sanitized_command": audit_data.get("safe_sanitized_command"),
+        "modifications_made": audit_data.get("modifications_made", []),
+        "explanation": audit_data.get("explanation", ""),
+        "execution_time_ms": execution_time_ms,
+        "created_at": created_at,
+        "deleted_at": None,
+    }
+
+    from app.engine.attestation import compute_record_signature
+
+    # The chain head is signed at write time with the server-only HMAC key. Retry
+    # once on a concurrent insert collision of (user_id, roe_id, chain_index).
+    for _attempt in range(3):
+        try:
+            prev_hash, chain_index = _previous_chain_head(client, user_id, str(roe_id))
+            payload = dict(base_payload)
+            payload["chain_index"] = chain_index
+            payload["prev_hash"] = prev_hash
+            payload["chain_hash"] = compute_record_signature(payload)
+            client.table("audit_logs").insert(payload).execute()
+            return True
+        except Exception as e:
+            last_error = e
+            logger.warning(f"[Supabase] Audit log insert attempt failed, retrying chain head: {e}")
+
+    logger.error(f"[Supabase] Failed to persist audit log: {last_error}")
+    return False
 
 
 def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-    """Retrieve audit history from PostgreSQL audit_logs table for authenticated user only."""
+    """Retrieve active audit history for the authenticated user.
+
+    Soft-deleted rows remain in the attestation ledger but are hidden from the
+    ordinary history view.
+    """
     if not is_valid_uuid(user_id):
         return []
 
@@ -121,7 +172,15 @@ def fetch_audit_history(user_id: Optional[str] = None, limit: int = 50) -> List[
         return []
 
     try:
-        res = client.table("audit_logs").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+        res = (
+            client.table("audit_logs")
+            .select("*")
+            .eq("user_id", user_id)
+            .is_("deleted_at", "null")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
         return res.data or []
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch audit history: {e}")
@@ -134,7 +193,10 @@ def fetch_audit_logs_for_roe(
     limit: int = 500,
     audit_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Retrieve audit logs for a specific RoE ID, scoped strictly to the given user.
+    """Retrieve all audit logs for a specific RoE ID, scoped strictly to the given user.
+
+    Soft-deleted rows are deliberately INCLUDED: deletion is a flag in the
+    attestation chain, never an omission (AUDIT_005 High 5).
 
     Returns an empty list if no valid user_id is provided — this function must
     never return data across users.
@@ -155,7 +217,7 @@ def fetch_audit_logs_for_roe(
         )
         if audit_id:
             query = query.eq("audit_id", audit_id)
-        res = query.order("created_at", desc=False).limit(limit).execute()
+        res = query.order("chain_index", desc=False).limit(limit).execute()
         return res.data or []
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch audit logs for RoE {roe_id} (user {user_id}): {e}")
@@ -164,8 +226,12 @@ def fetch_audit_logs_for_roe(
 
 
 def delete_audit_logs(audit_ids: List[str], user_id: str) -> Optional[int]:
-    """Permanently delete audit logs owned by user_id. Returns the number of rows actually deleted,
-    or None if the delete could not be performed."""
+    """Soft-delete audit logs owned by user_id.
+
+    Hard deletion is intentionally impossible from the application: a tombstone
+    must remain in the attestation ledger. Returns the number of rows newly
+    marked deleted, or None if the update could not be performed.
+    """
     if not is_valid_uuid(user_id) or not audit_ids:
         return 0
 
@@ -176,15 +242,16 @@ def delete_audit_logs(audit_ids: List[str], user_id: str) -> Optional[int]:
     try:
         res = (
             client.table("audit_logs")
-            .delete()
+            .update({"deleted_at": datetime.now(timezone.utc).isoformat()})
             .in_("audit_id", audit_ids)
             .eq("user_id", user_id)
+            .is_("deleted_at", "null")
             .select("audit_id")
             .execute()
         )
         return len(res.data or [])
     except Exception as e:
-        logger.error(f"[Supabase] Failed to delete audit logs: {e}")
+        logger.error(f"[Supabase] Failed to soft-delete audit logs: {e}")
         return None
 
 

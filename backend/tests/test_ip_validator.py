@@ -180,3 +180,42 @@ def test_scope_validator_target_hosts_cannot_override_prohibited_gateway_and_dns
     assert audit_gw.verdict == Verdict.UNSAFE
     assert any(t.status == TargetStatus.PROHIBITED for t in audit_gw.targets)
 
+
+
+# AUDIT_005 Medium: domain prohibitions must not be silently dropped
+
+def _domain_roe(**overrides) -> RoeScope:
+    values = dict(
+        roe_id="ROE-TEST-DOMAINS",
+        name="Domain Scope",
+        engagement_type="Web Penetration Test",
+        allowed_cidrs=["10.0.0.0/24"],
+        allowed_domains=["example.com"],
+        prohibited_ips=["prod.example.com", "metadata.google.internal"],
+    )
+    values.update(overrides)
+    return RoeScope(**values)
+
+
+def test_non_ip_prohibited_entry_blocks_domain_and_subdomains():
+    validator = ScopeValidator(_domain_roe())
+
+    assert validator.classify_target(normalize_ip_candidate("prod.example.com")).status == TargetStatus.PROHIBITED
+    assert validator.classify_target(normalize_ip_candidate("api.prod.example.com")).status == TargetStatus.PROHIBITED
+    assert validator.classify_target(normalize_ip_candidate("www.example.com")).status == TargetStatus.IN_SCOPE
+
+
+def test_prohibited_domain_wins_over_allowed_domain():
+    validator = ScopeValidator(_domain_roe(allowed_domains=["example.com", "prod.example.com"]))
+    assert validator.classify_target(normalize_ip_candidate("prod.example.com")).status == TargetStatus.PROHIBITED
+
+
+def test_hard_prohibited_metadata_hostnames_are_never_in_scope():
+    validator = ScopeValidator(
+        _domain_roe(
+            allowed_domains=["metadata.google.internal", "metadata.azure.com", "instance-data.ec2.internal"],
+            prohibited_ips=[],
+        )
+    )
+    for hostname in ("metadata.google.internal", "metadata.azure.com", "instance-data.ec2.internal"):
+        assert validator.classify_target(normalize_ip_candidate(hostname)).status == TargetStatus.PROHIBITED

@@ -138,15 +138,14 @@ def resolve_roe_locally(roe_id_or_file: Optional[str]) -> Any:
                     data = json.loads(content)
                     return RoeScope(**data)
                 else:
-                    # Markdown or text RoE
-                    from app.engine.roe_parser import parse_unstructured_roe_sync
-                    # If synchronous parser exists or simple fallback:
-                    try:
-                        import asyncio
-                        from app.engine.roe_parser import parse_unstructured_roe
-                        return asyncio.run(parse_unstructured_roe(content, filename=file_path.name))
-                    except Exception:
-                        pass
+                    # Markdown or text RoE: parse with the async LLM extractor.
+                    import asyncio
+                    from app.engine.roe_parser import parse_unstructured_roe
+
+                    scope = asyncio.run(parse_unstructured_roe(content, filename=file_path.name))
+                    if scope is None:
+                        raise ValueError("RoE parser returned no scope definition")
+                    return scope
         except Exception as e:
             # Fail closed: never audit or execute against a scope the user did not request
             raise SystemExit(f"Could not parse custom RoE file '{roe_id_or_file}': {e}")
@@ -207,17 +206,23 @@ def evaluate_command_audit(
 ) -> Tuple[Dict[str, Any], str]:
     """Evaluate command either via the daemon or local in-process fallback."""
     config = get_config()
-    active_roe = roe_spec or config.get("active_roe_id") or DEFAULT_ROE_ID
+    # Prefer an explicitly selected file, then the persisted file, then the id.
+    active_roe = roe_spec or config.get("active_roe_file") or config.get("active_roe_id") or DEFAULT_ROE_ID
 
-    # 1. Try daemon first unless force_offline is requested
+    # Resolve the scope exactly before contacting the daemon. This guarantees a
+    # typo or missing file exits non-zero instead of silently using NET-001.
+    roe = resolve_roe_locally(active_roe)
+    roe_payload = roe.model_dump(mode="json")
+
+    # 1. Try daemon first unless force_offline is requested. Send the parsed
+    #    scope itself: a file path is not a roe_id the daemon can resolve.
     if not force_offline:
-        res = query_daemon_audit(command, roe_id=active_roe, daemon_url=daemon_url)
+        res = query_daemon_audit(command, custom_roe=roe_payload, daemon_url=daemon_url)
         if res:
             return res, "daemon"
 
     # 2. Fallback to in-process deterministic engine
     engine = load_local_engine()
-    roe = resolve_roe_locally(active_roe)
     req = engine["DeterministicAuditRequest"](
         command=command,
         roe=roe,
@@ -351,7 +356,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         if args.dry_run:
             print(f"{Colors.CYAN}[DRY-RUN] Command passed inspection. Execution skipped.{Colors.RESET}")
             from app.engine.sandbox import IsolatedVirtualSandbox
-            scope = resolve_roe_locally(args.roe or DEFAULT_ROE_ID)
+            config = get_config()
+            active_roe = args.roe or config.get("active_roe_file") or config.get("active_roe_id") or DEFAULT_ROE_ID
+            scope = resolve_roe_locally(active_roe)
             sb_res = IsolatedVirtualSandbox.dry_run(command, roe=scope)
             render_sandbox_report(sb_res)
             return sb_res.exit_code
@@ -402,16 +409,23 @@ def cmd_roe(args: argparse.Namespace) -> int:
         if not target:
             sys.stderr.write(f"{Colors.RED}[!] Please specify a preset ID or RoE file path.{Colors.RESET}\n")
             return 1
-        # Test resolution
+        # Test resolution before persisting anything
         scope = resolve_roe_locally(target)
+        target_path = Path(target).expanduser()
+        is_file = target_path.exists() and target_path.is_file()
         config["active_roe_id"] = scope.roe_id
+        # Persist the file path so later checks reload the same document rather
+        # than resolving the generated id to an unrelated preset.
+        config["active_roe_file"] = str(target_path.resolve()) if is_file else None
         save_config(config)
         print(f"{Colors.GREEN}[✓] Active Scope updated to: {Colors.BOLD}{scope.name} [{scope.roe_id}]{Colors.RESET}")
+        if is_file:
+            print(f"{Colors.DIM}    Loaded from: {config['active_roe_file']}{Colors.RESET}")
         return 0
 
     else:  # show
-        active_id = config.get("active_roe_id", DEFAULT_ROE_ID)
-        scope = resolve_roe_locally(active_id)
+        active_spec = config.get("active_roe_file") or config.get("active_roe_id", DEFAULT_ROE_ID)
+        scope = resolve_roe_locally(active_spec)
         print(f"\n{Colors.BOLD}{Colors.WHITE}Active Scope Configuration:{Colors.RESET}")
         print(f"  ID:               {Colors.CYAN}{scope.roe_id}{Colors.RESET}")
         print(f"  Name:             {Colors.WHITE}{scope.name}{Colors.RESET}")

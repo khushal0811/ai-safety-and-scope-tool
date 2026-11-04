@@ -220,6 +220,9 @@ async def evaluate_benchmark_models(
             model_id=res.model_id,
             user_prompt=request.prompt,
             model_output=output_text,
+            # Benchmark fan-out must never spend the server's judge key. Each
+            # audited output is evaluated deterministically only (AUDIT_005 High 6).
+            deterministic_only=True,
         )
 
         audit_res: AuditResult = await evaluate_audit_async(audit_req)

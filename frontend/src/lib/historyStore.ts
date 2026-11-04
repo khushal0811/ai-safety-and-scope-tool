@@ -138,7 +138,8 @@ export async function deletePastAudits(auditIds: string[], userId?: string): Pro
     return [];
   }
 
-  // 1. Delete from Backend FastAPI endpoint (only for a configured origin)
+  // 1. Soft-delete through the Backend FastAPI endpoint only. Direct client
+  // deletes are prohibited: tombstones must stay in the attestation chain.
   try {
     const url = apiUrl('/api/audit/history');
     if (url) {
@@ -148,28 +149,14 @@ export async function deletePastAudits(auditIds: string[], userId?: string): Pro
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           audit_ids: auditIds,
-          user_id: userId,
         }),
       });
     }
   } catch (err) {
-    console.warn('[HistoryStore] FastAPI delete failed:', err);
+    console.warn('[HistoryStore] FastAPI soft-delete failed:', err);
   }
 
-  // 2. Direct Supabase delete as immediate guarantee
-  if (supabase) {
-    try {
-      await supabase
-        .from('audit_logs')
-        .delete()
-        .eq('user_id', userId)
-        .in('audit_id', auditIds);
-    } catch (err) {
-      console.warn('[HistoryStore] Direct Supabase delete failed:', err);
-    }
-  }
-
-  // 3. Update local cache / storage
+  // 2. Update local cache / storage
   const key = getUserStorageKey(userId);
   const current = getPastAudits(userId);
   const toDeleteSet = new Set(auditIds);

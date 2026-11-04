@@ -30,6 +30,24 @@ PUBLIC_DNS_SERVERS = {
     ipaddress.ip_address("9.9.9.9"),
 }
 
+# Cloud instance-metadata hostnames are never in scope on any engagement.
+# Matching is exact or suffix-based, so every subdomain is covered too.
+HARD_PROHIBITED_DOMAINS = {
+    "metadata.google.internal",
+    "metadata.goog",
+    "instance-data",
+    "instance-data.ec2.internal",
+    "metadata.azure.com",
+}
+
+
+def _domain_matches(domain: str, pattern: str) -> bool:
+    """Exact or subdomain match for a normalized domain pattern."""
+    pattern = pattern.lower().strip().lstrip("*").lstrip(".").rstrip(".")
+    if not pattern:
+        return False
+    return domain == pattern or domain.endswith(f".{pattern}")
+
 LOOPBACK_NET_V4 = ipaddress.ip_network("127.0.0.0/8")
 LOOPBACK_NET_V6 = ipaddress.ip_network("::1/128")
 
@@ -71,6 +89,20 @@ def normalize_ip_candidate(token: str) -> NormalizedTarget:
     Returns canonical string representation and obfuscation detection flag.
     """
     clean = token.strip().strip("[]\"'")
+
+    # `0` is a valid short form of 0.0.0.0 in inet_aton/curl; it must resolve to
+    # the hard-prohibited unspecified address, not be discarded as unparseable.
+    if clean == "0":
+        v4 = ipaddress.IPv4Address(0)
+        return NormalizedTarget(
+            raw_token=token,
+            canonical=str(v4),
+            kind=TargetKind.IP,
+            is_valid=True,
+            is_obfuscated=True,
+            format_type="short_ipv4",
+            ip_obj=v4,
+        )
 
     # Check for CIDR notation first (e.g. 192.168.1.0/24)
     if "/" in clean:
@@ -251,6 +283,10 @@ class ScopeValidator:
                 pass
 
         self.prohibited_networks: List[ipaddress._BaseNetwork] = []
+        # RoE extracts prohibited hostnames into `prohibited_ips` too (the parser
+        # prompt directs excluded hosts there and RoeScope has no separate
+        # prohibited-domains field). Keep them instead of silently dropping them.
+        self.prohibited_domains: set[str] = set()
         for p in roe.prohibited_ips:
             try:
                 p_clean = p.strip()
@@ -260,7 +296,9 @@ class ScopeValidator:
                     # Let ip_network choose the host prefix (/32 for IPv4, /128 for IPv6)
                     self.prohibited_networks.append(ipaddress.ip_network(p_clean))
             except ValueError:
-                pass
+                domain = str(p).strip().lower().lstrip("*").lstrip(".").rstrip(".")
+                if domain:
+                    self.prohibited_domains.add(domain)
 
         # Determine if loopback is intentionally authorized in allowed_cidrs
         self.allows_loopback = any(
@@ -299,10 +337,32 @@ class ScopeValidator:
         # Domain classification
         if target.kind == TargetKind.DOMAIN:
             domain = target.canonical.lower()
+
+            # 1. Hard-prohibited cloud metadata hostnames (never overridable)
+            if any(_domain_matches(domain, hard_domain) for hard_domain in HARD_PROHIBITED_DOMAINS):
+                return TargetFinding(
+                    token=target.raw_token,
+                    normalized=domain,
+                    kind=TargetKind.DOMAIN,
+                    status=TargetStatus.PROHIBITED,
+                    obfuscated=False,
+                )
+
+            # 2. RoE explicit prohibited hostnames/suffixes. These are checked
+            #    before allowed_domains so a name can never be allow-listed and
+            #    prohibited at the same time.
+            if any(_domain_matches(domain, prohibited) for prohibited in self.prohibited_domains):
+                return TargetFinding(
+                    token=target.raw_token,
+                    normalized=domain,
+                    kind=TargetKind.DOMAIN,
+                    status=TargetStatus.PROHIBITED,
+                    obfuscated=False,
+                )
+
             in_scope = False
             for allowed in self.roe.allowed_domains:
-                allowed_clean = allowed.lower().strip()
-                if domain == allowed_clean or domain.endswith(f".{allowed_clean}"):
+                if _domain_matches(domain, allowed):
                     in_scope = True
                     break
 

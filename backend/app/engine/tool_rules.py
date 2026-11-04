@@ -37,6 +37,21 @@ NMAP_TIMING_NAMES = {
 }
 
 
+def flag_token_matches(token: str, banned_token: str) -> bool:
+    """Match a command flag against a banned flag, allowing unambiguous prefixes.
+
+    sqlmap (optparse/argparse) and nmap (getopt_long_only) accept any
+    unambiguous prefix of a long option. Ambiguity favours blocking, so a
+    command token of at least three characters is treated as a hit when the
+    banned long option starts with it (AUDIT_005 Medium).
+    """
+    token = token.lower()
+    banned_token = banned_token.lower()
+    if token == banned_token:
+        return True
+    return len(token) >= 3 and banned_token.startswith(token)
+
+
 def nmap_timing_value(raw: str) -> int:
     """Normalize an nmap timing template (digit or name) to its numeric value."""
     raw_t = raw.lower()
@@ -215,7 +230,7 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
         if not bf_tokens:
             continue
         hit = any(
-            norm_tokens[i : i + len(bf_tokens)] == bf_tokens
+            all(flag_token_matches(tok, banned) for tok, banned in zip(norm_tokens[i : i + len(bf_tokens)], bf_tokens))
             for i in range(len(norm_tokens) - len(bf_tokens) + 1)
         )
         if hit:

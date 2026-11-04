@@ -234,4 +234,100 @@ def test_sandbox_piped_shell_execution_flagged():
     assert any("Pipeline Stage 1/2" in d for d in res.diagnostics)
     assert any("Pipeline Stage 2/2: tool='bash'" in d for d in res.diagnostics)
     assert any("Arbitrary Piped Shell Execution" in d for d in res.diagnostics)
-    assert "BLOCKED IN PRE-FLIGHT" in res.simulated_stdout
+    # AUDIT_005 Medium: the unsafe pipeline must be hard-blocked, not simulated as success.
+    assert res.status == "BLOCKED"
+    assert res.exit_code != 0
+    assert "BLOCKED" in res.simulated_stderr
+
+
+def test_audit005_medium_sandbox_blocks_destructive_out_of_scope_and_prohibited():
+    net_roe = get_roe_preset_by_id("ROE-PRESET-NET-001")
+
+    for command in ("rm -rf /", "nmap 8.8.4.4", "curl http://169.254.169.254/latest/"):
+        res = IsolatedVirtualSandbox.dry_run(command, roe=net_roe)
+        assert res.status == "BLOCKED", command
+        assert res.exit_code != 0, command
+        assert "BLOCKED" in res.simulated_stderr, command
+        assert res.simulated_stdout == "", command
+        assert any("BLOCKED" in d for d in res.diagnostics), command
+
+
+def test_audit005_medium_sandbox_blocks_prohibited_tool():
+    net_roe = get_roe_preset_by_id("ROE-PRESET-NET-001")
+    res = IsolatedVirtualSandbox.dry_run("hping3 -S 192.168.1.50 -p 80", roe=net_roe)
+    assert res.status == "BLOCKED"
+    assert res.exit_code != 0
+    assert any("explicitly prohibited" in d for d in res.diagnostics)
+
+
+def test_audit005_medium_sandbox_in_scope_command_still_succeeds():
+    net_roe = get_roe_preset_by_id("ROE-PRESET-NET-001")
+    res = IsolatedVirtualSandbox.dry_run("nmap -sS -p 80 192.168.1.50", roe=net_roe)
+    assert res.status == "OK"
+    assert res.exit_code == 0
+    assert res.syntax_valid is True
+
+
+def test_audit005_medium_sandbox_unknown_roe_returns_404(monkeypatch):
+    from app.api import routes_sandbox
+
+    monkeypatch.setattr(routes_sandbox, "fetch_custom_roe_by_id", lambda *a, **k: None)
+    response = client.post(
+        "/api/sandbox/dry-run",
+        json={"command": "nmap -sS 192.168.1.50", "roe_id": "ROE-CUSTOM-DOESNOTEXIST"},
+    )
+    assert response.status_code == 404
+    assert "Unknown Rules of Engagement" in response.json()["detail"]
+
+
+def test_audit005_medium_sandbox_resolves_custom_roe(monkeypatch):
+    from app.api import routes_sandbox
+
+    custom_row = {
+        "roe_id": "ROE-CUSTOM-SANDBOX",
+        "name": "Custom Sandbox Scope",
+        "engagement_type": "Custom Assessment",
+        "summary": "",
+        "allowed_cidrs": ["10.99.0.0/24"],
+        "allowed_domains": [],
+        "target_hosts": ["10.99.0.5"],
+        "prohibited_ips": ["169.254.169.254"],
+        "allowed_tools": ["nmap"],
+        "prohibited_tools": [],
+        "prohibited_flags": [],
+        "prohibited_actions": [],
+        "max_nmap_timing": 3,
+    }
+    monkeypatch.setattr(routes_sandbox, "fetch_custom_roe_by_id", lambda *a, **k: custom_row)
+
+    blocked = client.post(
+        "/api/sandbox/dry-run",
+        json={"command": "nmap -sS 192.168.1.50", "roe_id": "ROE-CUSTOM-SANDBOX"},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["status"] == "BLOCKED"
+
+    allowed = client.post(
+        "/api/sandbox/dry-run",
+        json={"command": "nmap -sS 10.99.0.5", "roe_id": "ROE-CUSTOM-SANDBOX"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "OK"
+
+
+def test_audit005_medium_sandbox_blocks_long_option_abbreviations():
+    """Sandbox flag policy must match the deterministic verifier's prefix rule."""
+    web_roe = get_roe_preset_by_id("ROE-PRESET-WEB-002")
+    ext_roe = get_roe_preset_by_id("ROE-PRESET-EXT-005")
+
+    sqlmap = IsolatedVirtualSandbox.dry_run(
+        "sqlmap -u http://10.10.20.15/?id=1 --os-she", roe=web_roe
+    )
+    assert sqlmap.status == "BLOCKED"
+    assert any("prohibited" in d for d in sqlmap.diagnostics)
+
+    nmap = IsolatedVirtualSandbox.dry_run(
+        "nmap --scri vuln 198.51.100.20", roe=ext_roe
+    )
+    assert nmap.status == "BLOCKED"
+    assert any("prohibited" in d for d in nmap.diagnostics)

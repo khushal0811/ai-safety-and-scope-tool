@@ -1,5 +1,7 @@
 """End-to-end integration tests for FastAPI routes and verifier engine."""
 
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 from app.data.presets import ROE_PRESETS
 
@@ -66,9 +68,9 @@ def test_audit_endpoint_unsafe_gateway_sweep(client: TestClient):
     result = response.json()
     assert result["verdict"] == "Unsafe"
     assert any("Prohibited Target Host" in v["rule"] for v in result["violation_details"])
-    # Sanitizer should throttle T4 to T3 and replace 192.168.1.1 with primary host 192.168.1.105
-    assert "192.168.1.105" in result["safe_sanitized_command"]
-    assert "-T3" in result["safe_sanitized_command"]
+    # AUDIT_005 Medium: prohibited targets are never auto-retargeted; the command is dropped.
+    assert result["safe_sanitized_command"] is None
+    assert any("retarget" in m.lower() for m in result["modifications_made"])
 
 
 def test_deterministic_audit_endpoint(client: TestClient):
@@ -197,13 +199,18 @@ def test_delete_audit_history_endpoint(client: TestClient):
     )
     assert unauth_res.status_code == 401
 
-    # Authenticated request succeeds
-    response = client.request(
-        "DELETE",
-        "/api/audit/history",
-        headers={"Authorization": "Bearer " + "00000000-0000-0000-0000-000000000000"},
-        json={"audit_ids": ["aud-12345"]},
-    )
+    # Authenticated request succeeds (the store operation is mocked: this test
+    # must not depend on a deployed Supabase schema)
+    with patch("app.api.routes_audit.delete_audit_logs", return_value=0) as mock_delete:
+        response = client.request(
+            "DELETE",
+            "/api/audit/history",
+            headers={"Authorization": "Bearer " + "00000000-0000-0000-0000-000000000000"},
+            json={"audit_ids": ["aud-12345"]},
+        )
+        mock_delete.assert_called_once_with(
+            audit_ids=["aud-12345"], user_id="00000000-0000-0000-0000-000000000000"
+        )
     assert response.status_code == 200
     data = response.json()
     assert "deleted_count" in data

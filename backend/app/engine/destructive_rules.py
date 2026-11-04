@@ -110,6 +110,97 @@ def _has_dd_to_block_device(tokens: List[str]) -> Optional[str]:
     return None
 
 
+PROTECTED_SYSTEM_PREFIXES = ("/etc/", "/boot/", "/bin/", "/usr/", "/lib")
+ALLOWED_DEV_WRITE_TARGETS = {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"}
+OUTPUT_PATH_FLAGS = {
+    "-o", "-oN", "-oX", "-oG", "-oA", "-oS", "--output", "--output-file", "--logfile",
+}
+WRITE_REDIRECT_PATTERN = re.compile(r"^\d*(&>>|&>|>>|>\||>)(.*)$")
+WASTING_DISK_TOOLS = {"shred", "wipefs", "blkdiscard"}
+PARTITION_WRITE_SUBCOMMANDS = {"mklabel", "mkpart", "rm", "resizepart", "set", "toggle"}
+
+
+def _is_protected_write_path(path: str) -> bool:
+    """True for system files and raw block devices that must never be written."""
+    p = path.strip("'\"")
+    if not p:
+        return False
+    if p.startswith("/dev/"):
+        return p not in ALLOWED_DEV_WRITE_TARGETS
+    return any(p.startswith(prefix) for prefix in PROTECTED_SYSTEM_PREFIXES)
+
+
+def _has_destructive_redirect(tokens: List[str]) -> Optional[str]:
+    """Return a protected path written via shell redirection or an output flag."""
+    for i, tok in enumerate(tokens):
+        match = WRITE_REDIRECT_PATTERN.match(tok)
+        if match:
+            rest = match.group(2)
+            if rest:
+                # fd duplication (2>&1) and close (>&-) are not file writes
+                if rest.startswith("&") or rest == "-":
+                    continue
+                destination = rest
+            elif i + 1 < len(tokens):
+                destination = tokens[i + 1]
+            else:
+                continue
+            if _is_protected_write_path(destination):
+                return destination
+
+        name, sep, value = tok.partition("=")
+        if name in OUTPUT_PATH_FLAGS:
+            if sep:
+                destination = value
+            elif i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                destination = tokens[i + 1]
+            else:
+                continue
+            if _is_protected_write_path(destination):
+                return destination
+    return None
+
+
+def _has_find_delete(tokens: List[str]) -> bool:
+    """True for find -delete or find -exec/-execdir rm."""
+    idx = _command_index(tokens)
+    if idx is None:
+        return False
+    if tokens[idx].lower().rsplit("/", 1)[-1] != "find":
+        return False
+    for i in range(idx + 1, len(tokens)):
+        tok = tokens[i].lower()
+        if tok == "-delete":
+            return True
+        if tok in {"-exec", "-execdir"} and i + 1 < len(tokens):
+            if tokens[i + 1].lower().rsplit("/", 1)[-1] in {"rm", "shred", "wipefs"}:
+                return True
+    return False
+
+
+def _has_disk_wiping_tool(tokens: List[str]) -> Optional[str]:
+    """Return the disk-wiping/partitioning command when invoked destructively."""
+    idx = _command_index(tokens)
+    if idx is None:
+        return None
+    name = tokens[idx].lower().rsplit("/", 1)[-1]
+    args = [t.lower() for t in tokens[idx + 1 :]]
+
+    if name in WASTING_DISK_TOOLS:
+        return name
+    if name == "sgdisk" and ("--zap-all" in args or "-z" in args):
+        return name
+    if name == "fdisk":
+        # Listing partitions is read-only.
+        if "-l" in args or "--list" in args:
+            return None
+        return name
+    if name == "parted":
+        if any(arg in PARTITION_WRITE_SUBCOMMANDS for arg in args):
+            return name
+    return None
+
+
 DESTRUCTIVE_PATTERNS: List[DestructivePattern] = [
     # System and Disk Destruction
     # Note: rm -rf (including separate flags and GNU long options) and dd block-device
@@ -135,6 +226,13 @@ DESTRUCTIVE_PATTERNS: List[DestructivePattern] = [
         category=ViolationCategory.DESTRUCTIVE,
         severity=Severity.CRITICAL,
         remediation_note="Removed dangerous piped shell execution.",
+    ),
+    DestructivePattern(
+        pattern=re.compile(r"/dev/(?:tcp|udp)/", re.IGNORECASE),
+        label="Reverse Shell / Raw Socket Redirection (/dev/tcp)",
+        category=ViolationCategory.DESTRUCTIVE,
+        severity=Severity.CRITICAL,
+        remediation_note="Removed raw socket redirection used for reverse shells or exfiltration.",
     ),
 
     # SQL Destruction
@@ -267,5 +365,52 @@ def check_destructive_commands(
                 )
             )
             seen_rules.add(DD_BLOCK_DEVICE_LABEL)
+
+        redirect_path = _has_destructive_redirect(seg_tokens)
+        redirect_label = "Destructive File Redirection (system path or block device)"
+        if redirect_label not in seen_rules and redirect_path:
+            violations.append(
+                Violation(
+                    rule=redirect_label,
+                    category=ViolationCategory.DESTRUCTIVE,
+                    severity=Severity.CRITICAL,
+                    detail=(
+                        f"Output redirection targets protected path '{redirect_path}'. "
+                        "Writing to system files or raw block devices is prohibited."
+                    ),
+                    command=command_str,
+                )
+            )
+            seen_rules.add(redirect_label)
+
+        find_label = "Destructive File Deletion (find -delete/-exec rm)"
+        if find_label not in seen_rules and _has_find_delete(seg_tokens):
+            violations.append(
+                Violation(
+                    rule=find_label,
+                    category=ViolationCategory.DESTRUCTIVE,
+                    severity=Severity.CRITICAL,
+                    detail="Recursive find-based deletion is prohibited under standard RoE stability guidelines.",
+                    command=command_str,
+                )
+            )
+            seen_rules.add(find_label)
+
+        disk_tool = _has_disk_wiping_tool(seg_tokens)
+        disk_label = "Disk Wiping or Partition Destruction"
+        if disk_label not in seen_rules and disk_tool:
+            violations.append(
+                Violation(
+                    rule=disk_label,
+                    category=ViolationCategory.DESTRUCTIVE,
+                    severity=Severity.CRITICAL,
+                    detail=(
+                        f"Disk wiping/partitioning command '{disk_tool}' detected. "
+                        "Raw device destruction is prohibited."
+                    ),
+                    command=command_str,
+                )
+            )
+            seen_rules.add(disk_label)
 
     return violations

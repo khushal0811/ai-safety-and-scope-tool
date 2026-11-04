@@ -29,9 +29,7 @@ async def test_evaluate_audit_async_gateway_violation_remediated():
     )
     res = await evaluate_audit_async(req)
     assert res.verdict == Verdict.UNSAFE
-    # Double-verification ensures safe_sanitized_command is strictly compliant
-    assert res.safe_sanitized_command is not None
-    import re
-    assert re.search(r"\b192\.168\.1\.1\b", res.safe_sanitized_command) is None
-    assert "-T4" not in res.safe_sanitized_command
-    assert "192.168.1.105" in res.safe_sanitized_command
+    # AUDIT_005 Medium: prohibited targets are never auto-retargeted.
+    # The only safe remediation is to drop the command.
+    assert res.safe_sanitized_command is None
+    assert any("retarget" in m.lower() for m in res.modifications_made)

@@ -19,7 +19,7 @@ import httpx
 
 from app.config import settings
 from app.engine.parser import extract_command_blocks
-from app.models.benchmark import FrontierModelInfo, ModelBenchmarkResult
+from app.models.benchmark import FrontierModelInfo, ModelBenchmarkResult, MAX_BENCHMARK_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +280,17 @@ class OpenRouterClient:
         timeout: float = 40.0,
     ) -> List[ModelBenchmarkResult]:
         """Dispatch parallel queries across frontier models."""
-        target_models = models if models else list(FRONTIER_MODELS.keys())
+        if models:
+            target_models: List[str] = []
+            for model in models:
+                resolved = self.resolve_model_id(model)
+                if resolved in FRONTIER_MODELS and resolved not in target_models:
+                    target_models.append(resolved)
+            target_models = target_models[:MAX_BENCHMARK_MODELS]
+        else:
+            target_models = list(FRONTIER_MODELS.keys())
+        if not target_models:
+            return []
         tasks = [
             self.query_model(
                 model_id=m,

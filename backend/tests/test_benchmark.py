@@ -535,3 +535,156 @@ async def test_benchmark_natural_language_refusal_excluded_from_comparative_scor
 
 
 
+
+
+# AUDIT_005 High 6: bounded benchmark fan-out and no server-key judge calls
+
+from pydantic import ValidationError
+
+
+def _benchmark_roe() -> RoeScope:
+    return RoeScope(
+        roe_id="ROE-PRESET-NET-001",
+        name="Internal Network Recon",
+        engagement_type="Network Penetration Test",
+        allowed_cidrs=["192.168.1.0/24"],
+        target_hosts=["192.168.1.105"],
+    )
+
+
+def test_benchmark_models_rejects_arbitrary_slugs():
+    from app.models.benchmark import BenchmarkEvaluateRequest
+
+    with pytest.raises(ValidationError) as exc:
+        BenchmarkEvaluateRequest(
+            roe=_benchmark_roe(),
+            prompt="Scan the target",
+            models=["some/free-model"],
+        )
+    assert "Unsupported benchmark model" in str(exc.value)
+
+
+def test_benchmark_models_dedupes_aliases():
+    from app.models.benchmark import BenchmarkEvaluateRequest
+
+    request = BenchmarkEvaluateRequest(
+        roe=_benchmark_roe(),
+        prompt="Scan the target",
+        models=["gpt-4o", "openai/gpt-4o", "GPT-4O", "claude-haiku", "anthropic/claude-haiku-5.5"],
+    )
+    assert request.models == ["openai/gpt-4o", "anthropic/claude-haiku-5.5"]
+
+
+def test_benchmark_models_rejects_more_than_max_entries():
+    from app.models.benchmark import BenchmarkEvaluateRequest
+
+    with pytest.raises(ValidationError):
+        BenchmarkEvaluateRequest(
+            roe=_benchmark_roe(),
+            prompt="Scan the target",
+            models=["openai/gpt-4o"] * 9,
+        )
+
+
+@pytest.mark.parametrize("temperature", [-0.1, 2.1, 100.0])
+def test_benchmark_temperature_is_bounded(temperature):
+    from app.models.benchmark import BenchmarkEvaluateRequest
+
+    with pytest.raises(ValidationError):
+        BenchmarkEvaluateRequest(
+            roe=_benchmark_roe(),
+            prompt="Scan the target",
+            temperature=temperature,
+        )
+
+
+@pytest.mark.asyncio
+async def test_benchmark_frontier_models_caps_at_eight_after_filtering():
+    """Defense in depth: even a direct caller cannot fan out beyond 8 known models."""
+    from app.models.benchmark import MAX_BENCHMARK_MODELS
+    from app.engine.openrouter_client import FrontierModelInfo
+
+    fake_catalog = {
+        f"test/model-{index}": FrontierModelInfo(
+            id=f"test/model-{index}",
+            name=f"Test {index}",
+            provider="Test",
+            description="Synthetic test model",
+        )
+        for index in range(12)
+    }
+    client = OpenRouterClient(default_api_key="sk-test")
+    calls = []
+
+    async def fake_query_model(model_id, prompt, **kwargs):
+        calls.append(model_id)
+        return ModelBenchmarkResult(
+            model_id=model_id,
+            model_name=model_id,
+            provider="Test",
+            latency_ms=1.0,
+            status="success",
+            raw_output="nmap -sV 192.168.1.105",
+        )
+
+    with patch.dict(FRONTIER_MODELS, fake_catalog, clear=True), patch.object(
+        client, "query_model", new=fake_query_model
+    ):
+        results = await client.benchmark_frontier_models(
+            prompt="Scan the target",
+            models=["test/model-3", "test/model-3", "unknown/model"] + [f"test/model-{i}" for i in range(12)],
+            api_key="sk-test",
+        )
+
+    assert len(calls) == MAX_BENCHMARK_MODELS
+    assert len(results) == MAX_BENCHMARK_MODELS
+    assert len(set(calls)) == MAX_BENCHMARK_MODELS
+    assert "unknown/model" not in calls
+
+
+@pytest.mark.asyncio
+async def test_benchmark_evaluation_never_invokes_server_key_judge():
+    """Each benchmark output must be audited deterministically only (AUDIT_005 High 6)."""
+    from app.api.routes_benchmark import evaluate_benchmark_models
+    from app.models.audit import AuditResult, Verdict
+    from app.models.benchmark import BenchmarkEvaluateRequest
+
+    request = BenchmarkEvaluateRequest(
+        roe=_benchmark_roe(),
+        prompt="Scan the target",
+        models=["openai/gpt-4o"],
+    )
+    model_result = ModelBenchmarkResult(
+        model_id="openai/gpt-4o",
+        model_name="GPT-4o",
+        provider="OpenAI",
+        latency_ms=12.0,
+        raw_output="```bash\nnmap -sV 192.168.1.105\n```",
+        extracted_commands=["nmap -sV 192.168.1.105"],
+        status="success",
+    )
+    captured = {}
+
+    async def fake_evaluate(audit_request):
+        captured["deterministic_only"] = audit_request.deterministic_only
+        return AuditResult(
+            audit_id="AUDIT-H6-TEST",
+            timestamp="2026-11-04T00:00:00Z",
+            selected_model=audit_request.model_id,
+            user_prompt=audit_request.user_prompt,
+            raw_model_output=audit_request.model_output,
+            verdict=Verdict.CORRECT,
+            explanation="Compliant.",
+            trust_tier="deterministic",
+        )
+
+    with patch(
+        "app.api.routes_benchmark.openrouter_client.benchmark_frontier_models",
+        new=AsyncMock(return_value=[model_result]),
+    ), patch("app.api.routes_benchmark.evaluate_audit_async", new=fake_evaluate):
+        response = await evaluate_benchmark_models(
+            request, x_openrouter_key="sk-test", user_id=None
+        )
+
+    assert captured["deterministic_only"] is True
+    assert response.items[0].audit.trust_tier == "deterministic"

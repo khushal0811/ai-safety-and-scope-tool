@@ -13,7 +13,7 @@ import uuid
 
 from app.engine.cve_validator import validate_cve_references
 from app.engine.destructive_rules import check_destructive_commands
-from app.engine.ip_validator import ScopeValidator, HARD_PROHIBITED_NETWORKS
+from app.engine.ip_validator import ScopeValidator, HARD_PROHIBITED_NETWORKS, normalize_ip_candidate
 from app.engine.llm_client import llm_client
 from app.engine.parser import (
     extract_and_parse_all_commands,
@@ -26,6 +26,7 @@ from app.engine.tool_rules import (
     NMAP_TIMING_PATTERN,
     PACKAGE_MANAGERS,
     check_tool_and_flags,
+    flag_token_matches,
     nmap_timing_value,
 )
 from app.models.audit import (
@@ -83,9 +84,13 @@ def sanitize_single_command(
     current_cmd = parsed.raw
     tool_lower = parsed.tool.lower()
 
-    # 1. Check if command contains inherently fatal destructive payload
+    # 1. Check if command contains inherently fatal destructive payload.
+    #    `check_destructive_commands` emits CRITICAL findings for policy-category
+    #    network-poisoning tools (arpspoof/ettercap/bettercap) as well as for the
+    #    destructive category. A CRITICAL finding from that rule set means there is
+    #    no safe rewrite: the original command must never survive as "remediation".
     for v in destructive_violations:
-        if v.severity == Severity.CRITICAL and v.category == ViolationCategory.DESTRUCTIVE:
+        if v.severity == Severity.CRITICAL:
             modifications.append(f"Dropped unsafe command ({v.rule}). No safe equivalent exists.")
             return None, modifications
 
@@ -165,29 +170,31 @@ def sanitize_single_command(
                 )
                 return None, modifications
 
-            if primary_target and primary_target != finding.token:
-                current_cmd = replace_host_token(current_cmd, finding.token, primary_target)
-                modifications.append(
-                    f"Substituted prohibited target {finding.token} with authorized primary {primary_target}."
-                )
-            else:
-                modifications.append(f"Target {finding.normalized} is prohibited under active RoE.")
-                return None, modifications
+            # Never retarget automatically: substitution preserves the original
+            # command's intent (uploads, credential attacks, exploit paths) and
+            # merely moves it onto a production asset.
+            modifications.append(
+                f"Dropped command targeting prohibited asset {finding.normalized}. "
+                "Automatic retargeting is disabled; manual review is required."
+            )
+            return None, modifications
 
         elif finding.status == TargetStatus.OUT_OF_SCOPE:
-            replacement = roe.allowed_domains[0] if finding.kind.value == "domain" and roe.allowed_domains else primary_target
-            if not replacement:
-                # Fail closed: no authorized asset to redirect to
-                modifications.append(f"No authorized replacement for out-of-scope target {finding.token}.")
+            # Never auto-rewrite a token we could not normalize: its role in the
+            # command is unknown, so substitution could silently change semantics.
+            if not normalize_ip_candidate(finding.token).is_valid:
+                modifications.append(
+                    f"Dropped command with unverifiable target syntax {finding.token!r}."
+                )
                 return None, modifications
-            rewritten = replace_host_token(current_cmd, finding.token, replacement)
-            if rewritten == current_cmd:
-                modifications.append(f"Could not rewrite out-of-scope target {finding.token}.")
-                return None, modifications
-            current_cmd = rewritten
+            # As with prohibited targets, dropping is the only safe remediation.
+            # Retargeting an out-of-scope command preserves its payload/flags and
+            # can turn an internet-facing action into one against client assets.
             modifications.append(
-                f"Redirected out-of-scope target {finding.token} to authorized asset {replacement}."
+                f"Dropped command targeting out-of-scope asset {finding.token}. "
+                "Automatic retargeting is disabled; manual review is required."
             )
+            return None, modifications
 
         elif finding.obfuscated:
             # Canonicalize obfuscated representation
@@ -213,20 +220,34 @@ def sanitize_single_command(
             current_cmd = re.sub(r"\s*--min-rate[=\s]+\d+", "", current_cmd)
             modifications.append("Removed aggressive --min-rate argument.")
 
-    # 6. Strip prohibited flags
+    # 6. Strip prohibited flags (including unambiguous long-option prefixes)
     for banned_flag in roe.prohibited_flags:
         bf = banned_flag.strip()
         if not bf:
             continue
         if bf.startswith("-") and not (" " in bf):
-            flag_pattern = re.compile(rf"\s*{re.escape(bf)}(?:=\S+)?(?=\s|$)", re.IGNORECASE)
+            if bf.startswith("--") and len(bf) > 2:
+                # Every valid prefix of a long option, e.g. --os-s, --os-sh,
+                # --os-she, ... for the banned --os-shell.
+                prefixes = {bf[:i] for i in range(3, len(bf) + 1)}
+                alternatives = "|".join(
+                    re.escape(prefix) for prefix in sorted(prefixes, key=len, reverse=True)
+                )
+            else:
+                alternatives = re.escape(bf)
+            flag_pattern = re.compile(rf"\s*(?:{alternatives})(?:=\S+)?(?=\s|$)", re.IGNORECASE)
             if flag_pattern.search(current_cmd):
                 current_cmd = flag_pattern.sub("", current_cmd)
         else:
-            phrase_tokens = bf.lower().split()
-            cmd_tokens_lower = [t.lower() for t in current_cmd.split()]
+            phrase_tokens = bf.lower().replace("=", " ").split()
+            cmd_tokens_lower = current_cmd.lower().replace("=", " ").split()
             hit = any(
-                cmd_tokens_lower[i : i + len(phrase_tokens)] == phrase_tokens
+                all(
+                    flag_token_matches(tok, banned)
+                    for tok, banned in zip(
+                        cmd_tokens_lower[i : i + len(phrase_tokens)], phrase_tokens
+                    )
+                )
                 for i in range(len(cmd_tokens_lower) - len(phrase_tokens) + 1)
             )
             if hit:
@@ -350,15 +371,33 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
                     )
                 )
             elif finding.status == TargetStatus.OUT_OF_SCOPE:
-                all_violations.append(
-                    Violation(
-                        rule="Out-of-Scope Target",
-                        category=ViolationCategory.SCOPE,
-                        severity=Severity.CRITICAL,
-                        detail=f"{finding.normalized} falls outside all authorized subnets and domains.",
-                        command=parsed.raw,
+                # An unparseable operand is not proof of innocence: fail closed
+                # with a distinct rule so it cannot masquerade as a benign
+                # out-of-scope address (AUDIT_005 C1).
+                if not target.is_valid:
+                    all_violations.append(
+                        Violation(
+                            rule="Unverifiable Target Syntax",
+                            category=ViolationCategory.SCOPE,
+                            severity=Severity.CRITICAL,
+                            detail=(
+                                f'Target token "{finding.token}" could not be normalized '
+                                "as an IP address, CIDR block, or domain. Unrecognised "
+                                "target syntax is treated as out of scope rather than ignored."
+                            ),
+                            command=parsed.raw,
+                        )
                     )
-                )
+                else:
+                    all_violations.append(
+                        Violation(
+                            rule="Out-of-Scope Target",
+                            category=ViolationCategory.SCOPE,
+                            severity=Severity.CRITICAL,
+                            detail=f"{finding.normalized} falls outside all authorized subnets and domains.",
+                            command=parsed.raw,
+                        )
+                    )
 
         # B. Destructive payload checks (using AST tokens + pipeline stages)
         cmd_destructive = check_destructive_commands(

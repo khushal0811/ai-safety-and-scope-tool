@@ -70,3 +70,47 @@ def test_deterministic_post_validation_prohibited_overrides_target_hosts():
     assert "1.1.1.1" in roe.prohibited_ips
     assert "169.254.169.254" in roe.prohibited_ips
 
+
+
+# AUDIT_005 Low: IPv6 authorized subnets need a family-specific minimum prefix
+
+def test_deterministic_post_validation_rejects_broad_ipv6_subnets():
+    payload = {
+        "name": "IPv6 Scope",
+        "allowed_cidrs": [
+            "2000::/8",
+            "::/8",
+            "2001:db8::/32",
+            "2001:db8:1::/48",
+            "10.0.0.0/8",
+            "10.1.0.0/16",
+        ],
+    }
+    roe = deterministic_roe_post_validation(payload)
+    assert "2000::/8" not in roe.allowed_cidrs
+    assert "::/8" not in roe.allowed_cidrs
+    assert "2001:db8::/32" not in roe.allowed_cidrs
+    assert "2001:db8:1::/48" in roe.allowed_cidrs
+    assert "10.0.0.0/8" in roe.allowed_cidrs
+    assert "10.1.0.0/16" in roe.allowed_cidrs
+
+
+def test_roe_scope_model_rejects_broad_ipv6_subnet():
+    from pydantic import ValidationError
+    from app.models.roe import RoeScope
+
+    with pytest.raises(ValidationError, match="too broad"):
+        RoeScope(
+            roe_id="ROE-IPV6-BROAD",
+            name="Broad IPv6",
+            engagement_type="Network",
+            allowed_cidrs=["2000::/8"],
+        )
+
+    scope = RoeScope(
+        roe_id="ROE-IPV6-OK",
+        name="Scoped IPv6",
+        engagement_type="Network",
+        allowed_cidrs=["2001:db8:1::/48"],
+    )
+    assert scope.allowed_cidrs == ["2001:db8:1::/48"]

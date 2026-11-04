@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import get_authenticated_user_id
 from app.data.presets import get_roe_preset_by_id, ROE_PRESETS
+from app.db import fetch_custom_roe_by_id
+from app.engine.roe_integrity import roe_scope_from_row
 from app.engine.sandbox import IsolatedVirtualSandbox
 from app.models.sandbox import (
     SandboxDryRunRequest,
@@ -21,15 +23,29 @@ async def dry_run_command(
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> SandboxDryRunResponse:
     """Execute pre-flight syntax and flag validation in a network-egress disabled micro-sandbox."""
-    # Resolve active RoE if provided
-    roe = None
-    if request.roe_id:
-        roe = get_roe_preset_by_id(request.roe_id)
-        if not roe:
-            for p in ROE_PRESETS:
-                if p.roe_id.lower() == request.roe_id.lower():
-                    roe = p
-                    break
+    # Resolve the active RoE exactly. A custom RoE is looked up by id; an
+    # unknown or missing scope is a 404 rather than an unpoliced dry-run.
+    if not request.roe_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="A Rules of Engagement scope is required for a sandbox dry-run.",
+        )
+
+    roe = get_roe_preset_by_id(request.roe_id)
+    if not roe:
+        for p in ROE_PRESETS:
+            if p.roe_id.lower() == request.roe_id.lower():
+                roe = p
+                break
+
+    if not roe:
+        custom_row = fetch_custom_roe_by_id(request.roe_id, user_id=user_id)
+        if not custom_row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Unknown Rules of Engagement id: {request.roe_id!r}",
+            )
+        roe = roe_scope_from_row(custom_row)
 
     result = IsolatedVirtualSandbox.dry_run(
         command_str=request.command,

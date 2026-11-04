@@ -25,7 +25,8 @@ class RoeScope(BaseModel):
                 continue  # Malformed entries are ignored by the scope engine, not treated as wildcards
             if net.prefixlen == 0:
                 raise ValueError("wildcard scope is not allowed")
-            if net.version == 4 and net.prefixlen < 8:
+            min_prefix = 8 if net.version == 4 else 48
+            if net.prefixlen < min_prefix:
                 raise ValueError(f"scope {value} is too broad")
         return values
 

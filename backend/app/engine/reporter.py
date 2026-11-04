@@ -22,6 +22,12 @@ from xml.sax.saxutils import escape as _xml_escape
 
 from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
 from app.db import fetch_audit_logs_for_roe, fetch_custom_roe_by_id
+from app.engine.attestation import (
+    attestation_key,
+    genesis_hash,
+    verify_record_signature,
+)
+from app.engine.roe_integrity import compute_roe_hash, roe_scope_from_row
 from app.models.roe import RoeScope
 
 logger = logging.getLogger(__name__)
@@ -51,28 +57,73 @@ def _code(value: object) -> str:
     return s.replace("|", "\\|").replace("`", "'").replace("\n", " ")
 
 
-_EPHEMERAL_ATTESTATION_KEY: Optional[bytes] = None
-
-
 def _attestation_key() -> bytes:
-    """Server-side secret used to key the attestation chain (HMAC-SHA256).
+    """Backward-compatible alias for the server-side attestation key."""
+    return attestation_key()
 
-    Without a secret, anyone with write access to audit_logs could recompute every hash.
+
+def verify_attested_records(
+    roe_id: str,
+    records: List[Dict[str, Any]],
+    user_id: Optional[str],
+    verify_continuity: bool = True,
+) -> Optional[RoeScope]:
+    """Validate write-time signatures and RoE binding for every record.
+
+    Returns the RoE snapshot actually used, or None for an empty record set.
+    Raises ValueError rather than attesting records that cannot be verified.
     """
-    global _EPHEMERAL_ATTESTATION_KEY
-    from app.config import settings
+    if not records:
+        return None
 
-    if settings.ATTESTATION_HMAC_KEY:
-        return settings.ATTESTATION_HMAC_KEY.encode("utf-8")
-    if _EPHEMERAL_ATTESTATION_KEY is None:
-        import secrets
+    expected_hashes = set()
+    snapshot_roe: Optional[RoeScope] = None
 
-        logger.warning(
-            "[Reporter] ATTESTATION_HMAC_KEY is not configured; using a per-process random key. "
-            "Attestations cannot be verified after a restart."
-        )
-        _EPHEMERAL_ATTESTATION_KEY = secrets.token_bytes(32)
-    return _EPHEMERAL_ATTESTATION_KEY
+    for index, rec in enumerate(records):
+        stored_hash = rec.get("roe_hash")
+        snapshot = rec.get("roe_snapshot")
+        if not stored_hash or not snapshot:
+            raise ValueError(
+                "Audit history contains records that predate scope binding and cannot be attested. "
+                "Generate new audits under the current engine before exporting an attestation."
+            )
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except ValueError as exc:
+                raise ValueError("Audit record has an unreadable RoE snapshot.") from exc
+        if not isinstance(snapshot, dict):
+            raise ValueError("Audit record has an invalid RoE snapshot.")
+
+        recomputed_roe_hash = compute_roe_hash(snapshot)
+        if not hmac.compare_digest(str(stored_hash), recomputed_roe_hash):
+            raise ValueError("Audit record RoE snapshot does not match its stored scope hash.")
+
+        if str(snapshot.get("roe_id") or "").lower() != str(roe_id).lower():
+            raise ValueError("Audit record belongs to a different RoE id than the requested report.")
+
+        expected_hashes.add(recomputed_roe_hash)
+        if snapshot_roe is None:
+            snapshot_roe = roe_scope_from_row(snapshot)
+
+        if not verify_record_signature(rec):
+            raise ValueError(
+                "Audit record signature is invalid; the attestation ledger has been altered."
+            )
+
+        if verify_continuity:
+            if int(rec.get("chain_index") or 0) != index + 1:
+                raise ValueError("Audit chain is incomplete; refusing to issue an attestation.")
+            if index == 0:
+                expected_prev = genesis_hash(roe_id)
+            else:
+                expected_prev = str(records[index - 1].get("chain_hash") or "")
+            if str(rec.get("prev_hash") or "") != expected_prev:
+                raise ValueError("Audit chain link is broken; refusing to issue an attestation.")
+
+    if len(expected_hashes) != 1:
+        raise ValueError("Audit records were evaluated against different RoE boundaries.")
+    return snapshot_roe
 
 
 def compute_hash_chain(
@@ -96,8 +147,12 @@ def compute_hash_chain(
         verdict = rec.get("verdict") or "Unsafe"
         sanitized = rec.get("safe_sanitized_command") or ""
         viols = json.dumps(rec.get("violation_details") or [], sort_keys=True)
+        roe_hash = rec.get("roe_hash") or ""
+        deleted_at = rec.get("deleted_at") or ""
 
-        block_payload = f"{prev_hash}|{audit_id}|{ts}|{cmd_str}|{verdict}|{sanitized}|{viols}"
+        block_payload = (
+            f"{prev_hash}|{audit_id}|{ts}|{cmd_str}|{verdict}|{sanitized}|{viols}|{roe_hash}|{deleted_at}"
+        )
         curr_hash = hmac.new(key, block_payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
         rec_copy = dict(rec)
@@ -130,6 +185,7 @@ def generate_compliance_report_markdown(
     compliant_ops = sum(1 for r in chained_records if r.get("verdict") == "Correct")
     unsafe_ops = sum(1 for r in chained_records if r.get("verdict") == "Unsafe")
     review_ops = sum(1 for r in chained_records if r.get("verdict") == "Incorrect")
+    deleted_ops = sum(1 for r in chained_records if r.get("deleted_at"))
     compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else None
     interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else None
     compliance_display = f"{compliance_rate}%" if total_ops > 0 else "N/A (no records)"
@@ -199,6 +255,10 @@ def generate_compliance_report_markdown(
     lines.append(f"| **Breaches Intercepted (Unsafe)** | **{unsafe_ops}** | Out-of-scope or destructive payloads halted |")
     lines.append(f"| **Warnings Reviewed (Incorrect)** | **{review_ops}** | Non-critical policy observations |")
     lines.append(
+        f"| **Soft-Deleted Records (retained in chain)** | **{deleted_ops}** | "
+        f"Tombstones kept for attestation; deletion never removes a record from the hash chain |"
+    )
+    lines.append(
         f"| **Unsafe Commands Intercepted Pre-Execution** | **{interception_display}** | "
         f"Of commands submitted to Vallum for review, this fraction were flagged Unsafe and blocked "
         f"before being returned to the operator. |"
@@ -211,7 +271,8 @@ def generate_compliance_report_markdown(
     lines.append("")
     lines.append(
         "Each audit entry is linked via an immutable SHA-256 hash chain to verify non-repudiation, chronological "
-        "order, and post-audit integrity. Any post-hoc alteration or omission invalidates the final attestation root."
+        "order, and post-audit integrity. Each record was signed server-side when it was written; the export "
+        "re-verifies every stored signature. Any post-hoc alteration or omission invalidates the final attestation root."
     )
     lines.append("")
 
@@ -235,6 +296,11 @@ def generate_compliance_report_markdown(
             lines.append(f"### Entry #{idx}: `{_code(a_id)}` — {badge}")
             lines.append(f"- **Timestamp:** `{_code(ts)}`")
             lines.append(f"- **Model/Source:** `{_code(model)}`")
+            if rec.get("deleted_at"):
+                lines.append(
+                    f"- **Deletion Status:** `SOFT-DELETED at {_code(rec.get('deleted_at'))}` "
+                    "(tombstone retained in the attestation chain)"
+                )
             lines.append(f"- **Proposed Command:** `{_code(cmd)}`")
             lines.append(f"- **Cumulative Hash Digest:** `{_code(ch_hash)}`")
 
@@ -403,6 +469,7 @@ def generate_compliance_report_pdf(
     compliant_ops = sum(1 for r in chained_records if r.get("verdict") == "Correct")
     unsafe_ops = sum(1 for r in chained_records if r.get("verdict") == "Unsafe")
     review_ops = sum(1 for r in chained_records if r.get("verdict") == "Incorrect")
+    deleted_ops = sum(1 for r in chained_records if r.get("deleted_at"))
     compliance_rate = round((compliant_ops / total_ops) * 100, 1) if total_ops > 0 else None
     interception_rate = round((unsafe_ops / total_ops) * 100, 1) if total_ops > 0 else None
     compliance_display = f"{compliance_rate}%" if total_ops > 0 else "N/A (no records)"
@@ -586,21 +653,7 @@ def generate_compliance_report(
     if not roe:
         custom_row = fetch_custom_roe_by_id(roe_id, user_id=user_id)
         if custom_row:
-            roe = RoeScope(
-                roe_id=custom_row.get("roe_id"),
-                name=custom_row.get("name", "Custom Scope"),
-                engagement_type=custom_row.get("engagement_type", "Custom Assessment"),
-                summary=custom_row.get("summary", ""),
-                allowed_cidrs=custom_row.get("allowed_cidrs") or [],
-                allowed_domains=custom_row.get("allowed_domains") or [],
-                target_hosts=custom_row.get("target_hosts") or [],
-                prohibited_ips=custom_row.get("prohibited_ips") or [],
-                allowed_tools=custom_row.get("allowed_tools") or [],
-                prohibited_tools=custom_row.get("prohibited_tools") or [],
-                prohibited_flags=custom_row.get("prohibited_flags") or [],
-                prohibited_actions=custom_row.get("prohibited_actions") or [],
-                max_nmap_timing=custom_row.get("max_nmap_timing", 3),
-            )
+            roe = roe_scope_from_row(custom_row)
 
     if not roe:
         raise ValueError(
@@ -608,8 +661,27 @@ def generate_compliance_report(
             "Cannot generate a compliance report for an unknown scope."
         )
 
-    # 2. Fetch Audit Logs for this RoE (now guaranteed to use the REQUESTED roe_id, not a substitute)
+    # 2. Fetch every audit for this RoE, including soft-deleted tombstones.
     records = fetch_audit_logs_for_roe(roe_id=roe.roe_id, user_id=user_id, limit=500, audit_id=audit_id)
+
+    if audit_id is None and len(records) >= 500:
+        raise ValueError(
+            "Audit chain exceeds the report limit; refusing to issue a truncated attestation."
+        )
+
+    # 3. Verify write-time signatures, RoE binding and chain continuity before
+    #    rendering anything. A scope mismatch or broken link is a hard failure,
+    #    never a silently narrower report (AUDIT_005 High 5).
+    snapshot_roe = verify_attested_records(
+        roe.roe_id,
+        records,
+        user_id=user_id,
+        verify_continuity=audit_id is None,
+    )
+    if snapshot_roe is not None:
+        # Display the boundaries the audits were actually evaluated under, not
+        # whatever the preset or custom row says today.
+        roe = snapshot_roe
 
     fmt = format.lower().strip()
     clean_id = roe.roe_id.lower().replace("-", "_")
@@ -623,8 +695,11 @@ def generate_compliance_report(
         data = {
             "report_id": f"ATTEST-{hashlib.sha256(root_hash.encode()).hexdigest()[:12].upper()}",
             "roe": roe.model_dump(),
+            "roe_hash": compute_roe_hash(roe),
             "records": chained_records,
             "root_hash": root_hash,
+            "chain_head": records[-1].get("chain_hash") if records else None,
+            "chain_signatures_verified": True,
             "total_operations": len(chained_records),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }

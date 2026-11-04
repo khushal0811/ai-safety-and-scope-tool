@@ -98,7 +98,10 @@ def deterministic_roe_post_validation(parsed_data: dict, fallback_name: str = "U
             continue  # Rejection of wildcard scope
         try:
             net = ipaddress.ip_network(c_clean, strict=False)
-            if net.prefixlen >= 8:  # Block massive internet-wide ranges
+            # Block massive internet-wide ranges. IPv6 needs a much longer
+            # prefix: /8 is 2^120 addresses (AUDIT_005 Low).
+            min_prefix = 8 if net.version == 4 else 48
+            if net.prefixlen >= min_prefix:
                 valid_cidrs.append(str(net))
         except ValueError:
             pass

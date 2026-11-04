@@ -15,11 +15,13 @@ import logging
 import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit
 
 import bashlex
 import bashlex.errors
 
 from app.engine.destructive_rules import check_destructive_commands
+from app.engine.ip_validator import ScopeValidator, normalize_ip_candidate
 from app.engine.parser import (
     CommandInvocation,
     KNOWN_SECURITY_TOOLS,
@@ -27,6 +29,8 @@ from app.engine.parser import (
     DEFAULT_TOOL_FLAG_SPEC,
     parse_cli_command,
 )
+from app.engine.tool_rules import flag_token_matches
+from app.models.audit import Severity, TargetStatus
 from app.models.roe import RoeScope
 from app.models.sandbox import (
     SandboxDryRunRequest,
@@ -149,6 +153,7 @@ class IsolatedVirtualSandbox:
             else list(invocation.tokens)
         )
         args = stage0_tokens[1:] if len(stage0_tokens) > 1 else []
+        policy_blocks: List[str] = []
 
         # Surface per-stage diagnostics when a pipeline or subshell stage is present
         if pipeline_stages:
@@ -167,6 +172,7 @@ class IsolatedVirtualSandbox:
                         f"CRITICAL Policy Diagnostic [Stage {idx}]: Arbitrary Piped Shell Execution "
                         f"('| {st_tool}') detected — this stage will be blocked by the Vallum enforcement engine."
                     )
+                    policy_blocks.append(f"Piped shell execution stage: {st_tool}")
 
         # Destructive payload pre-check across command and stages
         destructive_viols = check_destructive_commands(raw_cmd, tokens=[tool_binary] + args)
@@ -178,6 +184,8 @@ class IsolatedVirtualSandbox:
             diagnostics.append(
                 f"CRITICAL Destructive Policy Diagnostic: {dv.rule} — {dv.detail}"
             )
+            if dv.severity == Severity.CRITICAL:
+                policy_blocks.append(f"Destructive payload: {dv.rule}")
 
         # 3. Tool-Specific Flag Grammar Validation ( across primary stage and pipeline stages )
         syntax_valid, flag_errors, validated_flags, targets = cls._validate_tool_flags(tool_binary, args)
@@ -191,7 +199,16 @@ class IsolatedVirtualSandbox:
                     syntax_valid = False
                     diagnostics.extend(f"[Stage {idx} ({st_tool})] {e}" for e in st_errs)
                 if roe:
-                    cls._append_scope_diagnostics(st_tool, st_flags, st_targets, roe, diagnostics)
+                    policy_blocks.extend(
+                        cls._append_scope_diagnostics(
+                            st_tool,
+                            st_flags,
+                            st_targets,
+                            roe,
+                            diagnostics,
+                            normalized_targets=list(st.targets),
+                        )
+                    )
 
         if not syntax_valid and strict_syntax:
             elapsed = int((time.perf_counter() - t0) * 1000)
@@ -209,7 +226,40 @@ class IsolatedVirtualSandbox:
 
         # 4. Scope Cross-Check Diagnostic
         if roe:
-            cls._append_scope_diagnostics(tool_binary, validated_flags, targets, roe, diagnostics)
+            policy_blocks.extend(
+                cls._append_scope_diagnostics(
+                    tool_binary,
+                    validated_flags,
+                    targets,
+                    roe,
+                    diagnostics,
+                    normalized_targets=list(invocation.targets),
+                )
+            )
+
+        # 4b. Policy violations are a hard block. The command may be syntactically
+        #     valid, but a dry-run must never report success for a destructive,
+        #     prohibited, or out-of-scope command (AUDIT_005 Medium).
+        if policy_blocks:
+            diagnostics.append(
+                "BLOCKED: dry-run policy validation failed; this command is not safe to execute."
+            )
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            return SandboxDryRunResponse(
+                command=command_str,
+                tool=tool_binary,
+                syntax_valid=syntax_valid,
+                exit_code=126,
+                status="BLOCKED",
+                diagnostics=diagnostics,
+                simulated_stdout="",
+                simulated_stderr=(
+                    "vallum-sandbox: BLOCKED: "
+                    + "; ".join(dict.fromkeys(policy_blocks))
+                    + "\n"
+                ),
+                elapsed_ms=elapsed,
+            )
 
         # 5. Synthesize Execution Output (stdout/stderr)
         stdout_sim, stderr_sim, exit_code = cls._simulate_tool_execution(tool_binary, args, validated_flags, targets)
@@ -357,6 +407,35 @@ class IsolatedVirtualSandbox:
         syntax_ok = len(errors) == 0
         return syntax_ok, errors, validated_flags, targets
 
+    @staticmethod
+    def _coerce_scope_target(token: str):
+        """Best-effort conversion of a sandbox operand into a normalizable target."""
+        text = str(token).strip().strip("'\"")
+        if not text:
+            return None
+
+        if "://" in text or text.startswith("//"):
+            try:
+                host = urlsplit(text if "://" in text else f"http:{text}").hostname
+            except ValueError:
+                return None
+            if not host:
+                return None
+            text = host
+        elif "@" in text:
+            # userinfo-confused authority: inspect the actual host
+            text = text.rsplit("@", 1)[1]
+
+        if text.startswith("["):
+            text = text[1:].split("]", 1)[0]
+        elif text.count(":") == 1:
+            host, port = text.rsplit(":", 1)
+            if port.isdigit():
+                text = host
+
+        normalized = normalize_ip_candidate(text)
+        return normalized if normalized.is_valid else None
+
     @classmethod
     def _append_scope_diagnostics(
         cls,
@@ -365,20 +444,37 @@ class IsolatedVirtualSandbox:
         targets: List[str],
         roe: RoeScope,
         diagnostics: List[str],
-    ) -> None:
-        """Add engagement boundary cross-reference diagnostics."""
-        # Check tool allowance
+        normalized_targets: Optional[List[Any]] = None,
+    ) -> List[str]:
+        """Cross-reference a dry-run against the RoE and return hard block reasons."""
+        blocks: List[str] = []
+
+        # Check tool allowance. A tool outside the whitelist is treated as
+        # blocked, matching the verifier's sanitizer behaviour.
         if roe.prohibited_tools and tool in roe.prohibited_tools:
-            diagnostics.append(f"RoE Policy Warning: Tool '{tool}' is explicitly prohibited by active engagement rules.")
+            message = f"BLOCKED Policy: Tool '{tool}' is explicitly prohibited by active engagement rules."
+            diagnostics.append(message)
+            blocks.append(message)
         elif roe.allowed_tools and tool not in roe.allowed_tools:
-            diagnostics.append(f"RoE Policy Notice: Tool '{tool}' is not in authorized tools whitelist.")
+            message = f"BLOCKED Policy: Tool '{tool}' is not in the authorized tools whitelist."
+            diagnostics.append(message)
+            blocks.append(message)
 
-        # Check prohibited flags
-        for f in flags:
-            if roe.prohibited_flags and f in roe.prohibited_flags:
-                diagnostics.append(f"RoE Policy Warning: Flag '{f}' is prohibited by active engagement rules.")
+        # Check prohibited flags, including unambiguous long-option prefixes
+        # (sqlmap/optparse and nmap/getopt_long_only accept these).
+        for banned_flag in roe.prohibited_flags or []:
+            bf_tokens = banned_flag.strip().lower().replace("=", " ").split()
+            if not bf_tokens:
+                continue
+            banned_head = bf_tokens[0]
+            for f in flags:
+                if f.lower() == banned_flag.strip().lower() or flag_token_matches(f, banned_head):
+                    message = f"BLOCKED Policy: Flag '{f}' is prohibited by active engagement rules."
+                    diagnostics.append(message)
+                    blocks.append(message)
+                    break
 
-        # Check nmap timing template
+        # Check nmap timing template (advisory only; not a hard block)
         if "-T" in flags and roe.max_nmap_timing:
             try:
                 timing_val = int(flags["-T"])
@@ -388,6 +484,32 @@ class IsolatedVirtualSandbox:
                     )
             except ValueError:
                 pass
+
+        # Classify every target against the scope. Prohibited or out-of-scope
+        # targets make the dry-run a hard failure, never a successful simulation.
+        validator = ScopeValidator(roe)
+        candidates = list(normalized_targets or [])
+        for raw_target in targets:
+            coerced = cls._coerce_scope_target(raw_target)
+            if coerced is not None:
+                candidates.append(coerced)
+
+        seen: Set[Tuple[str, str]] = set()
+        for candidate in candidates:
+            key = (candidate.kind.value, candidate.canonical)
+            if key in seen:
+                continue
+            seen.add(key)
+            finding = validator.classify_target(candidate)
+            if finding.status in (TargetStatus.PROHIBITED, TargetStatus.OUT_OF_SCOPE):
+                message = (
+                    f"BLOCKED Scope: target '{finding.normalized}' is "
+                    f"{finding.status.value} under the active RoE."
+                )
+                diagnostics.append(message)
+                blocks.append(message)
+
+        return blocks
 
     @classmethod
     def _simulate_tool_execution(

@@ -19,19 +19,21 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.data.presets import get_roe_preset_by_id
+from app.engine.attestation import compute_record_signature, genesis_hash
 from app.engine.reporter import (
     compute_hash_chain,
     generate_compliance_report,
     generate_compliance_report_markdown,
     generate_compliance_report_pdf,
 )
+from app.engine.roe_integrity import canonical_roe_dict, compute_roe_hash, roe_scope_from_row
 from app.main import app
 
 client = TestClient(app)
 
 
 # Sample audit log fixtures
-SAMPLE_RECORDS = [
+_RAW_SAMPLE_RECORDS = [
     {
         "audit_id": "AUDIT-001",
         "created_at": "2026-10-27T10:00:00Z",
@@ -63,6 +65,29 @@ SAMPLE_RECORDS = [
         "violation_details": [],
     },
 ]
+
+
+def build_attested_records(records, roe):
+    """Attach the write-time signature/chain metadata the reporter now verifies."""
+    prev_hash = genesis_hash(roe.roe_id)
+    snapshot = canonical_roe_dict(roe)
+    roe_hash = compute_roe_hash(roe)
+    attested = []
+    for idx, rec in enumerate(records, start=1):
+        rec = dict(rec)
+        rec["roe_hash"] = roe_hash
+        rec["roe_snapshot"] = snapshot
+        rec["chain_index"] = idx
+        rec["prev_hash"] = prev_hash
+        rec["chain_hash"] = compute_record_signature(rec)
+        prev_hash = rec["chain_hash"]
+        attested.append(rec)
+    return attested
+
+
+SAMPLE_RECORDS = build_attested_records(
+    _RAW_SAMPLE_RECORDS, get_roe_preset_by_id("ROE-PRESET-NET-001")
+)
 
 
 # ==============================================================================
@@ -313,7 +338,10 @@ def test_generate_compliance_report_custom_roe():
     }
     with (
         patch("app.engine.reporter.fetch_custom_roe_by_id", return_value=custom_roe_row),
-        patch("app.engine.reporter.fetch_audit_logs_for_roe", return_value=SAMPLE_RECORDS) as mock_logs,
+        patch(
+            "app.engine.reporter.fetch_audit_logs_for_roe",
+            return_value=build_attested_records(_RAW_SAMPLE_RECORDS, roe_scope_from_row(custom_roe_row)),
+        ) as mock_logs,
     ):
         md_content, media_type, filename = generate_compliance_report(
             roe_id="ROE-CUSTOM-APEX-001",

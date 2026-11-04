@@ -4,7 +4,7 @@ import argparse
 import io
 import json
 import sys
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
@@ -46,7 +46,8 @@ def test_cli_evaluate_command_out_of_scope():
     assert result["verdict"] == "Unsafe"
     assert any(v["category"] == "scope" for v in result["violation_details"])
     assert result["targets"][0]["status"] == "out_of_scope"
-    assert result["safe_sanitized_command"] is not None
+    # AUDIT_005 Medium: out-of-scope commands are dropped, never retargeted.
+    assert result["safe_sanitized_command"] is None
 
 
 def test_cli_cmd_check_exit_codes(capsys):
@@ -198,3 +199,122 @@ def test_api_deterministic_endpoint_with_roe_id():
     assert data["verdict"] == "Correct"
     assert len(data["targets"]) == 1
     assert data["targets"][0]["status"] == "in_scope"
+
+
+# AUDIT_005 Medium: custom RoE files must be enforced exactly by the CLI
+
+def _write_custom_roe_file(tmp_path):
+    import json as _json
+
+    roe_file = tmp_path / "engagement.json"
+    roe_file.write_text(
+        _json.dumps(
+            {
+                "roe_id": "ROE-CUSTOM-CLI-FILE",
+                "name": "CLI File Scope",
+                "engagement_type": "Custom Assessment",
+                "allowed_cidrs": ["10.77.0.0/24"],
+                "target_hosts": ["10.77.0.5"],
+                "allowed_tools": ["nmap"],
+                "prohibited_tools": [],
+                "prohibited_flags": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return roe_file
+
+
+def test_cli_custom_roe_file_is_enforced(tmp_path):
+    roe_file = _write_custom_roe_file(tmp_path)
+
+    allowed, _ = evaluate_command_audit(
+        command="nmap -sS 10.77.0.5",
+        roe_spec=str(roe_file),
+        force_offline=True,
+    )
+    assert allowed["verdict"] == "Correct"
+
+    blocked, _ = evaluate_command_audit(
+        command="nmap -sS 192.168.1.105",
+        roe_spec=str(roe_file),
+        force_offline=True,
+    )
+    assert blocked["verdict"] == "Unsafe"
+
+
+def test_cli_sends_parsed_scope_not_file_path_to_daemon(tmp_path):
+    roe_file = _write_custom_roe_file(tmp_path)
+    captured = {}
+
+    def fake_daemon(command, roe_id=None, custom_roe=None, daemon_url=None, timeout=3.0):
+        captured["roe_id"] = roe_id
+        captured["custom_roe"] = custom_roe
+        return None
+
+    with patch("app.cli.shim.query_daemon_audit", side_effect=fake_daemon):
+        evaluate_command_audit(
+            command="nmap -sS 10.77.0.5",
+            roe_spec=str(roe_file),
+            force_offline=False,
+        )
+
+    assert captured["roe_id"] is None
+    assert captured["custom_roe"]["roe_id"] == "ROE-CUSTOM-CLI-FILE"
+    assert captured["custom_roe"]["allowed_cidrs"] == ["10.77.0.0/24"]
+
+
+def test_cli_roe_set_persists_active_file(tmp_path, monkeypatch):
+    from app.cli import shim
+
+    roe_file = _write_custom_roe_file(tmp_path)
+    monkeypatch.setattr(shim, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(shim, "CONFIG_FILE", tmp_path / "config.json")
+
+    rc = cmd_roe(argparse.Namespace(action="set", target=str(roe_file)))
+    assert rc == 0
+
+    config = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    assert config["active_roe_id"] == "ROE-CUSTOM-CLI-FILE"
+    assert config["active_roe_file"] == str(roe_file.resolve())
+
+    # Subsequent checks reload the file rather than falling back to NET-001.
+    result, _ = evaluate_command_audit(
+        command="nmap -sS 10.77.0.5",
+        force_offline=True,
+    )
+    assert result["verdict"] == "Correct"
+
+
+def test_cli_unresolved_scope_exits_non_zero(tmp_path):
+    with pytest.raises(SystemExit):
+        evaluate_command_audit(
+            command="nmap -sS 10.77.0.5",
+            roe_spec=str(tmp_path / "does-not-exist.json"),
+            force_offline=True,
+        )
+
+
+def test_cli_markdown_roe_file_parses_without_bogus_import(tmp_path):
+    from app.cli import shim
+    from app.models.roe import RoeScope
+
+    markdown_file = tmp_path / "engagement.md"
+    markdown_file.write_text("# Engagement\nScope: 10.88.0.0/24", encoding="utf-8")
+
+    parsed = RoeScope(
+        roe_id="ROE-CUSTOM-MARKDOWN",
+        name="Markdown Scope",
+        engagement_type="Custom Assessment",
+        allowed_cidrs=["10.88.0.0/24"],
+        target_hosts=["10.88.0.5"],
+    )
+
+    with patch(
+        "app.engine.roe_parser.parse_unstructured_roe",
+        new=AsyncMock(return_value=parsed),
+    ) as mock_parse:
+        scope = shim.resolve_roe_locally(str(markdown_file))
+
+    assert scope.roe_id == "ROE-CUSTOM-MARKDOWN"
+    mock_parse.assert_awaited_once()

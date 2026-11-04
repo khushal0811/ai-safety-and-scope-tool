@@ -16,6 +16,12 @@ from app.db import (
     save_audit_log,
 )
 from app.engine.verifier import evaluate_audit_async, evaluate_deterministic_command
+from app.engine.roe_integrity import (
+    RoeScopeMismatchError,
+    bind_audit_roe,
+    canonical_roe_dict,
+    compute_roe_hash,
+)
 from app.models.audit import AuditRequest, AuditResult, DeterministicAuditRequest
 
 logger = logging.getLogger(__name__)
@@ -24,9 +30,9 @@ router = APIRouter(prefix="/api/audit", tags=["Scope & Safety Audit"])
 
 
 class DeleteAuditsPayload(BaseModel):
-    """Payload to permanently delete one or more audit logs."""
+    """Payload to soft-delete one or more audit logs."""
 
-    audit_ids: List[str] = Field(..., description="List of audit UUIDs/IDs to permanently delete")
+    audit_ids: List[str] = Field(..., description="List of audit UUIDs/IDs to mark deleted")
 
 
 @router.delete("/history")
@@ -34,10 +40,10 @@ async def delete_audit_history(
     payload: DeleteAuditsPayload,
     user_id: str = Depends(require_authenticated_user_id),
 ) -> Dict[str, Any]:
-    """Permanently delete specified audit records from Supabase PostgreSQL audit_logs table."""
+    """Soft-delete specified audit records; tombstones stay in the attestation chain."""
     deleted = delete_audit_logs(audit_ids=payload.audit_ids, user_id=user_id)
     if deleted is None:
-        raise HTTPException(status_code=500, detail="Failed to delete audit logs.")
+        raise HTTPException(status_code=500, detail="Failed to soft-delete audit logs.")
     return {"success": True, "deleted_count": deleted}
 
 
@@ -52,13 +58,24 @@ async def audit_model_output(
     
     Persists result to Supabase audit_logs table before returning so immediate report exports include it.
     """
+    # The client-supplied scope is a claim: reject it when it does not match the
+    # stored preset/custom RoE for the claimed roe_id (AUDIT_005 High 5).
+    try:
+        effective_roe = bind_audit_roe(request.roe, user_id)
+    except RoeScopeMismatchError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    request = request.model_copy(update={"roe": effective_roe})
+
     t0 = time.perf_counter()
     result = await evaluate_audit_async(request)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-    # Persist to Supabase synchronously before returning so immediate report export sees the new audit
+    # Persist the canonical scope actually used, not just its id, so the report
+    # cannot be made to print different boundaries after the fact.
     data = result.model_dump(mode="json")
-    data["roe_id"] = getattr(request.roe, "roe_id", getattr(request.roe, "id", "UNKNOWN"))
+    data["roe_id"] = effective_roe.roe_id
+    data["roe_hash"] = compute_roe_hash(effective_roe)
+    data["roe_snapshot"] = canonical_roe_dict(effective_roe)
     await run_in_threadpool(save_audit_log, data, user_id, elapsed_ms)
 
     return result
@@ -79,12 +96,20 @@ async def audit_command_deterministic(
             raise HTTPException(status_code=404, detail=f"Unknown RoE id: {request.roe_id!r}")
         request = request.model_copy(update={"roe": effective_roe})
 
+    try:
+        effective_roe = bind_audit_roe(effective_roe, user_id)
+    except RoeScopeMismatchError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    request = request.model_copy(update={"roe": effective_roe})
+
     t0 = time.perf_counter()
     result = evaluate_deterministic_command(request)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
     data = result.model_dump(mode="json")
-    data["roe_id"] = getattr(effective_roe, "roe_id", getattr(effective_roe, "id", "UNKNOWN"))
+    data["roe_id"] = effective_roe.roe_id
+    data["roe_hash"] = compute_roe_hash(effective_roe)
+    data["roe_snapshot"] = canonical_roe_dict(effective_roe)
     await run_in_threadpool(save_audit_log, data, user_id, elapsed_ms)
 
     return result

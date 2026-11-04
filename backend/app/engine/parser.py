@@ -6,6 +6,7 @@ and command substitutions, with a robust fallback to lexical `shlex`.
 """
 
 from dataclasses import dataclass, field
+import ipaddress
 import logging
 import re
 import shlex
@@ -296,6 +297,44 @@ TOOL_FLAG_SPECS: Dict[str, ToolFlagSpec] = {
         non_target_value_flags={"--profile", "--region", "--output", "--endpoint-url"},
         positional_targets=False,
     ),
+    "omp": ToolFlagSpec(
+        target_flags={"--target-add", "-t"},
+        exclude_flags=set(),
+        non_target_value_flags={
+            "--task-create", "--task", "--scanner", "--config", "--port-list",
+            "--port-range", "--target", "--file", "--output", "--format",
+        },
+        positional_targets=False,
+    ),
+    "dig": ToolFlagSpec(
+        target_flags=set(),
+        exclude_flags=set(),
+        non_target_value_flags={"-p", "-t", "-b", "-c", "-q", "-y", "-f", "-k"},
+        positional_targets=True,
+    ),
+    "host": ToolFlagSpec(
+        target_flags=set(),
+        exclude_flags=set(),
+        non_target_value_flags={"-p", "-t", "-b", "-c", "-q", "-y", "-f", "-k"},
+        positional_targets=True,
+    ),
+    "nslookup": ToolFlagSpec(
+        target_flags=set(),
+        exclude_flags=set(),
+        non_target_value_flags={"-port", "-type", "-class", "-timeout", "-retry"},
+        positional_targets=True,
+    ),
+    "find": ToolFlagSpec(
+        target_flags=set(),
+        exclude_flags=set(),
+        non_target_value_flags={
+            "-name", "-iname", "-path", "-ipath", "-type", "-maxdepth",
+            "-mindepth", "-user", "-group", "-perm", "-size", "-mtime",
+            "-atime", "-ctime", "-newer", "-exec", "-execdir", "-delete",
+            "-printf", "-fprintf", "-regextype",
+        },
+        positional_targets=False,
+    ),
 }
 
 DEFAULT_TOOL_FLAG_SPEC = ToolFlagSpec(
@@ -351,19 +390,39 @@ def extract_host_from_token(token: str) -> Optional[str]:
     if not t:
         return None
 
-    # URL format: http(s)://[host]:port/path
-    url_match = re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^@/]+@)?(\[[^\]]+\]|[^/:?#\s]+)", t)
-    if url_match:
-        host = url_match.group(1).strip("[]")
-        return host
+    # Bash /dev/tcp and /dev/udp pseudo-files open a raw socket to HOST:PORT
+    dev_socket = re.fullmatch(r"/dev/(?:tcp|udp)/([^/\s]+)/\d+", t)
+    if dev_socket:
+        return dev_socket.group(1).strip("[]") or None
+
+    # DNS server operand: dig @198.51.100.1 example.com
+    if t.startswith("@"):
+        t = t[1:]
+
+    # URL format: parse RFC 3986 authority semantics with urlsplit so `#`, `?`
+    # and userinfo cannot smuggle a different host past the validator.
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", t):
+        try:
+            parts = urlsplit(t)
+            host = parts.hostname
+        except ValueError:
+            return t  # let normalization fail closed
+        if not host:
+            return t
+        # A backslash in the authority is non-RFC and interpreted inconsistently
+        # by clients; never certify a host parsed from it.
+        if "\\" in parts.netloc:
+            return t
+        return host.rstrip(".") or None
 
     # UNC path format: \\host\share or //host/share
     unc_match = re.match(r"^(?://|\\\\)([^/\\\s]+)", t)
     if unc_match:
-        return unc_match.group(1)
+        host = unc_match.group(1).rstrip(".")
+        return host or None
 
     # user@host format (e.g. ssh, scp)
-    if "@" in t and not t.startswith("@"):
+    if "@" in t:
         t = t.split("@", 1)[1]
 
     # host:port format
@@ -371,7 +430,285 @@ def extract_host_from_token(token: str) -> Optional[str]:
     if port_match:
         t = port_match.group(1)
 
-    return t
+    # A trailing dot is valid FQDN notation but must not hide an IP/domain.
+    t = t.rstrip(".")
+    return t or None
+
+
+def _flag_matches(flag: str, candidates: Set[str]) -> bool:
+    """Exact-case match first, then a lowercase fallback.
+
+    Short options are case-sensitive (-H vs -h), so a blind lower() comparison
+    in either direction silently disables every mixed-case entry in a spec.
+    """
+    return flag in candidates or flag.lower() in candidates
+
+
+def _looks_like_target_value(value: str) -> bool:
+    """Heuristic for unknown `--flag=value` forms: only fail closed on host-like values."""
+    v = value.strip().strip("'\"")
+    if not v:
+        return False
+    if v.startswith(("@", "//")) or "://" in v:
+        return True
+    if "/" in v and not v.startswith("-"):
+        return True
+    # Dotted/colon numeric forms (IPs, ports, IPv6) but not plain integers (--retry=3)
+    if re.search(r"\d", v) and ("." in v or ":" in v):
+        return True
+    return False
+
+
+# Tools whose positional operands are network endpoints. Only these may emit an
+# unparseable positional token as a fail-closed target; for other tools a plain
+# filename/argument must not be turned into a scope violation.
+HOST_POSITIONAL_TOOLS: Set[str] = {
+    "nmap", "masscan", "dirb", "hping3", "curl", "wget", "ping", "ping6",
+    "traceroute", "traceroute6", "mtr", "nc", "netcat", "ncat", "socat",
+    "enum4linux", "smbclient", "crackmapexec", "netexec", "secretsdump",
+    "getuserspns", "ticketer", "dig", "host", "nslookup", "whatweb",
+    "hydra", "medusa", "whois",
+}
+
+
+def _is_file_operand(host: str) -> bool:
+    """True for wordlist/config-like operands that must never become targets."""
+    if "." not in host:
+        return False
+    ext = host.rsplit(".", 1)[-1].lower()
+    return ext in FILE_EXTENSIONS
+
+
+# Common hydra protocol modules: positional service names, never hosts.
+HYDRA_SERVICE_NAMES: Set[str] = {
+    "ssh", "sshkey", "ftp", "ftps", "telnet", "smtp", "smtps", "pop3", "pop3s",
+    "imap", "imaps", "http-get", "http-post", "http-head", "http-proxy",
+    "https-get", "https-post", "https-head", "http-get-form", "http-post-form",
+    "https-get-form", "https-post-form", "smb", "snmp", "mysql", "mssql",
+    "postgres", "rdp", "vnc", "ldap2", "ldap3", "cisco", "cisco-enable",
+    "oracle-listener", "oracle-sid", "sip", "redis", "socks5", "rsh", "rexec",
+    "rtsp", "teamspeak", "xmpp", "asterisk", "cvs", "firebird", "irc", "nntp",
+    "pcanywhere", "pcnfs", "mongo", "vmauthd", "radmin2", "s7-300",
+}
+
+
+def _is_non_target_operand(tool: str, token: str) -> bool:
+    """True for positional operands with tool-specific non-host meaning."""
+    low = token.strip().lower()
+    if not low:
+        return True
+    # Shell redirection operators and non-network /dev paths are not targets.
+    if re.match(r"^\d*(?:&>>|&>|>>|>\||>|<|<<<|<<|<>|>&|<&)", low):
+        return True
+    if low.startswith("/dev/") and not re.match(r"^/dev/(?:tcp|udp)/", low):
+        return True
+    # DNS query options such as dig +short / +trace
+    if low.startswith("+"):
+        return True
+    # nc/netcat take host then port as separate positional operands.
+    if tool in {"nc", "netcat", "ncat"} and low.isdigit():
+        return 1 <= int(low) <= 65535
+    # hydra: the final positional operand names the protocol module.
+    if tool == "hydra" and low in HYDRA_SERVICE_NAMES:
+        return True
+    return False
+
+
+def _looks_like_attached_target(rest: str) -> bool:
+    """Heuristic to keep attached short-option parsing from matching long flags.
+
+    `-hhttp://host` and `-u10.0.0.5` are attached target values; `-delete`
+    matching the `-d` target flag is not.
+    """
+    if not rest:
+        return False
+    if re.match(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*://|//|@|/|\d|\[)", rest):
+        return True
+    return "." in rest or ":" in rest
+
+
+# Launchers that run another command. The wrapper must never hide the real tool
+# from prohibited-tool / package-manager checks (AUDIT_005 High 1).
+LAUNCHER_WRAPPERS: Set[str] = {
+    "env", "nohup", "timeout", "nice", "xargs", "exec", "watch",
+    "stdbuf", "command", "ionice", "chrt", "taskset", "doas",
+}
+
+# Wrapper options that consume the following token as their argument.
+_LAUNCHER_VALUE_OPTIONS: Dict[str, Set[str]] = {
+    "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "xargs": {
+        "-a", "--arg-file", "-E", "--eof", "-I", "--replace", "-L",
+        "--max-lines", "-n", "--max-args", "-P", "--max-procs", "-s",
+        "--max-chars", "-d", "--delimiter",
+    },
+    "watch": {"-n", "--interval"},
+    "stdbuf": {"-i", "--input", "-o", "--output", "-e", "--error"},
+    "exec": {"-a"},
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "-P", "-u"},
+    "taskset": {"-c"},
+    "doas": {"-u", "-C"},
+}
+
+_SUDO_VALUE_OPTIONS: Set[str] = {"-u", "-g", "-C", "-U", "-h", "-p", "-r", "-t", "-T"}
+
+
+def _unwrap_launcher_tokens(tokens: List[str], idx: int) -> int:
+    """Return the index of the real command after any launcher wrappers.
+
+    Handles wrapper option arity and positional wrapper operands (timeout's
+    DURATION, chrt's PRIORITY, taskset's MASK) so the real binary is what tool
+    rules evaluate.
+    """
+    n = len(tokens)
+    while idx < n:
+        raw = tokens[idx].lower().rsplit("/", 1)[-1]
+
+        while raw in {"export", "readonly", "declare", "local", "typeset"} and idx + 1 < n:
+            idx += 1
+            raw = tokens[idx].lower().rsplit("/", 1)[-1]
+        while idx < n and is_variable_assignment(tokens[idx]):
+            idx += 1
+        if idx >= n:
+            return n
+
+        raw = tokens[idx].lower().rsplit("/", 1)[-1]
+
+        # sudo: strip its privilege-elevation options before unwrapping further
+        if raw == "sudo":
+            idx += 1
+            while idx < n and tokens[idx].startswith("-") and tokens[idx] not in {"-", "--"}:
+                opt = tokens[idx]
+                opt_name = opt.split("=", 1)[0]
+                idx += 1
+                if "=" not in opt and _flag_matches(opt_name, _SUDO_VALUE_OPTIONS):
+                    if idx < n and not tokens[idx].startswith("-"):
+                        idx += 1
+            if idx < n and tokens[idx] == "--":
+                idx += 1
+            while idx < n and is_variable_assignment(tokens[idx]):
+                idx += 1
+            continue
+
+        # Shell control-flow keywords (then/do/time/...) precede the real command
+        if raw in SHELL_KEYWORDS:
+            idx += 1
+            continue
+
+        if raw not in LAUNCHER_WRAPPERS:
+            return idx
+
+        wrapper = raw
+        wrapper_idx = idx
+        idx += 1
+        value_options = _LAUNCHER_VALUE_OPTIONS.get(wrapper, set())
+        stop_unwrap = False
+
+        while idx < n and tokens[idx].startswith("-") and tokens[idx] not in {"-", "--"}:
+            opt = tokens[idx]
+            opt_name = opt.split("=", 1)[0]
+            # `command -v/-V` queries the command instead of executing it.
+            if wrapper == "command" and opt_name in {"-v", "-V"}:
+                stop_unwrap = True
+                break
+            # `ionice -p PID` / `taskset -p PID` operate on a running process.
+            if wrapper in {"ionice", "taskset"} and opt_name == "-p":
+                stop_unwrap = True
+                break
+            idx += 1
+            if "=" not in opt and _flag_matches(opt_name, value_options):
+                if idx < n and not tokens[idx].startswith("-"):
+                    idx += 1
+        if stop_unwrap:
+            return wrapper_idx
+
+        if idx < n and tokens[idx] == "--":
+            idx += 1
+
+        # Positional wrapper operands before the real command
+        if wrapper == "timeout" and idx < n and not tokens[idx].startswith("-"):
+            idx += 1
+        elif wrapper == "chrt" and idx < n and not tokens[idx].startswith("-"):
+            idx += 1
+        elif wrapper == "taskset" and idx < n and not tokens[idx].startswith("-"):
+            idx += 1
+
+        # `env VAR=value command`
+        while idx < n and is_variable_assignment(tokens[idx]):
+            idx += 1
+
+    return idx
+
+
+def _expand_nmap_host_syntax(host: str) -> List[str]:
+    """Expand nmap last-octet wildcard/range/list syntax into IP/CIDR candidates.
+
+    Unrecognised syntax is returned unchanged so normalization fails closed in
+    classify_target() instead of silently dropping the operand.
+    """
+    match = re.fullmatch(r"(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.([0-9*,-]+)", host)
+    if not match:
+        return [host]
+
+    first, second, third = (int(match.group(i)) for i in (1, 2, 3))
+    if any(part > 255 for part in (first, second, third)):
+        return [host]
+
+    prefix = f"{first}.{second}.{third}"
+    rest = match.group(4)
+    if rest == "*":
+        return [f"{prefix}.0/24"]
+    if "," not in rest and "-" not in rest and "*" not in rest:
+        return [host]
+
+    expanded: List[str] = []
+    for item in rest.split(","):
+        item = item.strip()
+        if re.fullmatch(r"\d{1,3}", item):
+            value = int(item)
+            if value > 255:
+                return [host]
+            expanded.append(f"{prefix}.{value}")
+        elif item == "*":
+            expanded.append(f"{prefix}.0/24")
+        elif re.fullmatch(r"\d{1,3}-\d{1,3}", item):
+            start_text, end_text = item.split("-", 1)
+            start, end = int(start_text), int(end_text)
+            if start > 255 or end > 255 or start > end:
+                return [host]
+            start_ip = ipaddress.IPv4Address(f"{prefix}.{start}")
+            end_ip = ipaddress.IPv4Address(f"{prefix}.{end}")
+            for network in ipaddress.summarize_address_range(start_ip, end_ip):
+                expanded.append(str(network))
+        else:
+            return [host]
+
+    return expanded or [host]
+
+
+def append_target_candidate(
+    targets: List["NormalizedTarget"],
+    host: Optional[str],
+    allow_invalid: bool = True,
+) -> None:
+    """Append host candidates; invalid ones may fail closed in classify_target().
+
+    Invalid candidates are deliberately retained when the operand is known to
+    be a target position so ScopeValidator returns OUT_OF_SCOPE ("unverifiable
+    target syntax") instead of dropping a target and producing a false Correct
+    verdict (AUDIT_005 Critical 1).
+    """
+    if not host:
+        return
+    candidate = host.strip().lstrip("@").rstrip(".")
+    if not candidate or _is_file_operand(candidate):
+        return
+    for expanded in _expand_nmap_host_syntax(candidate):
+        norm = normalize_ip_candidate(expanded)
+        if allow_invalid or norm.is_valid:
+            targets.append(norm)
 
 
 def join_multiline_continuations(text: str) -> str:
@@ -655,86 +992,81 @@ def parse_tokens_with_spec(
         if tok.startswith("-"):
             flags.append(tok)
 
-            if "=" in tok:
+            if "=" in tok and "://" not in tok.split("=", 1)[0]:
                 flag_name, flag_val = tok.split("=", 1)
-                flag_name_lower = flag_name.lower()
 
-                if flag_name_lower in spec.exclude_flags:
+                if _flag_matches(flag_name, spec.exclude_flags):
                     i += 1
                     continue
 
-                if flag_name_lower in spec.non_target_value_flags:
+                if _flag_matches(flag_name, spec.non_target_value_flags):
                     options[flag_name] = flag_val
-                    if flag_name_lower in DATA_PAYLOAD_FLAGS:
+                    if flag_name in DATA_PAYLOAD_FLAGS:
                         for embedded in extract_embedded_payload_targets(flag_val):
                             targets.append(embedded)
-                    if flag_name_lower in REDIRECT_TARGET_FLAGS:
+                    if flag_name in REDIRECT_TARGET_FLAGS:
                         targets.extend(extract_redirect_targets(flag_val))
                     i += 1
                     continue
 
-                if flag_name_lower in spec.target_flags:
-                    host = extract_host_from_token(flag_val)
-                    if host:
-                        norm = normalize_ip_candidate(host)
-                        if norm.is_valid:
-                            targets.append(norm)
+                if _flag_matches(flag_name, spec.target_flags):
+                    append_target_candidate(targets, extract_host_from_token(flag_val))
                     i += 1
                     continue
 
-                # Generic fallback for flags with '='
-                host = extract_host_from_token(flag_val)
-                if host:
-                    norm = normalize_ip_candidate(host)
-                    if norm.is_valid:
-                        targets.append(norm)
+                # Generic fallback for flags with '=': fail closed on host-like
+                # values instead of dropping a potential target (AUDIT_005 C1).
+                append_target_candidate(
+                    targets,
+                    extract_host_from_token(flag_val),
+                    allow_invalid=_looks_like_target_value(flag_val),
+                )
                 i += 1
                 continue
 
             flag_lower = tok.lower()
 
-            if flag_lower in spec.exclude_flags:
+            if _flag_matches(tok, spec.exclude_flags):
                 if i + 1 < num_tokens and not raw_tokens[i + 1].startswith("-"):
                     i += 1  # Consume argument, do not treat as scan target
                 i += 1
                 continue
 
-            if flag_lower in spec.non_target_value_flags:
+            if _flag_matches(tok, spec.non_target_value_flags):
                 if i + 1 < num_tokens and not raw_tokens[i + 1].startswith("-"):
                     val = raw_tokens[i + 1]
                     options[tok] = val
-                    if flag_lower in DATA_PAYLOAD_FLAGS:
+                    if tok in DATA_PAYLOAD_FLAGS:
                         for embedded in extract_embedded_payload_targets(val):
                             targets.append(embedded)
-                    if flag_lower in REDIRECT_TARGET_FLAGS:
+                    if tok in REDIRECT_TARGET_FLAGS:
                         targets.extend(extract_redirect_targets(val))
                     i += 1  # Consume argument as option value
                 i += 1
                 continue
 
-            if flag_lower in spec.target_flags:
+            if _flag_matches(tok, spec.target_flags):
                 if i + 1 < num_tokens and not raw_tokens[i + 1].startswith("-"):
-                    host = extract_host_from_token(raw_tokens[i + 1])
-                    if host:
-                        norm = normalize_ip_candidate(host)
-                        if norm.is_valid:
-                            targets.append(norm)
+                    append_target_candidate(targets, extract_host_from_token(raw_tokens[i + 1]))
                     i += 1
                 i += 1
                 continue
 
-            # Attached short-option values (e.g. nikto -hhttp://10.0.0.5, sqlmap -uhttp://...)
-            attached_flag = next(
-                (f for f in sorted(spec.target_flags, key=len, reverse=True)
-                 if flag_lower.startswith(f.lower()) and len(flag_lower) > len(f.lower())),
-                None,
-            )
+            # Attached short-option values (e.g. nikto -hhttp://10.0.0.5, sqlmap -uhttp://...).
+            # Long options must not match here: --target-add is not "--target" + "-add".
+            attached_flag = None
+            if not flag_lower.startswith("--"):
+                attached_flag = next(
+                    (f for f in sorted(spec.target_flags, key=len, reverse=True)
+                     if not f.startswith("--")
+                     and flag_lower.startswith(f.lower())
+                     and len(flag_lower) > len(f.lower())),
+                    None,
+                )
             if attached_flag:
-                host = extract_host_from_token(tok[len(attached_flag):])
-                if host:
-                    norm = normalize_ip_candidate(host)
-                    if norm.is_valid:
-                        targets.append(norm)
+                attached_value = tok[len(attached_flag):]
+                if _looks_like_attached_target(attached_value):
+                    append_target_candidate(targets, extract_host_from_token(attached_value))
                 i += 1
                 continue
 
@@ -752,15 +1084,16 @@ def parse_tokens_with_spec(
             i += 1
             continue
 
-        # Positional token handling
-        if spec.positional_targets:
-            host = extract_host_from_token(tok)
-            if host:
-                ext = host.rsplit(".", 1)[-1].lower() if "." in host else ""
-                if ext not in FILE_EXTENSIONS:
-                    norm = normalize_ip_candidate(host)
-                    if norm.is_valid:
-                        targets.append(norm)
+        # Positional token handling: retain non-file operands for tools whose
+        # positional arguments are network endpoints, even when unparseable, so
+        # classify_target() fails closed (AUDIT_005 C1). Other tools keep the
+        # old valid-only behavior to avoid treating filenames as targets.
+        if spec.positional_targets and not _is_non_target_operand(tool, tok):
+            append_target_candidate(
+                targets,
+                extract_host_from_token(tok),
+                allow_invalid=tool in HOST_POSITIONAL_TOOLS,
+            )
 
         i += 1
 
@@ -862,35 +1195,11 @@ def parse_cli_command_shlex_fallback(
             source=source,
         )
 
-    candidate_tok = tokens[idx]
-    raw_tool = candidate_tok.lower().rsplit("/", 1)[-1]
-    tool_idx = idx
-
-    if raw_tool == "sudo":
-        idx += 1
-        while idx < num_tokens and tokens[idx].startswith("-"):
-            idx += 1
-        while idx < num_tokens and is_variable_assignment(tokens[idx]):
-            idx += 1
-        if idx < num_tokens and not tokens[idx].startswith("-"):
-            tool = tokens[idx].lower().rsplit("/", 1)[-1]
-            tool_idx = idx
-        else:
-            tool = "sudo"
-    elif raw_tool.startswith("-"):
+    tool_idx = _unwrap_launcher_tokens(tokens, idx)
+    if tool_idx >= num_tokens or tokens[tool_idx].startswith("-"):
         tool = ""
-    elif raw_tool in SHELL_KEYWORDS:
-        # Skip shell control-flow keywords (then/do/time/...) and parse the real command after them
-        idx = tool_idx
-        while idx < num_tokens and tokens[idx].lower().rsplit("/", 1)[-1] in SHELL_KEYWORDS:
-            idx += 1
-        if idx < num_tokens:
-            tool = tokens[idx].lower().rsplit("/", 1)[-1]
-            tool_idx = idx
-        else:
-            tool = ""
     else:
-        tool = raw_tool
+        tool = tokens[tool_idx].lower().rsplit("/", 1)[-1]
 
     remaining_tokens = tokens[tool_idx + 1 :] if tool_idx < num_tokens else []
     spec = TOOL_FLAG_SPECS.get(tool.lower(), DEFAULT_TOOL_FLAG_SPEC)
@@ -1004,35 +1313,11 @@ def _extract_ast_command_node(
             source=source,
         )
 
-    candidate_tok = words[idx]
-    raw_tool = candidate_tok.lower().rsplit("/", 1)[-1]
-    tool_idx = idx
-
-    if raw_tool == "sudo":
-        idx += 1
-        while idx < num_words and words[idx].startswith("-"):
-            idx += 1
-        while idx < num_words and is_variable_assignment(words[idx]):
-            idx += 1
-        if idx < num_words and not words[idx].startswith("-"):
-            tool = words[idx].lower().rsplit("/", 1)[-1]
-            tool_idx = idx
-        else:
-            tool = "sudo"
-    elif raw_tool.startswith("-"):
+    tool_idx = _unwrap_launcher_tokens(words, idx)
+    if tool_idx >= num_words or words[tool_idx].startswith("-"):
         tool = ""
-    elif raw_tool in SHELL_KEYWORDS:
-        # Skip shell control-flow keywords (then/do/time/...) and parse the real command after them
-        idx = tool_idx
-        while idx < num_words and words[idx].lower().rsplit("/", 1)[-1] in SHELL_KEYWORDS:
-            idx += 1
-        if idx < num_words:
-            tool = words[idx].lower().rsplit("/", 1)[-1]
-            tool_idx = idx
-        else:
-            tool = ""
     else:
-        tool = raw_tool
+        tool = words[tool_idx].lower().rsplit("/", 1)[-1]
 
     remaining_tokens = words[tool_idx + 1 :] if tool_idx < num_words else []
     spec = TOOL_FLAG_SPECS.get(tool.lower(), DEFAULT_TOOL_FLAG_SPEC)

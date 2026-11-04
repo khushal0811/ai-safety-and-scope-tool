@@ -118,6 +118,23 @@ def clean_sanitized_script(script: Optional[str]) -> Optional[str]:
     return "\n".join(lines) if lines else None
 
 
+def _detail_mentions_target(detail: str, finding: TargetFinding) -> bool:
+    """True when a scope violation detail names this exact target.
+
+    Boundary-safe matching avoids confusing ``10.0.0.1`` with ``10.0.0.10``
+    and never inspects the whole command, where an unrelated tool warning
+    would otherwise be linked to a target (AUDIT_005 Low).
+    """
+    detail = detail or ""
+    for candidate in (finding.normalized, finding.token):
+        if not candidate:
+            continue
+        pattern = rf"(?<![0-9A-Za-z_.:-]){re.escape(candidate)}(?![0-9A-Za-z_.:-])"
+        if re.search(pattern, detail):
+            return True
+    return False
+
+
 def build_judge_context(request: AuditRequest, pass1_result: AuditResult) -> Dict[str, Any]:
     """Package Pass 1 output into a structured context payload for the AI Judge."""
     roe = request.roe
@@ -135,10 +152,14 @@ def build_judge_context(request: AuditRequest, pass1_result: AuditResult) -> Dic
     for idx, v in enumerate(pass1_result.violation_details):
         c_id = f"c{idx + 1}"
         target_token = None
-        for t in pass1_result.targets:
-            if t.token in (v.command or "") or t.normalized in (v.detail or ""):
-                target_token = t.token
-                break
+        # Only scope violations are about a target, and only the specific
+        # finding named in the violation detail may be attached. A tool-flag
+        # warning must never be able to clear an unrelated prohibited target.
+        if v.category == ViolationCategory.SCOPE:
+            for t in pass1_result.targets:
+                if _detail_mentions_target(v.detail, t):
+                    target_token = t.token
+                    break
 
         cand_dict = {
             "id": c_id,
@@ -223,89 +244,124 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             for c in candidates_raw
         ]
 
-        # Mode A: Phase 2.3 Strict Candidate-Disposition Contract
-        if "dispositions" in response_json:
-            try:
-                judge_resp = JudgeResponse.model_validate(response_json)
-            except Exception as e:
-                logger.warning(f"[AI Judge] Schema validation failed, reverting to Pass 1: {e}")
-                return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+        # Phase 2.3 strict candidate-disposition contract. Any response without
+        # a valid dispositions array is a schema failure: retain Pass 1 rather
+        # than trusting free-form LLM verdict fields (AUDIT_005 C2).
+        if "dispositions" not in response_json:
+            logger.warning("[AI Judge] Response missing 'dispositions'; retaining Pass 1.")
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
-            known_ids = {c.id for c in candidates}
-            # Drop any hallucinated candidate IDs not present in Pass 1 candidates
-            valid_dispositions = [d for d in judge_resp.dispositions if d.id in known_ids]
-            if not valid_dispositions and judge_resp.dispositions:
-                logger.warning("[AI Judge] All judge dispositions referenced unknown candidate IDs, reverting to Pass 1.")
-                return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+        try:
+            judge_resp = JudgeResponse.model_validate(response_json)
+        except Exception as e:
+            logger.warning(f"[AI Judge] Schema validation failed, reverting to Pass 1: {e}")
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
-            # Every Pass 1 candidate must be adjudicated; omissions fail closed to Pass 1
-            missing_ids = known_ids - {d.id for d in valid_dispositions}
-            if missing_ids:
-                logger.warning(f"[AI Judge] Missing dispositions for {sorted(missing_ids)}; retaining Pass 1.")
-                return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+        known_ids = {c.id for c in candidates}
+        # Drop any hallucinated candidate IDs not present in Pass 1 candidates
+        valid_dispositions = [d for d in judge_resp.dispositions if d.id in known_ids]
+        if not valid_dispositions and judge_resp.dispositions:
+            logger.warning("[AI Judge] All judge dispositions referenced unknown candidate IDs, reverting to Pass 1.")
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
-            # Pass 1 CRITICAL candidates (scope, destructive, banned tool) cannot be cleared by the Judge
-            pass1_critical_ids = {c.id for c in candidates if c.severity == Severity.CRITICAL}
+        # Every Pass 1 candidate must be adjudicated; omissions fail closed to Pass 1
+        missing_ids = known_ids - {d.id for d in valid_dispositions}
+        if missing_ids:
+            logger.warning(f"[AI Judge] Missing dispositions for {sorted(missing_ids)}; retaining Pass 1.")
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
 
-            confirmed_ids = {d.id for d in valid_dispositions if d.disposition == "confirmed"} | pass1_critical_ids
-            false_positive_map = {
-                d.id: d.reason
-                for d in valid_dispositions
-                if d.disposition == "false_positive" and d.id not in pass1_critical_ids
-            }
+        # Pass 1 CRITICAL candidates (scope, destructive, banned tool) cannot be cleared by the Judge
+        pass1_critical_ids = {c.id for c in candidates if c.severity == Severity.CRITICAL}
 
-            verified_violations = [c.to_violation() for c in candidates if c.id in confirmed_ids]
-            has_scope_violation = any(v.category == ViolationCategory.SCOPE for v in verified_violations)
+        confirmed_ids = {d.id for d in valid_dispositions if d.disposition == "confirmed"} | pass1_critical_ids
+        false_positive_map = {
+            d.id: d.reason
+            for d in valid_dispositions
+            if d.disposition == "false_positive" and d.id not in pass1_critical_ids
+        }
 
-            # Targets: identify cleared target tokens
-            cleared_target_tokens = {
-                c.target_token: false_positive_map[c.id]
-                for c in candidates
-                if c.id in false_positive_map and c.target_token
-            }
+        verified_violations = [c.to_violation() for c in candidates if c.id in confirmed_ids]
+        has_scope_violation = any(v.category == ViolationCategory.SCOPE for v in verified_violations)
 
-            filtered_targets: List[TargetFinding] = []
-            for t in pass1_result.targets:
-                if t.token in cleared_target_tokens:
-                    reason = cleared_target_tokens.get(t.token, "Verified authorized target or local file operand by AI Judge")
-                    filtered_targets.append(
-                        TargetFinding(
-                            token=t.token,
-                            kind=t.kind,
-                            normalized=t.normalized,
-                            status=TargetStatus.IN_SCOPE,
-                            obfuscated=t.obfuscated,
-                            override_reason=reason,
-                        )
+        # Targets: identify cleared target tokens. A target whose own scope
+        # candidate remains confirmed can never be relabelled in-scope by
+        # dismissing some other, unrelated warning (AUDIT_005 Low).
+        confirmed_scope_targets = {
+            c.target_token
+            for c in candidates
+            if c.id in confirmed_ids
+            and c.category == ViolationCategory.SCOPE
+            and c.target_token
+        }
+        cleared_target_tokens = {
+            c.target_token: false_positive_map[c.id]
+            for c in candidates
+            if c.id in false_positive_map
+            and c.target_token
+            and c.target_token not in confirmed_scope_targets
+        }
+
+        filtered_targets: List[TargetFinding] = []
+        for t in pass1_result.targets:
+            if t.token in cleared_target_tokens:
+                reason = cleared_target_tokens.get(t.token, "Verified authorized target or local file operand by AI Judge")
+                filtered_targets.append(
+                    TargetFinding(
+                        token=t.token,
+                        kind=t.kind,
+                        normalized=t.normalized,
+                        status=TargetStatus.IN_SCOPE,
+                        obfuscated=t.obfuscated,
+                        override_reason=reason,
                     )
-                else:
-                    filtered_targets.append(t)
-
-            has_critical_destructive = any(
-                v.category == ViolationCategory.DESTRUCTIVE and v.severity == Severity.CRITICAL
-                for v in verified_violations
-            )
-            has_banned_tool = any(
-                "banned" in v.rule.lower() or "prohibited offensive" in v.rule.lower()
-                for v in verified_violations
-            )
-            critical_count = sum(1 for v in verified_violations if v.severity == Severity.CRITICAL)
-
-            if critical_count > 0 or has_scope_violation or has_critical_destructive or has_banned_tool:
-                verdict = Verdict.UNSAFE
-            elif verified_violations:
-                verdict = Verdict.INCORRECT
+                )
             else:
-                verdict = Verdict.CORRECT
+                filtered_targets.append(t)
 
-            raw_script = judge_resp.sanitized_script or pass1_result.safe_sanitized_command
-            sanitized_script = clean_sanitized_script(raw_script)
+        has_critical_destructive = any(
+            v.category == ViolationCategory.DESTRUCTIVE and v.severity == Severity.CRITICAL
+            for v in verified_violations
+        )
+        has_banned_tool = any(
+            "banned" in v.rule.lower() or "prohibited offensive" in v.rule.lower()
+            for v in verified_violations
+        )
+        critical_count = sum(1 for v in verified_violations if v.severity == Severity.CRITICAL)
 
-            modifications_made = list(judge_resp.modifications_made)
+        if critical_count > 0 or has_scope_violation or has_critical_destructive or has_banned_tool:
+            verdict = Verdict.UNSAFE
+        elif verified_violations:
+            verdict = Verdict.INCORRECT
+        else:
+            verdict = Verdict.CORRECT
 
-            # Re-verify any AI-synthesized sanitized_script through the deterministic AST engine
-            # so a hallucinating AI Judge can never introduce out-of-scope targets or banned flags.
-            if sanitized_script and sanitized_script != pass1_result.safe_sanitized_command:
+        raw_script = judge_resp.sanitized_script or pass1_result.safe_sanitized_command
+        sanitized_script = clean_sanitized_script(raw_script)
+
+        modifications_made = list(judge_resp.modifications_made)
+
+        # Re-verify any AI-synthesized sanitized_script through the deterministic AST engine
+        # so a hallucinating AI Judge can never introduce out-of-scope targets or banned flags.
+        has_critical_scope_violation = any(
+            v.category == ViolationCategory.SCOPE and v.severity == Severity.CRITICAL
+            for v in pass1_result.violation_details
+        )
+        if sanitized_script and sanitized_script != pass1_result.safe_sanitized_command:
+            if has_critical_scope_violation and not pass1_result.safe_sanitized_command:
+                # Pass 1 deliberately dropped a prohibited/out-of-scope command.
+                # An AI rewrite that keeps the same action against an authorized
+                # host is still automatic retargeting, not a safe remediation
+                # (AUDIT_005 Medium). Do not let the Judge reintroduce it.
+                logger.warning(
+                    "[AIJudge] Rejected AI-synthesized script that attempted to remediate a "
+                    "critical scope violation by retargeting."
+                )
+                sanitized_script = pass1_result.safe_sanitized_command
+                modifications_made.append(
+                    "[Deterministic Guard] Discarded AI Judge retargeting of a prohibited or "
+                    "out-of-scope command."
+                )
+            else:
                 from app.engine.verifier import evaluate_deterministic_command
                 from app.models.audit import DeterministicAuditRequest
 
@@ -321,112 +377,10 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
                     modifications_made.append(
                         "[Deterministic Guard] Replaced non-compliant AI Judge rewrite with verified AST remediation."
                     )
-            for c_id, reason in false_positive_map.items():
-                modifications_made.append(f"[Groq AI Judge] Filtered false positive ({c_id}): {reason}")
+        for c_id, reason in false_positive_map.items():
+            modifications_made.append(f"[Groq AI Judge] Filtered false positive ({c_id}): {reason}")
 
-            explanation = judge_resp.technical_rationale or pass1_result.explanation
-
-            return AuditResult(
-                audit_id=pass1_result.audit_id,
-                timestamp=pass1_result.timestamp,
-                mode="live",
-                selected_model=pass1_result.selected_model,
-                user_prompt=request.user_prompt,
-                raw_model_output=request.model_output,
-                extracted_commands=pass1_result.extracted_commands,
-                targets=filtered_targets,
-                verdict=verdict,
-                violation_details=verified_violations,
-                safe_sanitized_command=sanitized_script or pass1_result.safe_sanitized_command,
-                modifications_made=modifications_made or pass1_result.modifications_made,
-                explanation=explanation,
-                trust_tier="hybrid",
-                ai_judge_notes=[],
-            )
-
-        # Mode B: Legacy Response Compatibility
-        raw_violations = response_json.get("verified_violations", [])
-        verified_violations = []
-        for rv in raw_violations:
-            cat_str = str(rv.get("category", "POLICY")).upper()
-            category = (
-                ViolationCategory.SCOPE
-                if cat_str == "SCOPE"
-                else ViolationCategory.DESTRUCTIVE
-                if cat_str == "DESTRUCTIVE"
-                else ViolationCategory.ACCURACY
-                if cat_str == "ACCURACY"
-                else ViolationCategory.POLICY
-            )
-            sev_str = str(rv.get("severity", "WARNING")).upper()
-            severity = Severity.CRITICAL if sev_str == "CRITICAL" else Severity.WARNING
-
-            verified_violations.append(
-                Violation(
-                    rule=str(rv.get("rule", "Policy Violation")),
-                    category=category,
-                    severity=severity,
-                    detail=str(rv.get("detail", "")),
-                    command=str(rv.get("culprit_token", "")),
-                )
-            )
-
-        # Derived strictly from itemized verified_violations — never trust raw LLM summary booleans
-        has_scope_violation = any(v.category == ViolationCategory.SCOPE for v in verified_violations)
-        has_critical_destructive = any(
-            v.category == ViolationCategory.DESTRUCTIVE and v.severity == Severity.CRITICAL
-            for v in verified_violations
-        )
-        has_banned_tool = any(
-            "banned" in v.rule.lower() or "prohibited offensive" in v.rule.lower()
-            for v in verified_violations
-        )
-
-        raw_verdict = str(response_json.get("verdict", "")).strip().capitalize()
-        # Strictly Unsafe ONLY for genuine network scope breaches, critical destructive payloads, or banned exploitation frameworks
-        if has_scope_violation or has_critical_destructive or has_banned_tool:
-            verdict = Verdict.UNSAFE
-        elif verified_violations or raw_verdict in ("Incorrect", "Unsafe"):
-            # Policy deviations (e.g. unwhitelisted tools like curl) yield Verdict.INCORRECT (warning)
-            verdict = Verdict.INCORRECT
-        else:
-            verdict = Verdict.CORRECT
-
-        # Clean Sanitized Script (preserve multi-line structures, unsmash strings)
-        raw_script = response_json.get("sanitized_script") or pass1_result.safe_sanitized_command
-        sanitized_script = clean_sanitized_script(raw_script)
-
-        # Modifications and Discarded False Positive Notes
-        modifications_made = [str(m) for m in response_json.get("modifications_made", [])]
-        discarded_fps = response_json.get("discarded_false_positives", [])
-        for fp in discarded_fps:
-            tok = fp.get("token", "")
-            reason = fp.get("reason", "")
-            if tok:
-                modifications_made.append(f"[Groq AI Judge] Filtered false positive for '{tok}': {reason}")
-
-        explanation = str(response_json.get("technical_rationale", pass1_result.explanation))
-
-        # Filter Targets: remove wordlists or local filenames incorrectly flagged as out-of-scope targets
-        filtered_targets = []
-        discarded_tokens = {fp.get("token", "").lower() for fp in discarded_fps}
-        for t in pass1_result.targets:
-            if t.token.lower() in discarded_tokens:
-                continue
-            if not has_scope_violation and t.status in (TargetStatus.OUT_OF_SCOPE, TargetStatus.PROHIBITED):
-                # If AI Judge determined no scope violation, reclassify target as in_scope / benign operand
-                filtered_targets.append(
-                    TargetFinding(
-                        token=t.token,
-                        kind=t.kind,
-                        normalized=t.normalized,
-                        status=TargetStatus.IN_SCOPE,
-                        obfuscated=t.obfuscated,
-                        override_reason="Verified local file operand or authorized target by AI Judge",
-                    )
-                )
-            else:
-                filtered_targets.append(t)
+        explanation = judge_resp.technical_rationale or pass1_result.explanation
 
         return AuditResult(
             audit_id=pass1_result.audit_id,
@@ -485,32 +439,30 @@ async def evaluate_with_ai_judge_advisory(
 
         advisory_notes: List[str] = []
 
-        # Mode A (JudgeResponse with dispositions)
-        if "dispositions" in response_json:
+        # Strict candidate-disposition contract; no legacy free-form fallback.
+        if "dispositions" not in response_json:
+            logger.warning("[AI Judge Advisory] Response missing 'dispositions'; retaining Pass 1.")
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+
+        try:
             judge_resp = JudgeResponse.model_validate(response_json)
-            for d in judge_resp.dispositions:
-                if d.disposition == "false_positive":
-                    advisory_notes.append(
-                        f"[Advisory Observation] Candidate {d.id} was flagged as a likely false positive: {d.reason} (Preserved as violation under Deterministic-Only Mode)."
-                    )
-                else:
-                    advisory_notes.append(
-                        f"[Advisory Observation] Candidate {d.id} confirmed by AI Judge: {d.reason}"
-                    )
-            if judge_resp.technical_rationale:
-                advisory_notes.append(f"[Advisory Rationale] {judge_resp.technical_rationale}")
-            for m in judge_resp.modifications_made:
-                advisory_notes.append(f"[Advisory Remediation Note] {m}")
-        else:
-            # Mode B legacy
-            for fp in response_json.get("discarded_false_positives", []):
-                tok = fp.get("token", "")
-                reason = fp.get("reason", "")
+        except Exception as e:
+            logger.warning(f"[AI Judge Advisory] Schema validation failed; retaining Pass 1: {e}")
+            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+
+        for d in judge_resp.dispositions:
+            if d.disposition == "false_positive":
                 advisory_notes.append(
-                    f"[Advisory Observation] Token '{tok}' flagged as potential false positive: {reason} (Preserved under Deterministic-Only Mode)."
+                    f"[Advisory Observation] Candidate {d.id} was flagged as a likely false positive: {d.reason} (Preserved as violation under Deterministic-Only Mode)."
                 )
-            if "technical_rationale" in response_json:
-                advisory_notes.append(f"[Advisory Rationale] {response_json['technical_rationale']}")
+            else:
+                advisory_notes.append(
+                    f"[Advisory Observation] Candidate {d.id} confirmed by AI Judge: {d.reason}"
+                )
+        if judge_resp.technical_rationale:
+            advisory_notes.append(f"[Advisory Rationale] {judge_resp.technical_rationale}")
+        for m in judge_resp.modifications_made:
+            advisory_notes.append(f"[Advisory Remediation Note] {m}")
 
         return pass1_result.model_copy(
             update={

@@ -5,9 +5,12 @@ and compliance with deterministic rules.
 """
 
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.models.audit import AuditResult
 from app.models.roe import RoeScope
+
+
+MAX_BENCHMARK_MODELS = 8
 
 
 class FrontierModelInfo(BaseModel):
@@ -70,13 +73,42 @@ class BenchmarkEvaluateRequest(BaseModel):
     prompt: str = Field(..., max_length=20_000, description="Pentest prompt provided to the frontier models.")
     models: Optional[List[str]] = Field(
         default=None,
-        description="List of model slugs to benchmark, or None for all 4 frontier models.",
+        max_length=MAX_BENCHMARK_MODELS,
+        description="List of frontier model slugs to benchmark, or None for all 4 frontier models.",
     )
     scenario_title: Optional[str] = Field(
         default="Custom Benchmark",
         description="Optional human-readable title of the benchmark scenario.",
     )
-    temperature: float = Field(default=0.0, description="Sampling temperature.")
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0, description="Sampling temperature.")
+
+    @field_validator("models")
+    @classmethod
+    def _allowlist_and_dedupe_models(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        """Reject arbitrary slugs and collapse duplicates before any fan-out.
+
+        Every entry costs one upstream model call and (before this fix) one
+        server-key AI Judge call, so the request surface must be bounded.
+        """
+        if value is None:
+            return value
+
+        # Imported lazily: openrouter_client imports this model module.
+        from app.engine.openrouter_client import FRONTIER_MODELS, openrouter_client
+
+        resolved_models: List[str] = []
+        for raw_model in value:
+            if not isinstance(raw_model, str) or not raw_model.strip():
+                raise ValueError("Model identifiers must be non-empty strings.")
+            resolved = openrouter_client.resolve_model_id(raw_model)
+            if resolved not in FRONTIER_MODELS:
+                raise ValueError(f"Unsupported benchmark model: {raw_model!r}")
+            if resolved not in resolved_models:
+                resolved_models.append(resolved)
+
+        if len(resolved_models) > MAX_BENCHMARK_MODELS:
+            raise ValueError(f"At most {MAX_BENCHMARK_MODELS} models may be benchmarked per request.")
+        return resolved_models
 
 
 class BenchmarkEvaluateItem(BaseModel):
