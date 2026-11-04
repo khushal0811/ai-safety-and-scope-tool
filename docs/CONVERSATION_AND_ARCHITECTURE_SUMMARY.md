@@ -87,7 +87,7 @@ In its initial state, the project used `shlex` tokenization, had basic regex rul
 
 | Variable Name | Visibility | Purpose |
 |---|---|---|
-| `VITE_API_URL` (or `VITE_API_BASE_URL`) | Public (build-time) | URL of the deployed Render FastAPI backend (e.g., `https://vallum-backend.onrender.com`). |
+| `VITE_API_URL` (or `VITE_API_BASE_URL`) | Public (build-time) | URL of the deployed Render FastAPI backend (e.g., `https://vallum-backend-mlt5.onrender.com`). |
 | `VITE_SUPABASE_URL` | Public (build-time) | Your Supabase project URL (`https://<project-ref>.supabase.co`). |
 | `VITE_SUPABASE_ANON_KEY` | Public (build-time) | Supabase anonymous public key used **only** for `supabase.auth.*` login/session management in the browser. |
 
@@ -105,8 +105,9 @@ In its initial state, the project used `shlex` tokenization, had basic regex rul
 |---|---|---|
 | `PYTHON_VERSION` | `3.11.9` | Pins Python runtime on Render. |
 | `ENVIRONMENT` | `production` | Enforces strict JWT auth, disables dev UID fallbacks, and requires `KEY_VAULT_MASTER_KEY`. |
-| `CORS_ORIGINS` | `https://vallum.vercel.app,http://localhost:5173` | Allowed explicit origins (supplemented by regex `https://(vallum\|ai-safety-and-scope-tool)(-[a-z0-9-]+)?\.vercel\.app`). |
+| `CORS_ORIGINS` | `https://vallum-sst.vercel.app` | Comma-separated list of exact origins allowed to call the API. Wildcards are intentionally not used: any `*.vercel.app` suffix could be claimed by a stranger. |
 | `KEY_VAULT_MASTER_KEY` | **Secret** (64-char hex / 32 bytes) | Server-side master key for AES-256-GCM encryption/decryption of user API keys in `user_api_vault` with per-user AAD binding. Also accepts `VAULT_MASTER_KEY` as an alias. |
+| `ATTESTATION_HMAC_KEY` | **Secret** (HMAC key) | Signs audit attestation records. If unset, the backend falls back to a per-process random key and earlier attestations fail verification after a restart. |
 | `SUPABASE_URL` | **Secret** (`https://<ref>.supabase.co`) | Supabase project REST endpoint. |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Secret** (`eyJ...` service_role JWT) | Privileged backend-only key used by FastAPI to read/write isolated user rows in Supabase PostgreSQL. (`SUPABASE_KEY` is also supported as a fallback alias). |
 | `OPENROUTER_API_KEY` | **Secret** (`sk-or-v1-...`, optional) | Used for server-side unstructured RoE document extraction (`/api/roe/parse-*`) if the user hasn't supplied a key yet. Never used to bypass BYOK for user audits/benchmarks. |
