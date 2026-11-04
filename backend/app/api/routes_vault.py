@@ -108,8 +108,8 @@ async def save_vault_keys(
             "data": res,
         }
     except Exception as e:
-        logger.error(f"[VaultAPI] Failed to save vault keys: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("[VaultAPI] Failed to save vault keys")
+        raise HTTPException(status_code=500, detail="Failed to save vault keys.")
 
 
 @router.delete("/keys")
@@ -124,8 +124,8 @@ async def revoke_vault_keys(
             "message": "API keys permanently revoked and wiped from database vault.",
         }
     except Exception as e:
-        logger.error(f"[VaultAPI] Failed to revoke vault keys: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("[VaultAPI] Failed to revoke vault keys")
+        raise HTTPException(status_code=500, detail="Failed to revoke vault keys.")
 
 
 @router.post("/verify-key", response_model=VerifyKeyResponse)
@@ -227,7 +227,7 @@ async def verify_api_keys(
                     provider="OpenRouter",
                     valid=False,
                     status_code=500,
-                    message=f"Connection error contacting OpenRouter: {str(e)}",
+                    message="Connection error contacting OpenRouter.",
                     latency_ms=0.0,
                 )
             )
@@ -289,7 +289,7 @@ async def verify_api_keys(
                     provider="Groq",
                     valid=False,
                     status_code=500,
-                    message=f"Connection error contacting Groq: {str(e)}",
+                    message="Connection error contacting Groq.",
                     latency_ms=0.0,
                 )
             )

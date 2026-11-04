@@ -35,13 +35,18 @@ def get_master_key_bytes(override_key: Optional[str] = None) -> bytes:
             "python -c \"import secrets; print(secrets.token_hex(32))\" "
             "and set it as KEY_VAULT_MASTER_KEY in your deployed environment."
         )
+    # Require a full 32-byte random key. A single unsalted SHA-256 of a human-chosen string
+    # can be brute-forced offline if vault ciphertext leaks.
     raw_str = raw.strip()
-    if len(raw_str) == 64:
-        try:
-            return bytes.fromhex(raw_str)
-        except ValueError:
-            pass
-    return hashlib.sha256(raw_str.encode("utf-8")).digest()
+    if len(raw_str) != 64:
+        raise RuntimeError(
+            "KEY_VAULT_MASTER_KEY must be 64 hex characters (32 bytes). "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    try:
+        return bytes.fromhex(raw_str)
+    except ValueError as e:
+        raise RuntimeError("KEY_VAULT_MASTER_KEY is not valid hexadecimal.") from e
 
 
 def encrypt_api_key(plaintext_key: str, user_id: str, master_key_hex: Optional[str] = None) -> str:

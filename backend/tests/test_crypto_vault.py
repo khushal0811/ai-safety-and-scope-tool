@@ -170,7 +170,7 @@ def test_vault_api_verify_empty_returns_400():
     """Verify POST /api/vault/verify-key rejects authenticated requests with no keys."""
     res = client.post(
         "/api/vault/verify-key",
-        headers={"X-User-Id": TEST_USER_ID},
+        headers={"Authorization": "Bearer " + TEST_USER_ID},
         json={},
     )
     assert res.status_code == 400
@@ -194,7 +194,7 @@ def test_vault_api_verify_key_mock_success(monkeypatch):
 
     res = client.post(
         "/api/vault/verify-key",
-        headers={"X-User-Id": TEST_USER_ID},
+        headers={"Authorization": "Bearer " + TEST_USER_ID},
         json={"openrouter_key": "sk-or-v1-valid-test-key"},
     )
     assert res.status_code == 200
@@ -223,7 +223,7 @@ def test_vault_api_verify_key_mock_unauthorized(monkeypatch):
 
     res = client.post(
         "/api/vault/verify-key",
-        headers={"X-User-Id": TEST_USER_ID},
+        headers={"Authorization": "Bearer " + TEST_USER_ID},
         json={"openrouter_key": "sk-or-v1-bad-key"},
     )
     assert res.status_code == 200
