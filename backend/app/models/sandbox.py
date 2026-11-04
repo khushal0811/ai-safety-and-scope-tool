@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class SandboxDryRunRequest(BaseModel):
     """Request payload for dry-running a command in the micro-sandbox."""
 
-    command: str = Field(..., description="Offensive CLI command or synthesized remediation to dry-run")
+    command: str = Field(..., max_length=20_000, description="Offensive CLI command or synthesized remediation to dry-run")
     roe_id: Optional[str] = Field(default="ROE-PRESET-NET-001", description="Active RoE identifier for scope cross-referencing")
     strict_syntax: bool = Field(default=True, description="Enforce strict POSIX and tool-specific flag grammar")
     timeout_ms: int = Field(default=5000, ge=500, le=30000, description="Virtual execution timeout in milliseconds")

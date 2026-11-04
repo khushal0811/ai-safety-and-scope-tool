@@ -4,7 +4,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from app.api.deps import get_authenticated_user_id
+from starlette.concurrency import run_in_threadpool
+from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
 from app.data.presets import ROE_PRESETS
 from app.db import fetch_custom_roes, fetch_roe_presets, save_custom_roe
 from app.engine.roe_parser import parse_unstructured_roe
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/roe", tags=["Rules of Engagement"])
 class ParseTextRequest(BaseModel):
     """Raw text payload for RoE document extraction."""
 
-    content: str = Field(..., description="Markdown or plaintext RoE document text.")
+    content: str = Field(..., max_length=500 * 1024, description="Markdown or plaintext RoE document text.")
     filename: Optional[str] = Field(default="custom_roe.md", description="Optional source filename.")
 
 
@@ -69,7 +70,8 @@ async def get_custom_roes(
 @router.post("/parse-document", response_model=RoeScope)
 async def parse_roe_document(
     file: UploadFile = File(...),
-    user_id: Optional[str] = Depends(get_authenticated_user_id),
+    # LLM-backed extraction spends the server's key: require a verified user
+    user_id: str = Depends(require_authenticated_user_id),
 ) -> RoeScope:
     """Upload and parse an unstructured .md or .txt RoE document using LLM extraction."""
     filename = file.filename or "uploaded_roe.md"
@@ -80,7 +82,8 @@ async def parse_roe_document(
             detail="Unsupported file format. Please upload a Markdown (.md) or Plaintext (.txt) document.",
         )
 
-    content_bytes = await file.read()
+    # Read at most the limit plus one byte, so an oversized upload is never fully buffered
+    content_bytes = await file.read(500 * 1024 + 1)
     if len(content_bytes) > 500 * 1024:
         raise HTTPException(status_code=400, detail="File exceeds 500 KB upload limit.")
 
@@ -92,7 +95,7 @@ async def parse_roe_document(
     try:
         scope = await parse_unstructured_roe(content_text, filename=filename)
         # Asynchronously persist custom RoE in Supabase
-        save_custom_roe(scope.model_dump(), user_id=user_id, raw_document=content_text)
+        await run_in_threadpool(save_custom_roe, scope.model_dump(), user_id=user_id, raw_document=content_text)
         return scope
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -101,12 +104,13 @@ async def parse_roe_document(
 @router.post("/parse-text", response_model=RoeScope)
 async def parse_roe_text(
     request: ParseTextRequest,
-    user_id: Optional[str] = Depends(get_authenticated_user_id),
+    # LLM-backed extraction spends the server's key: require a verified user
+    user_id: str = Depends(require_authenticated_user_id),
 ) -> RoeScope:
     """Parse raw pasted RoE text directly without multipart file upload."""
     try:
         scope = await parse_unstructured_roe(request.content, filename=request.filename or "custom_roe.md")
-        save_custom_roe(scope.model_dump(), user_id=user_id, raw_document=request.content)
+        await run_in_threadpool(save_custom_roe, scope.model_dump(), user_id=user_id, raw_document=request.content)
         return scope
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

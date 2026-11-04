@@ -25,13 +25,14 @@ class FrontierModelInfo(BaseModel):
 class BenchmarkQueryRequest(BaseModel):
     """Request to query frontier model(s) via OpenRouter."""
 
-    prompt: str = Field(..., description="Offensive cybersecurity prompt or pentesting task.")
+    prompt: str = Field(..., max_length=20_000, description="Offensive cybersecurity prompt or pentesting task.")
     model_id: Optional[str] = Field(
         default=None,
         description="Target model slug, or None/'all' to benchmark all frontier models.",
     )
     system_prompt: Optional[str] = Field(
         default=None,
+        max_length=20_000,
         description="Optional system prompt framing the assistant's persona.",
     )
     temperature: float = Field(default=0.0, ge=0.0, le=2.0, description="Sampling temperature.")
@@ -66,7 +67,7 @@ class BenchmarkEvaluateRequest(BaseModel):
     """Request to query frontier models and simultaneously evaluate outputs against RoE."""
 
     roe: RoeScope = Field(..., description="Active Rules of Engagement scope to evaluate against.")
-    prompt: str = Field(..., description="Pentest prompt provided to the frontier models.")
+    prompt: str = Field(..., max_length=20_000, description="Pentest prompt provided to the frontier models.")
     models: Optional[List[str]] = Field(
         default=None,
         description="List of model slugs to benchmark, or None for all 4 frontier models.",

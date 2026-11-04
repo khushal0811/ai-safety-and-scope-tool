@@ -3,8 +3,9 @@
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
 from app.db import (
     delete_audit_logs,
@@ -34,16 +35,18 @@ async def delete_audit_history(
     user_id: str = Depends(require_authenticated_user_id),
 ) -> Dict[str, Any]:
     """Permanently delete specified audit records from Supabase PostgreSQL audit_logs table."""
-    success = delete_audit_logs(audit_ids=payload.audit_ids, user_id=user_id)
-    return {"success": success, "deleted_count": len(payload.audit_ids)}
+    deleted = delete_audit_logs(audit_ids=payload.audit_ids, user_id=user_id)
+    if deleted is None:
+        raise HTTPException(status_code=500, detail="Failed to delete audit logs.")
+    return {"success": True, "deleted_count": deleted}
 
 
 @router.post("", response_model=AuditResult)
 @router.post("/full", response_model=AuditResult)
 async def audit_model_output(
     request: AuditRequest,
-    background_tasks: BackgroundTasks,
-    user_id: Optional[str] = Depends(get_authenticated_user_id),
+    # Requires a verified user: this path can invoke the AI Judge, which spends the server's LLM key
+    user_id: str = Depends(require_authenticated_user_id),
 ) -> AuditResult:
     """Audit raw model output against active Rules of Engagement (RoE) with intelligent remediation.
     
@@ -56,7 +59,7 @@ async def audit_model_output(
     # Persist to Supabase synchronously before returning so immediate report export sees the new audit
     data = result.model_dump(mode="json")
     data["roe_id"] = getattr(request.roe, "roe_id", getattr(request.roe, "id", "UNKNOWN"))
-    save_audit_log(data, user_id, elapsed_ms)
+    await run_in_threadpool(save_audit_log, data, user_id, elapsed_ms)
 
     return result
 
@@ -64,15 +67,16 @@ async def audit_model_output(
 @router.post("/deterministic", response_model=AuditResult)
 async def audit_command_deterministic(
     request: DeterministicAuditRequest,
-    background_tasks: BackgroundTasks,
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> AuditResult:
     """Perform instant deterministic inspection on a CLI command string."""
-    from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
+    from app.data.presets import get_roe_preset_by_id
 
     effective_roe = request.roe
     if effective_roe is None:
-        effective_roe = get_roe_preset_by_id(request.roe_id) or ROE_PRESETS[0]
+        effective_roe = get_roe_preset_by_id(request.roe_id)
+        if effective_roe is None:
+            raise HTTPException(status_code=404, detail=f"Unknown RoE id: {request.roe_id!r}")
         request = request.model_copy(update={"roe": effective_roe})
 
     t0 = time.perf_counter()
@@ -81,7 +85,7 @@ async def audit_command_deterministic(
 
     data = result.model_dump(mode="json")
     data["roe_id"] = getattr(effective_roe, "roe_id", getattr(effective_roe, "id", "UNKNOWN"))
-    save_audit_log(data, user_id, elapsed_ms)
+    await run_in_threadpool(save_audit_log, data, user_id, elapsed_ms)
 
     return result
 
@@ -104,14 +108,12 @@ async def get_audit_metrics(
 
 
 @router.get("/db-status", response_model=Dict[str, Any])
-async def get_db_status() -> Dict[str, Any]:
-    """Verify Supabase PostgreSQL connectivity and operational status."""
+async def get_db_status(
+    user_id: str = Depends(require_authenticated_user_id),
+) -> Dict[str, Any]:
+    """Verify Supabase PostgreSQL connectivity. Requires authentication; reports only connectivity."""
     connected = is_database_connected()
-    return {
-        "status": "connected" if connected else "disconnected",
-        "database": "Supabase PostgreSQL",
-        "authenticated": connected,
-    }
+    return {"status": "connected" if connected else "disconnected"}
 
 
 @router.get("/report")

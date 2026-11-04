@@ -292,7 +292,7 @@ def test_api_benchmark_evaluate_persists_when_authenticated(
             res = client.post(
                 "/api/benchmark/evaluate",
                 json=payload,
-                headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+                headers={"Authorization": "Bearer " + "11111111-1111-1111-1111-111111111111"},
             )
             assert res.status_code == 200
             data = res.json()
@@ -335,7 +335,7 @@ def test_api_benchmark_history_endpoints(client: TestClient):
     with patch("app.api.routes_benchmark.fetch_benchmark_history", return_value=mock_runs):
         res = client.get(
             "/api/benchmark/history",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers={"Authorization": "Bearer " + "11111111-1111-1111-1111-111111111111"},
         )
         assert res.status_code == 200
         data = res.json()
@@ -357,7 +357,7 @@ def test_api_benchmark_history_endpoints(client: TestClient):
             "DELETE",
             "/api/benchmark/history",
             json={"benchmark_ids": ["BM-ABC12345"]},
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers={"Authorization": "Bearer " + "11111111-1111-1111-1111-111111111111"},
         )
         assert res.status_code == 200
         assert res.json() == {"deleted": 1, "status": "success"}

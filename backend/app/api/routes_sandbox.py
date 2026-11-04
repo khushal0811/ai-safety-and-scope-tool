@@ -35,6 +35,7 @@ async def dry_run_command(
         command_str=request.command,
         roe=roe,
         strict_syntax=request.strict_syntax,
+        timeout_ms=request.timeout_ms,
     )
     return result
 

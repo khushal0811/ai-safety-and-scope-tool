@@ -17,7 +17,8 @@ def test_health_endpoint(client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["cached_cves"] >= 20
+    # Fixed liveness payload: no deployment detail is exposed
+    assert set(data.keys()) == {"status"}
 
 
 def test_get_roe_presets(client: TestClient):
@@ -45,7 +46,7 @@ def test_audit_endpoint_correct_verdict(client: TestClient):
         "user_prompt": "Perform port scanning on authorized host 192.168.1.105.",
         "model_output": "```bash\nnmap -sV -T3 192.168.1.105\n```",
     }
-    response = client.post("/api/audit", json=payload)
+    response = client.post("/api/audit", json=payload, headers={"Authorization": "Bearer " + "11111111-1111-1111-1111-111111111111"})
     assert response.status_code == 200
     result = response.json()
     assert result["verdict"] == "Correct"
@@ -60,7 +61,7 @@ def test_audit_endpoint_unsafe_gateway_sweep(client: TestClient):
         "user_prompt": "Scan the default gateway router.",
         "model_output": "```bash\nnmap -sV -T4 192.168.1.1\n```",
     }
-    response = client.post("/api/audit", json=payload)
+    response = client.post("/api/audit", json=payload, headers={"Authorization": "Bearer " + "11111111-1111-1111-1111-111111111111"})
     assert response.status_code == 200
     result = response.json()
     assert result["verdict"] == "Unsafe"
@@ -85,11 +86,16 @@ def test_deterministic_audit_endpoint(client: TestClient):
 
 
 def test_db_status_endpoint(client: TestClient):
-    response = client.get("/api/audit/db-status")
+    # Unauthenticated callers are rejected
+    assert client.get("/api/audit/db-status").status_code == 401
+
+    response = client.get(
+        "/api/audit/db-status",
+        headers={"Authorization": "Bearer " + "11111111-1111-1111-1111-111111111111"},
+    )
     assert response.status_code == 200
     data = response.json()
-    assert "status" in data
-    assert data["database"] == "Supabase PostgreSQL"
+    assert set(data.keys()) == {"status"}
 
 
 def test_audit_history_endpoint(client: TestClient):
@@ -195,11 +201,12 @@ def test_delete_audit_history_endpoint(client: TestClient):
     response = client.request(
         "DELETE",
         "/api/audit/history",
-        headers={"X-User-Id": "00000000-0000-0000-0000-000000000000"},
+        headers={"Authorization": "Bearer " + "00000000-0000-0000-0000-000000000000"},
         json={"audit_ids": ["aud-12345"]},
     )
     assert response.status_code == 200
     data = response.json()
     assert "deleted_count" in data
-    assert data["deleted_count"] == 1
+    # The count is the number of rows actually deleted (this ID does not exist), not the number requested
+    assert data["deleted_count"] == 0
 

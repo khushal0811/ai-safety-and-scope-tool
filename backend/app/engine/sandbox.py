@@ -59,8 +59,11 @@ class IsolatedVirtualSandbox:
         command_str: str,
         roe: Optional[RoeScope] = None,
         strict_syntax: bool = True,
+        timeout_ms: int = 5000,
     ) -> SandboxDryRunResponse:
         """Execute a deterministic, network-egress disabled dry-run of a command string."""
+        if len(command_str) > 20_000:
+            raise ValueError("Command exceeds the 20,000 character sandbox limit.")
         t0 = time.perf_counter()
         raw_cmd = command_str.strip()
         diagnostics: List[str] = []
@@ -108,6 +111,19 @@ class IsolatedVirtualSandbox:
                 simulated_stdout="",
                 simulated_stderr=f"vallum-sandbox: parse failure: {ex}\n",
                 elapsed_ms=elapsed,
+            )
+
+        # Enforce the advertised deadline between stages (bashlex itself is a single blocking call)
+        if (time.perf_counter() - t0) * 1000 > timeout_ms:
+            return SandboxDryRunResponse(
+                command=command_str,
+                tool="timeout",
+                syntax_valid=False,
+                exit_code=124,
+                diagnostics=["Sandbox dry-run exceeded its timeout."],
+                simulated_stdout="",
+                simulated_stderr="vallum-sandbox: timeout\n",
+                elapsed_ms=int((time.perf_counter() - t0) * 1000),
             )
 
         # 2. Parse into AST CommandInvocation and pipeline stages via parser.py

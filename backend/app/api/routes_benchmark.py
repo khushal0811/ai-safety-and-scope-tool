@@ -11,6 +11,7 @@ import logging
 from typing import List, Optional
 from uuid import uuid4
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
 from app.db.supabase_client import (
@@ -88,7 +89,6 @@ async def list_benchmark_models():
 async def query_benchmark_models(
     request: BenchmarkQueryRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
-    x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ):
     """Query one or all frontier models via OpenRouter or system Groq key.
@@ -100,13 +100,11 @@ async def query_benchmark_models(
     timestamp = datetime.now(timezone.utc).isoformat()
 
     # Only ever pull vault keys for the verified caller's own account.
-    if user_id and (not x_openrouter_key or not x_groq_key):
+    if user_id and not x_openrouter_key:
         from app.db.supabase_client import get_user_vault_keys
         vault_keys = get_user_vault_keys(user_id)
         if not x_openrouter_key and vault_keys.get("openrouter_key"):
             x_openrouter_key = vault_keys["openrouter_key"]
-        if not x_groq_key and vault_keys.get("groq_key"):
-            x_groq_key = vault_keys["groq_key"]
 
     if request.model_id and request.model_id.lower() != "all":
         single_res = await openrouter_client.query_model(
@@ -114,7 +112,6 @@ async def query_benchmark_models(
             prompt=request.prompt,
             system_prompt=request.system_prompt,
             api_key=x_openrouter_key,
-            groq_key=x_groq_key,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
@@ -124,7 +121,6 @@ async def query_benchmark_models(
             prompt=request.prompt,
             system_prompt=request.system_prompt,
             api_key=x_openrouter_key,
-            groq_key=x_groq_key,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
@@ -140,20 +136,17 @@ async def query_benchmark_models(
 async def evaluate_benchmark_models(
     request: BenchmarkEvaluateRequest,
     x_openrouter_key: Optional[str] = Header(None, alias="X-OpenRouter-Key"),
-    x_groq_key: Optional[str] = Header(None, alias="X-Groq-Key"),
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ):
     """Query frontier models and evaluate each response against the active RoE scope."""
     timestamp = datetime.now(timezone.utc).isoformat()
 
     # Only ever pull vault keys for the verified caller's own account.
-    if user_id and (not x_openrouter_key or not x_groq_key):
+    if user_id and not x_openrouter_key:
         from app.db.supabase_client import get_user_vault_keys
         vault_keys = get_user_vault_keys(user_id)
         if not x_openrouter_key and vault_keys.get("openrouter_key"):
             x_openrouter_key = vault_keys["openrouter_key"]
-        if not x_groq_key and vault_keys.get("groq_key"):
-            x_groq_key = vault_keys["groq_key"]
 
     # 1. Dispatch queries across target models with explicit structured RoE boundaries
     benchmark_system_prompt = build_benchmark_system_prompt(request.roe)
@@ -162,7 +155,6 @@ async def evaluate_benchmark_models(
         models=request.models,
         system_prompt=benchmark_system_prompt,
         api_key=x_openrouter_key,
-        groq_key=x_groq_key,
         temperature=request.temperature,
     )
 
@@ -320,7 +312,8 @@ async def evaluate_benchmark_models(
     # Persist benchmark run to PostgreSQL if user is authenticated
     if user_id:
         try:
-            save_benchmark_run(
+            await run_in_threadpool(
+                save_benchmark_run,
                 benchmark_data={
                     "benchmark_id": benchmark_id,
                     "roe_id": request.roe.roe_id,
@@ -349,7 +342,7 @@ async def evaluate_benchmark_models(
 @benchmark_router.get("/history", response_model=List[BenchmarkRunRecord])
 async def get_benchmark_history(
     user_id: Optional[str] = Depends(get_authenticated_user_id),
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
 ):
     """Retrieve historical benchmark runs for the authenticated user."""
     if not user_id:
@@ -366,8 +359,9 @@ async def delete_benchmark_history(
     if not payload.benchmark_ids:
         return {"deleted": 0, "status": "noop"}
 
-    success = delete_benchmark_runs(benchmark_ids=payload.benchmark_ids, user_id=auth_user_id)
-    if not success:
+    deleted = delete_benchmark_runs(benchmark_ids=payload.benchmark_ids, user_id=auth_user_id)
+    if deleted is None:
         logger.warning(f"[Benchmark] Failed to delete runs for user {auth_user_id}")
-    return {"deleted": len(payload.benchmark_ids), "status": "success"}
+        raise HTTPException(status_code=500, detail="Failed to delete benchmark runs.")
+    return {"deleted": deleted, "status": "success"}
 
