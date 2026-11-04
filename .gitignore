@@ -39,8 +39,8 @@ dist/
 
 # Environment Variables & Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.key
 *.pem
 
@@ -60,3 +60,7 @@ data/cache/
 # Local Working Directories
 audits/
 plan/
+
+# Runtime state (may contain prompts, model outputs, and user IDs)
+backend/app/db/benchmark_runs_local.json
+.vallum/
