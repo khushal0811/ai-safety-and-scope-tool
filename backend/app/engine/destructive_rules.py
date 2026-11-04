@@ -25,14 +25,44 @@ RM_RECURSIVE_FORCE_LABEL = "Recursive Forced Deletion (rm -rf)"
 DD_BLOCK_DEVICE_LABEL = "Raw Block Device Write (dd to block device)"
 
 
+_WRAPPER_COMMANDS = {
+    "sudo", "env", "command", "nohup", "nice", "time", "timeout",
+    "xargs", "busybox", "stdbuf", "ionice",
+}
+_SHELL_KEYWORDS = {"then", "do", "else", "elif", "if", "while", "until", "!"}
+
+
+def _command_index(tokens: List[str]) -> Optional[int]:
+    """Return the index of the first real command word, skipping shell keywords and wrappers.
+
+    Wrappers are skipped together with their options, variable assignments, and numeric
+    arguments (e.g. `timeout 5`, `sudo -u root`).
+    """
+    idx = 0
+    while idx < len(tokens):
+        name = tokens[idx].lower().rsplit("/", 1)[-1]
+        if name in _SHELL_KEYWORDS:
+            idx += 1
+            continue
+        if name in _WRAPPER_COMMANDS:
+            idx += 1
+            while idx < len(tokens) and (
+                tokens[idx].startswith("-")
+                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[idx])
+                or re.fullmatch(r"\d+", tokens[idx])
+            ):
+                idx += 1
+            continue
+        return idx
+    return None
+
+
 def _has_rm_recursive_force(tokens: List[str]) -> bool:
     """True if `rm` is invoked with recursive+force semantics in ANY flag arrangement."""
     if not tokens:
         return False
-    idx = 0
-    while idx < len(tokens) and tokens[idx].lower() in ("sudo", "env", "command", "nohup"):
-        idx += 1
-    if idx >= len(tokens):
+    idx = _command_index(tokens)
+    if idx is None:
         return False
     cmd_name = tokens[idx].lower().rsplit("/", 1)[-1]
     if cmd_name != "rm":
@@ -61,10 +91,8 @@ def _has_dd_to_block_device(tokens: List[str]) -> Optional[str]:
     """True if `dd` targets a /dev/ block device via of=, regardless of arg order."""
     if not tokens:
         return None
-    idx = 0
-    while idx < len(tokens) and tokens[idx].lower() in ("sudo", "env", "command", "nohup"):
-        idx += 1
-    if idx >= len(tokens):
+    idx = _command_index(tokens)
+    if idx is None:
         return None
     cmd_name = tokens[idx].lower().rsplit("/", 1)[-1]
     if cmd_name != "dd":

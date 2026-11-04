@@ -5,13 +5,14 @@ Strict Zero Host Execution: Validates tools and flags against contract terms.
 
 import re
 from typing import List, Set, Tuple
-from app.engine.parser import ParsedCommand
+from app.engine.parser import ParsedCommand, extract_and_parse_all_commands
 from app.models.audit import Severity, Violation, ViolationCategory
 from app.models.roe import RoeScope
 
 # Standard local POSIX stream and string processing utilities (not offensive attack tools)
+# Shell interpreters are intentionally NOT whitelisted: their -c payloads are arbitrary code.
 WHITELISTED_SYSTEM_UTILITIES: Set[str] = {
-    "sh", "bash", "zsh", "cat", "grep", "egrep", "fgrep", "awk", "sed",
+    "cat", "grep", "egrep", "fgrep", "awk", "sed",
     "tee", "head", "tail", "sort", "uniq", "cut", "tr", "wc", "echo",
     "printf", "xargs", "column", "base64", "strings", "hexdump", "xxd",
     "od", "fold", "find", "diff", "less", "more", "sleep", "true", "false",
@@ -28,6 +29,28 @@ INTERACTIVE_SESSION_TOOLS: Set[str] = {
     "ssh", "telnet", "rlogin", "nc", "netcat", "socat",
 }
 
+# Nmap timing templates: -T0..-T5, spaced (-T 5) or named (-T insane); normalized to a number
+NMAP_TIMING_PATTERN = r"(?:^|\s)-T\s*([0-5]|paranoid|sneaky|polite|normal|aggressive|insane)\b"
+NMAP_TIMING_NAMES = {
+    "paranoid": 0, "sneaky": 1, "polite": 2,
+    "normal": 3, "aggressive": 4, "insane": 5,
+}
+
+
+def nmap_timing_value(raw: str) -> int:
+    """Normalize an nmap timing template (digit or name) to its numeric value."""
+    raw_t = raw.lower()
+    return NMAP_TIMING_NAMES.get(raw_t, int(raw_t) if raw_t.isdigit() else 0)
+
+
+# RoE prohibited_actions mapped to the tools that perform them
+ACTION_TOOLS = {
+    "password_spraying": {"hydra", "medusa", "patator"},
+    "arp_spoofing": {"arpspoof", "ettercap", "bettercap"},
+    "golden_ticket": {"ticketer", "mimikatz"},
+    "cloud_metadata_access": {"curl", "wget"},
+}
+
 
 def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List[Violation], List[str]]:
     """Validate tool permissions, prohibited flags, and rate constraints."""
@@ -36,10 +59,13 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
     tool = parsed_cmd.tool.lower()
 
     # 1. Sudo Check: Local privilege escalation check
-    has_sudo = (
-        "sudo" in [tok.lower() for tok in parsed_cmd.tokens]
-        or re.search(r"(?:^|[;&|]\s*)sudo\b", parsed_cmd.raw, re.IGNORECASE) is not None
-    )
+    has_sudo = any(
+        tok.lower().rsplit("/", 1)[-1] == "sudo" for tok in parsed_cmd.tokens
+    ) or re.search(
+        r"(?:^|[;&|]\s*)(?:[^\s;&|]*/)?sudo(?:\s|$)",
+        parsed_cmd.raw,
+        re.IGNORECASE,
+    ) is not None
     if has_sudo:
         violations.append(
             Violation(
@@ -110,6 +136,40 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
             )
             modifications.append(f"Replaced interactive session '{stage_tool}' with non-interactive scanner.")
 
+        # Shell interpreter '-c' payload check: the payload is arbitrary code and must be audited
+        if stage_tool in {"sh", "bash", "zsh"}:
+            payload = next(
+                (v for k, v in stage.options.items() if k.lower() == "-c" and v),
+                None,
+            )
+            if payload:
+                violations.append(
+                    Violation(
+                        rule="Arbitrary Shell Execution (-c)",
+                        category=ViolationCategory.DESTRUCTIVE,
+                        severity=Severity.CRITICAL,
+                        detail=f"Shell '-c' payload is arbitrary code: {payload[:200]}",
+                        command=parsed_cmd.raw,
+                    )
+                )
+                modifications.append(f"Dropped shell '-c' payload executed by '{stage_tool}'.")
+                for nested in extract_and_parse_all_commands(payload):
+                    nested_viols, _ = check_tool_and_flags(nested, roe)
+                    violations.extend(nested_viols)
+
+        # Process substitution (<(...) / >(...)) runs an embedded command that is not parsed
+        if re.search(r"[<>]\(", stage.raw):
+            violations.append(
+                Violation(
+                    rule="Unparsed Process Substitution",
+                    category=ViolationCategory.DESTRUCTIVE,
+                    severity=Severity.CRITICAL,
+                    detail="Process substitution executes a nested command that cannot be audited.",
+                    command=parsed_cmd.raw,
+                )
+            )
+            modifications.append("Dropped unparsed process substitution.")
+
         # Piped shell interpreter execution check (e.g. echo ... | bash)
         if idx > 0 and stage_tool in {"sh", "bash", "zsh"}:
             violations.append(
@@ -142,24 +202,22 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
     raw_flag_tokens = {f.split("=", 1)[0].lower() for stage in all_stages for f in stage.flags}
     toks_lower = [t.lower() for stage in all_stages for t in stage.tokens]
 
+    # Normalize '--flag=value' into adjacent '--flag', 'value' tokens so spaced and '=' forms match alike
+    norm_tokens = [part for tok in toks_lower for part in tok.split("=", 1)]
+
     for banned_flag in roe.prohibited_flags:
         bf_clean = banned_flag.strip()
         if not bf_clean:
             continue
         bf_lower = bf_clean.lower()
-        if bf_lower.startswith("-"):
-            # Match flag tokens (e.g. --script-args or -T5) exactly
-            hit = bf_lower in raw_flag_tokens
-        else:
-            # Action-shaped prohibitions (e.g. "s3 rm", "kerberos::golden"):
-            # require the phrase to appear as whole, adjacent tokens
-            phrase_tokens = bf_lower.split()
-            if not phrase_tokens:
-                continue
-            hit = any(
-                toks_lower[i : i + len(phrase_tokens)] == phrase_tokens
-                for i in range(len(toks_lower) - len(phrase_tokens) + 1)
-            )
+        # Ban phrases (flags, flag+value pairs, or action phrases) must appear as whole, adjacent tokens
+        bf_tokens = bf_lower.replace("=", " ").split()
+        if not bf_tokens:
+            continue
+        hit = any(
+            norm_tokens[i : i + len(bf_tokens)] == bf_tokens
+            for i in range(len(norm_tokens) - len(bf_tokens) + 1)
+        )
         if hit:
             violations.append(
                 Violation(
@@ -172,11 +230,27 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
             )
             modifications.append(f'Stripped prohibited parameter "{bf_clean}".')
 
+    # 3b. RoE prohibited actions mapped to the tools that perform them
+    stage_tools = {s.tool.lower() for s in all_stages if s.tool}
+    for action in roe.prohibited_actions:
+        action_key = action.strip().lower()
+        if stage_tools & ACTION_TOOLS.get(action_key, set()):
+            violations.append(
+                Violation(
+                    rule="Prohibited Action",
+                    category=ViolationCategory.POLICY,
+                    severity=Severity.CRITICAL,
+                    detail=f"Action '{action_key}' is prohibited by the RoE.",
+                    command=parsed_cmd.raw,
+                )
+            )
+            modifications.append(f"Dropped prohibited action '{action_key}'.")
+
     # 4. Tool-Specific Parameters: Nmap Timing Template
     if tool == "nmap":
-        timing_match = re.search(r"(?:^|\s)-T([0-5])\b", parsed_cmd.raw)
+        timing_match = re.search(NMAP_TIMING_PATTERN, parsed_cmd.raw, re.IGNORECASE)
         if timing_match:
-            timing_val = int(timing_match.group(1))
+            timing_val = nmap_timing_value(timing_match.group(1))
             if timing_val > roe.max_nmap_timing:
                 violations.append(
                     Violation(
@@ -207,5 +281,21 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
                     )
                 )
                 modifications.append(f"Removed aggressive --min-rate {rate} flag.")
+
+        # Check for --max-rate (previously unchecked)
+        max_rate_match = re.search(r"--max-rate[=\s]+(\d+)", parsed_cmd.raw)
+        if max_rate_match:
+            rate = int(max_rate_match.group(1))
+            if rate >= 1000:
+                violations.append(
+                    Violation(
+                        rule="Excessive Scanning Packet Rate",
+                        category=ViolationCategory.POLICY,
+                        severity=Severity.WARNING,
+                        detail=f"--max-rate {rate} may saturate bandwidth or trigger client firewall bans.",
+                        command=parsed_cmd.raw,
+                    )
+                )
+                modifications.append(f"Flagged aggressive --max-rate {rate} flag.")
 
     return violations, modifications

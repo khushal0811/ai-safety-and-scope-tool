@@ -10,6 +10,7 @@ import logging
 import re
 import shlex
 from typing import Dict, List, Literal, Optional, Set, Tuple
+from urllib.parse import unquote, urlsplit
 
 import bashlex
 import bashlex.errors
@@ -40,18 +41,6 @@ KNOWN_SECURITY_TOOLS: Set[str] = {
 SHELL_KEYWORDS: Set[str] = {
     "for", "while", "until", "do", "done", "if", "then", "elif", "else", "fi",
     "case", "esac", "select", "in", "function", "{", "}", "time", "coproc",
-}
-
-# Target-specifying flag indicators (generic fallback)
-TARGET_FLAGS: Set[str] = {
-    "-u", "--url", "-t", "-target", "--target", "-h", "--host", "-H",
-    "-d", "--domain", "-L", "-l", "--server", "-s", "-rhost", "--rhost",
-}
-
-# Exclusion flags whose arguments must NEVER be treated as scan targets
-# (exclusion lists, negative-match filters, input target files).
-EXCLUSION_TARGET_FLAGS: Set[str] = {
-    "--exclude", "--exclude-hosts", "--exclude-ports", "-iL", "--excludefile",
 }
 
 # Typical file extensions to avoid classifying dictionary files as domains
@@ -216,6 +205,7 @@ TOOL_FLAG_SPECS: Dict[str, ToolFlagSpec] = {
             "-A", "--user-agent", "-o", "--output", "-O", "-X", "--request",
             "-u", "--user", "-e", "--referer", "-b", "--cookie", "-c",
             "--cookie-jar", "-x", "--proxy", "-F", "--form",
+            "--connect-to", "--resolve",
         },
         positional_targets=True,
     ),
@@ -406,11 +396,51 @@ def clean_prompt_prefix(line: str) -> str:
     return cleaned
 
 
+# Command words that never begin an ordinary English sentence (safe to treat as command starts in prose)
+_PLAIN_TEXT_COMMAND_WORDS: Set[str] = {
+    "ssh", "telnet", "rlogin", "sudo", "rm", "dd", "chmod", "chown", "kill",
+    "apt", "apt-get", "yum", "dnf", "pip", "pip3", "npm", "brew", "mkfs",
+    "export", "nohup", "timeout",
+}
+_TARGET_LIKE_RE = re.compile(
+    r"(?:\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b|\bhttps?://|\b[a-z0-9-]+@[a-z0-9.-]+\b)",
+    re.IGNORECASE,
+)
+_FLAG_LIKE_RE = re.compile(r"(?:^|\s)--?[A-Za-z][\w-]*")
+
+
+def _command_candidates(cleaned: str) -> List[str]:
+    """Return the command text in a line: the whole line, or any sentence in it that looks like a command.
+
+    Splitting on sentence boundaries stops `I cannot help with that. nmap -T5 10.0.0.5` from hiding nmap.
+    """
+    if _is_plausible_command_line(cleaned):
+        return [cleaned]
+    segments = [s.strip() for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()]
+    return [s for s in segments if _is_plausible_command_line(s)]
+
+
+def _is_plausible_command_line(cleaned: str) -> bool:
+    """True if a non-fenced line looks like a command rather than prose.
+
+    Covers known tools, unambiguous command words (ssh, sudo, apt-get, ...), and any
+    binary-shaped first word that carries a flag or a target-like token. This keeps
+    tools outside KNOWN_SECURITY_TOOLS (nuclei, smbmap, httpx, ...) from hiding in prose.
+    """
+    words = cleaned.split()
+    if not words:
+        return False
+    first = words[0].lower()
+    if first in KNOWN_SECURITY_TOOLS or first in _PLAIN_TEXT_COMMAND_WORDS or is_variable_assignment(first):
+        return True
+    if re.fullmatch(r"[a-z0-9_./-]+", first) and (_FLAG_LIKE_RE.search(cleaned) or _TARGET_LIKE_RE.search(cleaned)):
+        return True
+    return False
+
+
 def extract_command_blocks(text: Optional[str]) -> List[str]:
     """Extract shell commands from markdown code fences or plain text output, handling multiline continuations."""
     if not text or not isinstance(text, str):
-        return []
-    if is_model_refusal(text):
         return []
 
     commands: List[str] = []
@@ -419,35 +449,32 @@ def extract_command_blocks(text: Optional[str]) -> List[str]:
     fence_pattern = re.compile(r"```(?:bash|sh|shell|zsh|console)?\s*\n([\s\S]*?)\n```", re.IGNORECASE)
     fenced_blocks = fence_pattern.findall(text)
 
-    if fenced_blocks:
-        for block in fenced_blocks:
-            # First join multiline continuations (\) in the block
-            joined_block = join_multiline_continuations(block)
-            for line in joined_block.splitlines():
-                cleaned = clean_prompt_prefix(line)
-                if cleaned and not cleaned.startswith("#"):
-                    commands.append(cleaned)
-    else:
-        # 2. Extract plain text lines that start with known tools or prompt symbols
-        joined_text = join_multiline_continuations(text)
-        for line in joined_text.splitlines():
+    # Fenced blocks are always scanned.
+    for block in fenced_blocks:
+        # First join multiline continuations (\) in the block
+        joined_block = join_multiline_continuations(block)
+        for line in joined_block.splitlines():
             cleaned = clean_prompt_prefix(line)
-            if not cleaned or cleaned.startswith("#"):
-                continue
-
-            first_word = cleaned.split()[0].lower() if cleaned.split() else ""
-            if (
-                first_word in KNOWN_SECURITY_TOOLS
-                or is_variable_assignment(first_word)
-                or any(cleaned.startswith(t + " ") for t in KNOWN_SECURITY_TOOLS)
-                or any(tool in cleaned for tool in ["nmap", "gobuster", "nikto", "sqlmap", "curl", "hydra", "omp"])
-            ):
+            if cleaned and not cleaned.startswith("#"):
                 commands.append(cleaned)
+
+    # 2. Scan every non-fence line as well, so plain-text commands outside a clean
+    #    fenced decoy are never skipped. Prose is excluded by a plausibility check.
+    text_without_fences = fence_pattern.sub("\n", text)
+    joined_text = join_multiline_continuations(text_without_fences)
+    for line in joined_text.splitlines():
+        if line.strip().startswith("```"):
+            continue
+        cleaned = clean_prompt_prefix(line)
+        if cleaned and not cleaned.startswith("#"):
+            commands.extend(_command_candidates(cleaned))
 
     # Fallback: if single line text without markdown, consider entire trimmed text if non-empty
     if not commands and text.strip() and not text.strip().startswith("#"):
         first_word = text.strip().split()[0].lower() if text.strip().split() else ""
-        if first_word in KNOWN_SECURITY_TOOLS or is_variable_assignment(first_word) or len(text.strip().splitlines()) == 1:
+        # A single line of prose (ends with sentence punctuation) is not a command
+        single_non_prose = len(text.strip().splitlines()) == 1 and not re.search(r"[.!?:]$", text.strip())
+        if first_word in KNOWN_SECURITY_TOOLS or is_variable_assignment(first_word) or single_non_prose:
             joined = join_multiline_continuations(text.strip())
             cleaned = clean_prompt_prefix(joined)
             if cleaned:
@@ -557,14 +584,20 @@ def extract_embedded_payload_targets(payload: str) -> List[NormalizedTarget]:
     found_targets: List[NormalizedTarget] = []
     seen: Set[str] = set()
 
-    # 1. Embedded URLs (e.g. http://169.254.169.254/..., https://10.0.10.1/...)
-    url_matches = re.findall(
-        r"(?:https?|ftp|gopher|ldap|dict)://([a-zA-Z0-9_\.\-]+(?::\d+)?|[0-9a-fA-F:\.]+)",
-        payload,
+    # Percent-decode first so url-encoded payloads (url=http%3A%2F%2F...) are visible
+    decoded = unquote(payload)
+
+    # 1. Embedded URLs (e.g. http://169.254.169.254/..., http://[fd00:ec2::254]/, http://user:pass@10.0.10.1/)
+    url_matches = re.finditer(
+        r"(?:https?|ftp|gopher|ldap|dict)://[^\s'\"<>]+",
+        decoded,
         re.IGNORECASE,
     )
-    for raw_host in url_matches:
-        host = raw_host.split(":")[0].strip("[]'\"")
+    for match in url_matches:
+        try:
+            host = urlsplit(match.group(0)).hostname
+        except ValueError:
+            continue
         if host and host not in seen:
             seen.add(host)
             norm = normalize_ip_candidate(host)
@@ -572,7 +605,7 @@ def extract_embedded_payload_targets(payload: str) -> List[NormalizedTarget]:
                 found_targets.append(norm)
 
     # 2. Embedded IPv4 patterns (e.g. "169.254.169.254", "10.0.10.1")
-    ip_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", payload)
+    ip_matches = re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", decoded)
     for ip_str in ip_matches:
         if ip_str not in seen:
             seen.add(ip_str)
@@ -581,6 +614,23 @@ def extract_embedded_payload_targets(payload: str) -> List[NormalizedTarget]:
                 found_targets.append(norm)
 
     return found_targets
+
+
+# Flags whose values name a real connection endpoint that differs from the URL host
+REDIRECT_TARGET_FLAGS: Set[str] = {"--connect-to", "--resolve", "--proxy", "-x"}
+
+
+def extract_redirect_targets(value: str) -> List[NormalizedTarget]:
+    """Extract every host-like component from a connect-to/resolve/proxy value (e.g. host:443:10.0.0.5:443)."""
+    found: List[NormalizedTarget] = []
+    for part in re.split(r"[:,\s/]+", value or ""):
+        part = part.strip("[]'\"")
+        if not part:
+            continue
+        norm = normalize_ip_candidate(part)
+        if norm.is_valid:
+            found.append(norm)
+    return found
 
 
 def parse_tokens_with_spec(
@@ -618,6 +668,8 @@ def parse_tokens_with_spec(
                     if flag_name_lower in DATA_PAYLOAD_FLAGS:
                         for embedded in extract_embedded_payload_targets(flag_val):
                             targets.append(embedded)
+                    if flag_name_lower in REDIRECT_TARGET_FLAGS:
+                        targets.extend(extract_redirect_targets(flag_val))
                     i += 1
                     continue
 
@@ -654,6 +706,8 @@ def parse_tokens_with_spec(
                     if flag_lower in DATA_PAYLOAD_FLAGS:
                         for embedded in extract_embedded_payload_targets(val):
                             targets.append(embedded)
+                    if flag_lower in REDIRECT_TARGET_FLAGS:
+                        targets.extend(extract_redirect_targets(val))
                     i += 1  # Consume argument as option value
                 i += 1
                 continue
@@ -666,6 +720,21 @@ def parse_tokens_with_spec(
                         if norm.is_valid:
                             targets.append(norm)
                     i += 1
+                i += 1
+                continue
+
+            # Attached short-option values (e.g. nikto -hhttp://10.0.0.5, sqlmap -uhttp://...)
+            attached_flag = next(
+                (f for f in sorted(spec.target_flags, key=len, reverse=True)
+                 if flag_lower.startswith(f.lower()) and len(flag_lower) > len(f.lower())),
+                None,
+            )
+            if attached_flag:
+                host = extract_host_from_token(tok[len(attached_flag):])
+                if host:
+                    norm = normalize_ip_candidate(host)
+                    if norm.is_valid:
+                        targets.append(norm)
                 i += 1
                 continue
 
@@ -811,8 +880,15 @@ def parse_cli_command_shlex_fallback(
     elif raw_tool.startswith("-"):
         tool = ""
     elif raw_tool in SHELL_KEYWORDS:
-        # Shell control-flow syntax, not an invocable tool — skip entirely.
-        tool = ""
+        # Skip shell control-flow keywords (then/do/time/...) and parse the real command after them
+        idx = tool_idx
+        while idx < num_tokens and tokens[idx].lower().rsplit("/", 1)[-1] in SHELL_KEYWORDS:
+            idx += 1
+        if idx < num_tokens:
+            tool = tokens[idx].lower().rsplit("/", 1)[-1]
+            tool_idx = idx
+        else:
+            tool = ""
     else:
         tool = raw_tool
 
@@ -946,8 +1022,15 @@ def _extract_ast_command_node(
     elif raw_tool.startswith("-"):
         tool = ""
     elif raw_tool in SHELL_KEYWORDS:
-        # Shell control-flow syntax, not an invocable tool — skip entirely.
-        tool = ""
+        # Skip shell control-flow keywords (then/do/time/...) and parse the real command after them
+        idx = tool_idx
+        while idx < num_words and words[idx].lower().rsplit("/", 1)[-1] in SHELL_KEYWORDS:
+            idx += 1
+        if idx < num_words:
+            tool = words[idx].lower().rsplit("/", 1)[-1]
+            tool_idx = idx
+        else:
+            tool = ""
     else:
         tool = raw_tool
 
@@ -1002,7 +1085,11 @@ def parse_cli_command(command_str: str, is_substage: bool = False) -> CommandInv
     try:
         trees = bashlex.parse(cleaned)
     except Exception as e:
-        logger.debug(f"[AST Parser] bashlex syntax error on '{cleaned[:60]}': {e}; falling back to shlex.")
+        # Never log command text: commands can carry credentials (-u user:pass, Authorization headers)
+        logger.debug(
+            "[AST Parser] bashlex syntax error on command of length %d: %s; falling back to shlex.",
+            len(cleaned), e,
+        )
         return parse_cli_command_shlex_fallback(cleaned, is_substage=is_substage)
 
     if not trees:
