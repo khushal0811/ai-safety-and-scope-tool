@@ -2,6 +2,7 @@
 > **Automated Empirical Auditing, Scope Verification, and Safe Command Remediation for AI-Assisted Penetration Testing**
 > *Named after the ancient Roman "Vallum" (fortified defensive boundary rampart) — strictly enforcing deterministic scope perimeter defenses.*
 
+[![CI](https://github.com/khushal0811/ai-safety-and-scope-tool/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/khushal0811/ai-safety-and-scope-tool/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-Vite-61DAFB.svg)](https://react.dev/)
@@ -112,7 +113,7 @@ Vallum follows an architectural, tactile dark-canvas design philosophy focused o
 
 ## 📚 Documentation & Lab Walkthroughs
 
-* [**Deployment & Setup Manual (`docs/SETUP.md`)**](docs/SETUP.md): Step-by-step installation, environment variables, Supabase migrations (`001` through `004`), and API vault setup.
+* [**Deployment & Setup Manual (`docs/SETUP.md`)**](docs/SETUP.md): Step-by-step installation, environment variables, Supabase migrations (`001` through `012`), and API vault setup.
 * [**20-Scenario Lab Walkthrough (`docs/LAB_WALKTHROUGH.md`)**](docs/LAB_WALKTHROUGH.md): Comprehensive offensive validation matrix testing Metasploitable 2, DVWA, Nmap timing templates, SQLMap destructive queries, and cloud metadata SSRF.
 
 ---
@@ -135,7 +136,7 @@ ai-safety-and-scope-tool/
 │   │   ├── lib/              # Auth store, benchmark store, history store, crypto vault, diff engine
 │   │   └── types/            # TypeScript interfaces
 ├── supabase/                 # PostgreSQL migrations & Row Level Security
-│   └── migrations/           # 001_initial_schema to 004_auth_rbac_hardening
+│   └── migrations/           # 001_initial_schema to 012_audit_attestation_hardening
 ├── docs/                     # SETUP.md & LAB_WALKTHROUGH.md
 └── README.md
 ```

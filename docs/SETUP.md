@@ -29,7 +29,7 @@ ai-safety-and-scope-tool/
 │   │   ├── lib/              # Client state, auth store, crypto vault, diff engine
 │   │   └── types/            # TypeScript interfaces
 ├── supabase/
-│   └── migrations/           # 001_initial_schema to 004_auth_rbac_hardening
+│   └── migrations/           # 001_initial_schema to 012_audit_attestation_hardening
 └── docs/                     # SETUP.md & LAB_WALKTHROUGH.md
 ```
 
@@ -56,7 +56,8 @@ Create or update `backend/.env` with the following configuration:
 # FastAPI Configuration
 HOST=127.0.0.1
 PORT=8000
-ENVIRONMENT=production
+# Local development mode; deployed environments use "production"
+ENVIRONMENT=development
 
 # Inference Providers
 # Built-in Groq key for default Llama 3.3 70B evaluation
@@ -97,6 +98,14 @@ Execute the following migrations in order via the Supabase Dashboard SQL Editor 
 2. `supabase/migrations/002_user_api_vault.sql`: Zero-knowledge encrypted user API key vault (`user_api_vault`) with AES-256-GCM ciphertext storage.
 3. `supabase/migrations/003_benchmark_runs.sql`: Benchmark telemetry store (`benchmark_runs`) with compliance rate indices.
 4. `supabase/migrations/004_auth_rbac_hardening.sql`: Purges mock/testing accounts, configures verified signup requirements, and establishes the immutable Super Admin rule.
+5. `supabase/migrations/005_security_hardening.sql`: Cascades user deletion to owned rows (no orphaned/global rows) and restricts SELECT policies to owners.
+6. `supabase/migrations/006_admin_role_uid_source.sql`: Moves the admin role source to an immutable auth-UID table and makes profile emails immutable for their owner.
+7. `supabase/migrations/007_remove_guest_insert_policies.sql`: Removes anonymous insert policies so every row must have an owner.
+8. `supabase/migrations/008_benchmark_runs_violation_columns.sql`: Adds the violation columns required by the benchmark writer.
+9. `supabase/migrations/009_audit_verdict_refused.sql`: Adds `Refused` as a first-class audit verdict.
+10. `supabase/migrations/010_definer_search_path.sql`: Pins `search_path` on every `SECURITY DEFINER` function.
+11. `supabase/migrations/011_audit_metrics_rpc.sql`: Server-side aggregation RPC for audit metrics (service-role only).
+12. `supabase/migrations/012_audit_attestation_hardening.sql`: Binds each audit to its canonical RoE and adds the hash-chained, append-only attestation ledger.
 
 ---
 

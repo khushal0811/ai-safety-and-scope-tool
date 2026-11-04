@@ -14,10 +14,12 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: CORS_ORIGINS
-        value: "https://vallum.vercel.app"
+        value: "https://vallum-sst.vercel.app"
       - key: FORWARDED_ALLOW_IPS
         value: "10.0.0.0/8"
       - key: KEY_VAULT_MASTER_KEY
+        sync: false
+      - key: ATTESTATION_HMAC_KEY
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false

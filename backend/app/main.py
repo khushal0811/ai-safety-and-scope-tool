@@ -18,9 +18,10 @@ app = FastAPI(
     title="Vallum — AI Safety & Scope Engine API",
     description="Deterministic verification engine for LLM cybersecurity recommendations.",
     version="0.2.0",
-    # Interactive API docs are a map of the deployment: not exposed in production
+    # Interactive API docs and the schema are a map of the deployment: not exposed in production
     docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
     redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
+    openapi_url="/openapi.json" if settings.ENVIRONMENT != "production" else None,
 )
 
 if settings.ENVIRONMENT not in ("development", "staging", "production"):
