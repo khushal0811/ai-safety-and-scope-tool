@@ -37,7 +37,7 @@ jobs:
 
       - name: Run test suite
         env:
-          ENVIRONMENT: test
+          ENVIRONMENT: development
           # Test-only fixed value, not a production secret. The vault refuses to
           # operate without a 64-hex master key, so CI supplies a dummy one.
           KEY_VAULT_MASTER_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
