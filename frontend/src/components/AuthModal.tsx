@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { UserProfile } from '../types/user';
 import { resolveUserRole } from '../lib/authStore';
 import {
+  isSupabaseConfigured,
   signInWithGoogle,
   signInWithGithub,
   signInWithEmailPassword,
@@ -26,6 +27,10 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   async function handleGoogleLogin() {
+    if (!isSupabaseConfigured) {
+      setError('Authentication is not configured for this deployment.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -46,6 +51,10 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
   }
 
   async function handleGithubLogin() {
+    if (!isSupabaseConfigured) {
+      setError('Authentication is not configured for this deployment.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -70,6 +79,10 @@ export function AuthModal({ currentUser, onLogin, onLogout, onClose }: Props) {
     const cleanEmail = email.trim();
     if (!cleanEmail || !password.trim()) {
       setError('Please provide both your email address and password.');
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setError('Authentication is not configured for this deployment.');
       return;
     }
 

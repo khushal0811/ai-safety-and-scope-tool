@@ -2,11 +2,45 @@ import type { PastAudit } from '../types/history';
 import { supabase, getAuthHeaders } from './supabaseClient';
 
 const STORAGE_PREFIX = 'sst.history.audits';
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// Deployment config sets VITE_API_URL; VITE_API_BASE_URL remains a legacy alias.
+// An empty base means "no backend configured" and must never fall back to localhost,
+// because that would leak the Supabase bearer token to a local process (AUDIT_004 H2).
+const API_BASE = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
+function apiUrl(path: string): string | null {
+  return API_BASE ? `${API_BASE}${path}` : null;
+}
+
+async function getScopedAuthHeaders(): Promise<Record<string, string>> {
+  if (!API_BASE) return {};
+  return getAuthHeaders();
+}
 
 function getUserStorageKey(userId?: string): string | null {
   if (!userId) return null;
   return `${STORAGE_PREFIX}.${userId}`;
+}
+
+export function isPastAudit(value: unknown): value is PastAudit {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Partial<PastAudit>;
+  return (
+    typeof v.id === 'string' &&
+    typeof v.timestamp === 'string' &&
+    typeof v.roeId === 'string' &&
+    typeof v.modelId === 'string' &&
+    typeof v.prompt === 'string' &&
+    !!v.result &&
+    typeof v.result === 'object' &&
+    Array.isArray(v.result.targets) &&
+    Array.isArray(v.result.violation_details)
+  );
+}
+
+function parseStoredAudits(raw: string | null): PastAudit[] {
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed.filter(isPastAudit) : [];
 }
 
 /**
@@ -59,7 +93,7 @@ export function getPastAudits(userId?: string): PastAudit[] {
   }
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : [];
+    return parseStoredAudits(raw);
   } catch {
     return [];
   }
@@ -104,17 +138,20 @@ export async function deletePastAudits(auditIds: string[], userId?: string): Pro
     return [];
   }
 
-  // 1. Delete from Backend FastAPI endpoint
+  // 1. Delete from Backend FastAPI endpoint (only for a configured origin)
   try {
-    const authHeaders = await getAuthHeaders();
-    await fetch(`${API_BASE}/api/audit/history`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({
-        audit_ids: auditIds,
-        user_id: userId,
-      }),
-    });
+    const url = apiUrl('/api/audit/history');
+    if (url) {
+      const authHeaders = await getScopedAuthHeaders();
+      await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          audit_ids: auditIds,
+          user_id: userId,
+        }),
+      });
+    }
   } catch (err) {
     console.warn('[HistoryStore] FastAPI delete failed:', err);
   }
@@ -162,19 +199,21 @@ export async function syncPastAuditsFromCloud(userId?: string): Promise<PastAudi
 
   try {
     // Attempt 1: Fetch via FastAPI backend endpoint filtered by user_id
-    const authHeaders = await getAuthHeaders();
-    const url = `${API_BASE}/api/audit/history?limit=100&user_id=${encodeURIComponent(userId)}`;
-    const res = await fetch(url, {
-      headers: { ...authHeaders },
-    });
-    if (res.ok) {
-      const rows = await res.json();
-      if (Array.isArray(rows)) {
-        const cloudAudits = rows.map(dbRecordToPastAudit);
-        if (key) {
-          localStorage.setItem(key, JSON.stringify(cloudAudits));
+    const url = apiUrl(`/api/audit/history?limit=100&user_id=${encodeURIComponent(userId)}`);
+    if (url) {
+      const authHeaders = await getScopedAuthHeaders();
+      const res = await fetch(url, {
+        headers: { ...authHeaders },
+      });
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows)) {
+          const cloudAudits = rows.map(dbRecordToPastAudit).filter(isPastAudit);
+          if (key) {
+            localStorage.setItem(key, JSON.stringify(cloudAudits));
+          }
+          return cloudAudits;
         }
-        return cloudAudits;
       }
     }
   } catch (err) {
@@ -192,7 +231,7 @@ export async function syncPastAuditsFromCloud(userId?: string): Promise<PastAudi
         .limit(100);
 
       if (!error && Array.isArray(data)) {
-        const cloudAudits = data.map(dbRecordToPastAudit);
+        const cloudAudits = data.map(dbRecordToPastAudit).filter(isPastAudit);
         if (key) {
           localStorage.setItem(key, JSON.stringify(cloudAudits));
         }
@@ -224,13 +263,15 @@ export async function fetchCloudMetrics(userId?: string): Promise<{
   }
 
   try {
-    const authHeaders = await getAuthHeaders();
-    const url = `${API_BASE}/api/audit/metrics?user_id=${encodeURIComponent(userId)}`;
-    const res = await fetch(url, {
-      headers: { ...authHeaders },
-    });
-    if (res.ok) {
-      return await res.json();
+    const url = apiUrl(`/api/audit/metrics?user_id=${encodeURIComponent(userId)}`);
+    if (url) {
+      const authHeaders = await getScopedAuthHeaders();
+      const res = await fetch(url, {
+        headers: { ...authHeaders },
+      });
+      if (res.ok) {
+        return await res.json();
+      }
     }
   } catch (err) {
     console.warn('[Metrics] Failed to fetch cloud metrics:', err);

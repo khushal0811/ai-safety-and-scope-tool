@@ -75,7 +75,11 @@ export function InitialSetupModal({ user, isOpen, onClose, onKeySaved }: Props) 
     setError(null);
     try {
       if (user) {
-        await saveKeysToVault(user.id, { openRouterKey: trimmed });
+        const saved = await saveKeysToVault(user.id, { openRouterKey: trimmed });
+        if (!saved) {
+          setError('The vault rejected this key. It is active for this tab only — retry from Settings.');
+          return;
+        }
       } else {
         saveAllApiKeys({ openRouterKey: trimmed });
       }

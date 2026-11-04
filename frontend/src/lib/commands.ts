@@ -61,20 +61,41 @@ export function tokenize(cmd: string): string[] {
   const tokens: string[] = [];
   const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(cmd)) !== null) tokens.push(m[1] ?? m[2] ?? m[3]);
+  while ((m = re.exec(cmd)) !== null) {
+    const token = m[1] ?? m[2] ?? m[3];
+    if (token !== undefined) tokens.push(token);
+  }
   return tokens;
 }
 
 function basename(t: string): string {
-  return t.split('/').pop()!.toLowerCase();
+  return (t.split('/').pop() ?? t).toLowerCase();
 }
 
 export function detectTool(tokens: string[]): string | null {
   let i = 0;
-  while (i < tokens.length && (WRAPPERS.has(basename(tokens[i])) || /^\w+=/.test(tokens[i]) || /^-/.test(tokens[i]))) i++;
-  if (i >= tokens.length) return null;
-  const first = basename(tokens[i]);
-  if (INTERPRETERS.has(first) && tokens[i + 1]) return basename(tokens[i + 1]).replace(/\.py$/, '');
+  while (i < tokens.length) {
+    const token = tokens[i];
+    if (token === undefined) break;
+    if (!(WRAPPERS.has(basename(token)) || /^\w+=/.test(token) || /^-/.test(token))) break;
+    i++;
+  }
+
+  const firstToken = tokens[i];
+  if (firstToken === undefined) return null;
+  const first = basename(firstToken);
+
+  // Interpreters hide the real tool inside their argument list. Recurse into
+  // the non-flag arguments so `bash -c "nmap 10.0.0.1"` reports `nmap`.
+  if (INTERPRETERS.has(first)) {
+    const rest = tokens.slice(i + 1).filter((t) => !t.startsWith('-'));
+    if (rest.length > 0) {
+      const inner = detectTool(tokenize(rest.join(' ')));
+      if (inner) return inner;
+    }
+    return first;
+  }
+
   return first.replace(/\.py$/, '');
 }
 

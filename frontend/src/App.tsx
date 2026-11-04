@@ -6,7 +6,7 @@ import type { BenchmarkEvaluateResponse, BenchmarkRunRecord } from './types/benc
 import { ROE_PRESETS } from './data/presets';
 import { buildExamples, MODELS, type PromptExample } from './data/models';
 import { runAudit, queryLiveModel } from './services/auditService';
-import { getStoredUser, saveUser, initSupabaseAuthListener } from './lib/authStore';
+import { loadAuthenticatedUser, saveUser, initSupabaseAuthListener } from './lib/authStore';
 import { getPastAudits, savePastAudit, deletePastAudits, clearPastAudits, syncPastAuditsFromCloud } from './lib/historyStore';
 import {
   getPastBenchmarks,
@@ -15,7 +15,7 @@ import {
   clearPastBenchmarks,
   syncPastBenchmarksFromCloud,
 } from './lib/benchmarkStore';
-import { getOpenRouterKey, hasVaultOpenRouterKey, fetchVaultStatus } from './lib/keyStore';
+import { getOpenRouterKey, hasVaultOpenRouterKey, fetchVaultStatus, clearAllKeys } from './lib/keyStore';
 import { NavBar, type AppPage } from './components/NavBar';
 import { RoeSelector, type RoeMode } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
@@ -32,6 +32,24 @@ import { ShieldIcon } from './components/Icons';
 type Theme = 'light' | 'dark';
 type Step = 1 | 2 | 3;
 
+// The static preset list is non-empty in every build; this keeps strict mode
+// honest without a non-null assertion or an undefined render path.
+const DEFAULT_ROE: RoeScope = ROE_PRESETS[0] ?? {
+  roe_id: 'ROE-UNCONFIGURED',
+  name: 'No scope configured',
+  engagement_type: 'custom',
+  summary: '',
+  allowed_cidrs: [],
+  allowed_domains: [],
+  target_hosts: [],
+  prohibited_ips: [],
+  allowed_tools: [],
+  prohibited_tools: [],
+  prohibited_flags: [],
+  prohibited_actions: [],
+  max_nmap_timing: 3,
+};
+
 function initialTheme(): Theme {
   const saved = localStorage.getItem('sst.theme');
   if (saved === 'light' || saved === 'dark') return saved;
@@ -43,8 +61,10 @@ export default function App() {
   const [page, setPage] = useState<AppPage>('studio');
   const [step, setStep] = useState<Step>(1);
 
-  // Authentication state
-  const [user, setUser] = useState<UserProfile | null>(getStoredUser);
+  // Authentication state. The cached profile is never trusted directly: it is
+  // validated against the Supabase auth server before the app is rendered.
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [guestMode, setGuestMode] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [initialSetupOpen, setInitialSetupOpen] = useState(false);
@@ -59,11 +79,11 @@ export default function App() {
 
   // Studio state
   const [roeMode, setRoeMode] = useState<RoeMode>('preset');
-  const [presetId, setPresetId] = useState(ROE_PRESETS[0].roe_id);
+  const [presetId, setPresetId] = useState(DEFAULT_ROE.roe_id);
   const [customRoe, setCustomRoe] = useState('');
   const [customScope, setCustomScope] = useState<RoeScope | null>(null);
 
-  const [modelId, setModelId] = useState(MODELS[0].id);
+  const [modelId, setModelId] = useState(MODELS[0]?.id ?? '');
   const [prompt, setPrompt] = useState('');
   const [modelOutput, setModelOutput] = useState('');
   const [activeExample, setActiveExample] = useState<string | null>(null);
@@ -75,9 +95,9 @@ export default function App() {
   const [queryingModel, setQueryingModel] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
 
-  const [trustTier, setTrustTier] = useState<'hybrid' | 'deterministic'>(() => {
-    return (localStorage.getItem('vallum.trust_tier') as 'hybrid' | 'deterministic') || 'hybrid';
-  });
+  const [trustTier, setTrustTier] = useState<'hybrid' | 'deterministic'>(() =>
+    localStorage.getItem('vallum.trust_tier') === 'deterministic' ? 'deterministic' : 'hybrid'
+  );
 
   function handleSelectTrustTier(tier: 'hybrid' | 'deterministic') {
     setTrustTier(tier);
@@ -161,19 +181,46 @@ export default function App() {
   useEffect(() => {
     const activeModel = MODELS.find((m) => m.id === modelId);
     if (!activeModel) {
-      setModelId(MODELS[0].id);
+      setModelId(MODELS[0]?.id ?? '');
     }
   }, [modelId]);
 
-  // Listen for Supabase session changes
+  // Validate the cached session with the auth server, then follow auth changes.
   useEffect(() => {
-    const unsub = initSupabaseAuthListener((newUser) => {
-      if (newUser) {
-        setUser(newUser);
-      }
+    let active = true;
+
+    loadAuthenticatedUser().then((validatedUser) => {
+      if (!active) return;
+      setUser(validatedUser);
+      setAuthReady(true);
     });
-    return unsub;
+
+    const unsub = initSupabaseAuthListener((newUser) => {
+      if (!active) return;
+      setUser(newUser);
+      setAuthReady(true);
+      if (!newUser) clearSessionState();
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
   }, []);
+
+  function clearSessionState() {
+    clearAllKeys();
+    setAudits([]);
+    setBenchmarks([]);
+    setResult(null);
+    setResultRoeId(null);
+    setPrompt('');
+    setModelOutput('');
+    setQueryError(null);
+    setHasOpenRouterKey(false);
+    setGuestMode(false);
+    setPage('studio');
+    setStep(1);
+  }
 
   // Synchronize past audits & past benchmarks with Supabase PostgreSQL cloud database (Strictly isolated by user_id)
   useEffect(() => {
@@ -196,10 +243,7 @@ export default function App() {
   function handleLogout() {
     setUser(null);
     saveUser(null);
-    setAudits([]);
-    setBenchmarks([]);
-    setGuestMode(false);
-    setPage('studio');
+    clearSessionState();
   }
 
   function handleClearHistory() {
@@ -270,7 +314,7 @@ export default function App() {
   }
 
   const activeScope = roeMode === 'preset' ? ROE_PRESETS.find((p) => p.roe_id === presetId) ?? null : customScope;
-  const examples = useMemo(() => (activeScope ? buildExamples(activeScope) : buildExamples(ROE_PRESETS[0])), [activeScope]);
+  const examples = useMemo(() => buildExamples(activeScope ?? DEFAULT_ROE), [activeScope]);
 
   // Keep a loaded example in sync with the selected preset's addresses.
   useEffect(() => {
@@ -397,6 +441,19 @@ export default function App() {
     setResultRoeId(audit.roeId);
     setStep(3);
     setPage('studio');
+  }
+
+  // Do not render the studio from a cached profile before the live session is
+  // validated. This closes the localStorage auth-gate bypass (AUDIT_004 H1).
+  if (!authReady) {
+    return (
+      <div
+        className="app"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}
+      >
+        <p className="muted" role="status">Validating secure session…</p>
+      </div>
+    );
   }
 
   // LANDING PAGE: If user is not authenticated and has not entered guest mode
@@ -567,7 +624,7 @@ export default function App() {
       {/* PAGE 3: BENCHMARK STUDIO */}
       {page === 'benchmark' && (
         <BenchmarkStudioView
-          activeRoe={activeScope || ROE_PRESETS[0]}
+          activeRoe={activeScope ?? DEFAULT_ROE}
           allRoes={ROE_PRESETS}
           onSelectRoe={(newRoe) => {
             setPresetId(newRoe.roe_id);

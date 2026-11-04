@@ -24,7 +24,7 @@ interface Props {
 }
 
 export function PromptComposer(p: Props) {
-  const selectedModel = MODELS.find((m) => m.id === p.modelId) || MODELS[0];
+  const selectedModelLabel = MODELS.find((m) => m.id === p.modelId)?.label ?? p.modelId;
 
   return (
     <section className="card card--hero" aria-labelledby="step2-title">
@@ -138,11 +138,11 @@ export function PromptComposer(p: Props) {
                 style={{ gap: 6 }}
                 disabled={!p.prompt.trim() || p.queryingModel || p.loading}
                 onClick={p.onQueryLiveModel}
-                title={`Query ${selectedModel.label} with this prompt`}
+                title={`Query ${selectedModelLabel} with this prompt`}
               >
                 {p.queryingModel ? (
                   <>
-                    <span className="spinner" style={{ width: 13, height: 13 }} /> Querying {selectedModel.label}…
+                    <span className="spinner" style={{ width: 13, height: 13 }} /> Querying {selectedModelLabel}…
                   </>
                 ) : (
                   <>

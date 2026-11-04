@@ -1,3 +1,4 @@
+import type { User } from '@supabase/supabase-js';
 import type { UserProfile, UserRole } from '../types/user';
 import { supabase, signOutSupabase } from './supabaseClient';
 
@@ -20,28 +21,81 @@ export function resolveUserRole(email: string): UserRole {
     : 'penetration_tester';
 }
 
-export function getStoredUser(): UserProfile | null {
+function clearStoredUser(): void {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const user: UserProfile = JSON.parse(raw);
-    if (!user.isVerified) return null;
-    // Enforce immutable RBAC policy on cached sessions
-    user.role = resolveUserRole(user.email);
-    return user;
+    localStorage.removeItem(STORAGE_KEY);
   } catch {
-    return null;
+    // ignore storage errors
   }
 }
 
-export const getCurrentUser = getStoredUser;
+function displayNameFromEmail(email: string): string {
+  return email.split('@')[0] || email;
+}
+
+function profileFromAuthUser(u: User): UserProfile {
+  const email = u.email || '';
+  const name = (u.user_metadata?.full_name ||
+    u.user_metadata?.name ||
+    u.user_metadata?.user_name ||
+    displayNameFromEmail(email)) as string;
+  const avatarUrl = (u.user_metadata?.avatar_url ||
+    `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`) as string;
+  const rawProvider = u.app_metadata?.provider;
+  const provider: 'google' | 'github' | 'email' =
+    rawProvider === 'github' ? 'github' : rawProvider === 'google' ? 'google' : 'email';
+
+  return {
+    id: u.id,
+    email,
+    name,
+    avatarUrl,
+    provider,
+    role: resolveUserRole(email),
+    isVerified: Boolean(u.email_confirmed_at) || provider !== 'email',
+    createdAt: u.created_at || new Date().toISOString(),
+  };
+}
+
+/**
+ * Validate the cached session against the Supabase auth server before trusting it.
+ * The localStorage profile is only a UI cache; it must never be the sole proof of
+ * authentication (see AUDIT_004 H1).
+ */
+export async function loadAuthenticatedUser(): Promise<UserProfile | null> {
+  if (!supabase) {
+    clearStoredUser();
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    const authUser = data.user;
+    if (error || !authUser || !authUser.email) {
+      clearStoredUser();
+      return null;
+    }
+
+    const profile = profileFromAuthUser(authUser);
+    if (!profile.isVerified) {
+      clearStoredUser();
+      return null;
+    }
+
+    saveUser(profile);
+    return profile;
+  } catch {
+    clearStoredUser();
+    return null;
+  }
+}
 
 export function saveUser(user: UserProfile | null) {
   if (user) {
     user.role = resolveUserRole(user.email);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
   } else {
-    localStorage.removeItem(STORAGE_KEY);
+    clearStoredUser();
     signOutSupabase();
   }
 }
@@ -53,7 +107,7 @@ export function createGoogleUser(email: string, name: string, id?: string): User
 
   return {
     id: id || generatedId,
-    name: name || email.split('@')[0],
+    name: name || displayNameFromEmail(email),
     email,
     avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
     provider: 'google',
@@ -70,7 +124,7 @@ export function createGithubUser(email: string, name: string, id?: string): User
 
   return {
     id: id || generatedId,
-    name: name || email.split('@')[0],
+    name: name || displayNameFromEmail(email),
     email,
     avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
     provider: 'github',
@@ -87,7 +141,7 @@ export function createEmailUser(email: string, name: string, isVerified = false,
 
   return {
     id: id || generatedId,
-    name: name || email.split('@')[0],
+    name: name || displayNameFromEmail(email),
     email,
     avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
     provider: 'email',
@@ -105,25 +159,12 @@ export function initSupabaseAuthListener(onUserChanged: (user: UserProfile | nul
 
   const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
     if (session?.user) {
-      const u = session.user;
-      const email = u.email || '';
-      const name = (u.user_metadata?.full_name || u.user_metadata?.name || u.user_metadata?.user_name || email.split('@')[0]) as string;
-      const avatarUrl = (u.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`) as string;
-      const rawProvider = u.app_metadata?.provider;
-      const provider: 'google' | 'github' | 'email' =
-        rawProvider === 'github' ? 'github' : rawProvider === 'google' ? 'google' : 'email';
-      const profile: UserProfile = {
-        id: u.id,
-        email,
-        name,
-        avatarUrl,
-        provider,
-        role: resolveUserRole(email),
-        isVerified: !!u.email_confirmed_at || provider !== 'email',
-        createdAt: u.created_at || new Date().toISOString(),
-      };
+      const profile = profileFromAuthUser(session.user);
       saveUser(profile);
       onUserChanged(profile);
+    } else {
+      clearStoredUser();
+      onUserChanged(null);
     }
   });
 

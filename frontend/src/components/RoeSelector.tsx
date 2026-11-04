@@ -2,7 +2,7 @@ import { useRef, useState, type DragEvent } from 'react';
 import type { RoeScope } from '../types/audit';
 import { ROE_PRESETS } from '../data/presets';
 import { MAX_ROE_BYTES, validateRoeFile } from '../lib/roeFile';
-import { parseRoeFile, parseRoeText } from '../services/auditService';
+import { parseRoeText } from '../services/auditService';
 import { AlertIcon, ChevronIcon, FileIcon, InfoIcon, UploadIcon, XIcon } from './Icons';
 
 export type RoeMode = 'preset' | 'custom';
@@ -141,10 +141,12 @@ function CustomRoe({
     setFileName(file.name);
     onChange(res.text);
 
-    // Trigger server-side Llama 3 extraction automatically
+    // Send the bytes that were actually validated, never the original File.
+    // The server repeats validation, but the client must not create a second,
+    // unvalidated upload path (AUDIT_004 I2).
     setParsing(true);
     try {
-      const scope = await parseRoeFile(file);
+      const scope = await parseRoeText(res.text, file.name);
       if (seq !== parseSeq.current) return;
       onScopeParsed?.(scope);
     } catch (err: any) {

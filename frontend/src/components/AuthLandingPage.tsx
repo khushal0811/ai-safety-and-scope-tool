@@ -1,7 +1,8 @@
 import { useState, useRef, type FormEvent } from 'react';
 import type { UserProfile } from '../types/user';
-import { createEmailUser, resolveUserRole } from '../lib/authStore';
+import { resolveUserRole } from '../lib/authStore';
 import {
+  isSupabaseConfigured,
   supabase,
   signInWithGoogle,
   signInWithGithub,
@@ -37,6 +38,10 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
   const [resendNotice, setResendNotice] = useState(false);
 
   async function handleGoogleLogin() {
+    if (!isSupabaseConfigured) {
+      setError('Authentication is not configured for this deployment.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -60,6 +65,10 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
   }
 
   async function handleGithubLogin() {
+    if (!isSupabaseConfigured) {
+      setError('Authentication is not configured for this deployment.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -86,6 +95,10 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
       setError('Please provide your email and password.');
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setError('Authentication is not configured for this deployment.');
       return;
     }
 
@@ -128,6 +141,10 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
     }
     if (password.length < 6) {
       setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setError('Authentication is not configured for this deployment.');
       return;
     }
 
@@ -194,35 +211,39 @@ export function AuthLandingPage({ onAuthenticated, onContinueAsGuest, theme, onT
     setLoading(true);
     setError(null);
     try {
-      if (supabase) {
-        const { data, error: supaErr } = await supabase.auth.verifyOtp({
-          email: email.trim(),
-          token: code,
-          type: 'signup',
-        });
-        if (supaErr) {
-          setLoading(false);
-          setError(supaErr.message);
-          return;
-        }
-        if (data.user) {
-          const profile: UserProfile = {
-            id: data.user.id,
-            email: data.user.email || email.trim(),
-            name: (data.user.user_metadata?.full_name || name.trim() || email.trim().split('@')[0]) as string,
-            avatarUrl: (data.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email.trim())}`) as string,
-            provider: 'email',
-            role: resolveUserRole(data.user.email || email.trim()),
-            isVerified: true,
-            createdAt: data.user.created_at || new Date().toISOString(),
-          };
-          onAuthenticated(profile);
-          setLoading(false);
-          return;
-        }
+      if (!supabase) {
+        setLoading(false);
+        setError('Email verification is unavailable: the authentication service is not configured.');
+        return;
       }
-      const user = createEmailUser(email.trim(), name.trim(), true);
-      onAuthenticated(user);
+
+      const { data, error: supaErr } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: code,
+        type: 'signup',
+      });
+      if (supaErr) {
+        setLoading(false);
+        setError(supaErr.message);
+        return;
+      }
+      if (!data.user) {
+        setLoading(false);
+        setError('Verification did not return a valid account. Please request a new code.');
+        return;
+      }
+
+      const profile: UserProfile = {
+        id: data.user.id,
+        email: data.user.email || email.trim(),
+        name: (data.user.user_metadata?.full_name || name.trim() || email.trim().split('@')[0]) as string,
+        avatarUrl: (data.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email.trim())}`) as string,
+        provider: 'email',
+        role: resolveUserRole(data.user.email || email.trim()),
+        isVerified: Boolean(data.user.email_confirmed_at),
+        createdAt: data.user.created_at || new Date().toISOString(),
+      };
+      onAuthenticated(profile);
       setLoading(false);
     } catch (err: any) {
       setLoading(false);

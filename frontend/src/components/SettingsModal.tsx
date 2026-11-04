@@ -4,14 +4,13 @@ import {
   getOpenRouterKey,
   getGroqKey,
   saveAllApiKeys,
-  getStorageMode,
+  revokeAndWipeUserKeys,
   maskKey,
-  type KeyStorageMode,
 } from '../lib/keyStore';
+import { getStoredAuthToken } from '../lib/supabaseClient';
 import { KeyIcon, XIcon } from './Icons';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<KeyStorageMode>(getStorageMode());
   const [draftOpenRouter, setDraftOpenRouter] = useState('');
   const [draftGroq, setDraftGroq] = useState('');
   const [storedOpenRouter, setStoredOpenRouter] = useState<string | null>(getOpenRouterKey());
@@ -24,21 +23,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   function save() {
-    saveAllApiKeys(
-      {
-        openRouterKey: draftOpenRouter ? draftOpenRouter.trim() : (storedOpenRouter || undefined),
-        groqKey: draftGroq ? draftGroq.trim() : (storedGroq || undefined),
-      },
-      mode
-    );
+    saveAllApiKeys({
+      openRouterKey: draftOpenRouter ? draftOpenRouter.trim() : (storedOpenRouter || undefined),
+      groqKey: draftGroq ? draftGroq.trim() : (storedGroq || undefined),
+    });
     if (draftOpenRouter.trim()) setStoredOpenRouter(draftOpenRouter.trim());
     if (draftGroq.trim()) setStoredGroq(draftGroq.trim());
     setDraftOpenRouter('');
     setDraftGroq('');
   }
 
-  function clear() {
-    clearAllKeys();
+  async function clear() {
+    if (getStoredAuthToken()) {
+      const res = await revokeAndWipeUserKeys();
+      if (!res.success) {
+        window.alert(res.error || 'Could not delete the vault key.');
+        return;
+      }
+    } else {
+      clearAllKeys();
+    }
     setStoredOpenRouter(null);
     setStoredGroq(null);
     setDraftOpenRouter('');
@@ -123,21 +127,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </details>
 
           <p className="section-label">Storage Isolation</p>
-          <div className="radio-row">
-            <label className="radio-card">
-              <input type="radio" name="key-mode" checked={mode === 'memory'} onChange={() => setMode('memory')} />
-              <span>
-                <strong>Memory only</strong>
-                Cleared on reload
-              </span>
-            </label>
-            <label className="radio-card">
-              <input type="radio" name="key-mode" checked={mode === 'session'} onChange={() => setMode('session')} />
-              <span>
-                <strong>Session</strong>
-                Cleared when tab closes
-              </span>
-            </label>
+          <div
+            className="note"
+            style={{ fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.5 }}
+          >
+            <strong>Memory only.</strong> Raw keys live in this tab's memory and are cleared on
+            reload. Signed-in keys are persisted exclusively in the encrypted server-side vault.
           </div>
         </div>
 

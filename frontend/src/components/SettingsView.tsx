@@ -51,15 +51,20 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
     }
   }, [currentUser?.id]);
 
-  // Verification rule toggles
-  const [strictNormalization, setStrictNormalization] = useState(true);
-  const [blockGateway, setBlockGateway] = useState(true);
-  const [blockCloudMetadata, setBlockCloudMetadata] = useState(true);
-  const [filterDestructiveArgs, setFilterDestructiveArgs] = useState(true);
+  // Verification policies are enforced server-side; there is deliberately no
+  // client-side switch that can turn them off.
 
   async function handleSaveKeys() {
     if (currentUser) {
-      await saveKeysToVault(currentUser.id, { openRouterKey, groqKey });
+      const saved = await saveKeysToVault(currentUser.id, { openRouterKey, groqKey });
+      if (!saved) {
+        setTestFeedback({
+          success: false,
+          results: [],
+          error: 'Vault rejected the key; it is only active for this tab.',
+        });
+        return;
+      }
       fetchVaultStatus(currentUser.id).then(setVaultStatus).catch(() => {});
     } else {
       saveAllApiKeys({ openRouterKey, groqKey });
@@ -73,7 +78,15 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
     setRevoking(true);
     setTestFeedback(null);
     try {
-      await revokeAndWipeUserKeys(currentUser?.id);
+      const result = await revokeAndWipeUserKeys(currentUser?.id);
+      if (!result.success) {
+        setTestFeedback({
+          success: false,
+          results: [],
+          error: result.error || 'Failed to revoke the vault key.',
+        });
+        return;
+      }
       setOpenRouterKey('');
       setGroqKey('');
       setVaultStatus(null);
@@ -324,7 +337,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
                   color: 'var(--text-subtle)',
                 }}
               >
-                <strong>Guest Session:</strong> Your key will be saved temporarily in session storage and cleared when you close the browser tab. <button type="button" className="inline-link-btn" onClick={onOpenLogin} style={{ fontWeight: 600 }}>Sign in</button> to encrypt your key permanently in your private database vault.
+                <strong>Guest Session:</strong> Your key is kept in this tab's memory only and is cleared on reload. <button type="button" className="inline-link-btn" onClick={onOpenLogin} style={{ fontWeight: 600 }}>Sign in</button> to encrypt your key permanently in your private database vault.
               </div>
             )}
 
@@ -335,7 +348,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
             <div className="card__actions">
               {savedNotice && (
                 <span className="row" style={{ color: 'var(--healthy)', fontSize: 13, fontWeight: 500, gap: 6 }}>
-                  <CheckIcon width={16} height={16} /> API keys encrypted &amp; saved to vault
+                  <CheckIcon width={16} height={16} /> {currentUser ? 'API keys encrypted & saved to vault' : 'API keys saved for this tab'}
                 </span>
               )}
               {revokedNotice && (
@@ -399,70 +412,50 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
             <div>
               <h3 className="card__title">Verification Engine Policies</h3>
               <p className="card__desc">
-                Configure deterministic AST safety checks applied before and after LLM inference.
+                Server-side deterministic AST safety checks are always applied before and after LLM inference. They cannot be disabled from the browser.
               </p>
             </div>
           </div>
           <div className="card__body" style={{ display: 'grid', gap: 14 }}>
-            <label className="settings-toggle-row">
+            <div className="settings-toggle-row">
               <div>
                 <strong>Strict IP Obfuscation Normalization</strong>
                 <p className="card__desc">
-                  Normalize hex (`0x7f000001`), octal (`0177.0.0.1`), decimal (`2130706433`), and IPv6-mapped addresses.
+                  Normalizes hex (`0x7f000001`), octal (`0177.0.0.1`), decimal (`2130706433`), and IPv6-mapped addresses.
                 </p>
               </div>
-              <input
-                type="checkbox"
-                checked={strictNormalization}
-                onChange={(e) => setStrictNormalization(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: 'var(--accent)' }}
-              />
-            </label>
+              <span className="tag tag--ok">Always on</span>
+            </div>
 
-            <label className="settings-toggle-row">
+            <div className="settings-toggle-row">
               <div>
                 <strong>Infrastructure &amp; Default Gateway Defense</strong>
                 <p className="card__desc">
-                  Automatically flag and drop targets matching `.1` default gateway or broadcast addresses.
+                  Flags and drops targets matching `.1` default gateway or broadcast addresses.
                 </p>
               </div>
-              <input
-                type="checkbox"
-                checked={blockGateway}
-                onChange={(e) => setBlockGateway(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: 'var(--accent)' }}
-              />
-            </label>
+              <span className="tag tag--ok">Always on</span>
+            </div>
 
-            <label className="settings-toggle-row">
+            <div className="settings-toggle-row">
               <div>
                 <strong>Cloud Metadata Endpoint Interception</strong>
                 <p className="card__desc">
-                  Prohibit instance metadata exfiltration on `169.254.169.254` across AWS and GCP scopes.
+                  Prohibits instance metadata exfiltration on `169.254.169.254` across AWS and GCP scopes.
                 </p>
               </div>
-              <input
-                type="checkbox"
-                checked={blockCloudMetadata}
-                onChange={(e) => setBlockCloudMetadata(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: 'var(--accent)' }}
-              />
-            </label>
+              <span className="tag tag--ok">Always on</span>
+            </div>
 
-            <label className="settings-toggle-row">
+            <div className="settings-toggle-row">
               <div>
                 <strong>Destructive Shell Command Filter</strong>
                 <p className="card__desc">
-                  Block dangerous bash patterns (fork bombs, disk erasures, raw block writes).
+                  Blocks dangerous bash patterns (fork bombs, disk erasures, raw block writes).
                 </p>
               </div>
-              <input
-                type="checkbox"
-                checked={filterDestructiveArgs}
-                onChange={(e) => setFilterDestructiveArgs(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: 'var(--accent)' }}
-              />
-            </label>
+              <span className="tag tag--ok">Always on</span>
+            </div>
           </div>
         </div>
 

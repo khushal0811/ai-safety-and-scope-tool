@@ -5,31 +5,53 @@ import type {
   FrontierModelInfo,
 } from '../types/benchmark';
 import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
-import { getCurrentUser } from '../lib/authStore';
+import { isBenchmarkRunRecord } from '../lib/benchmarkStore';
 import { getStoredAuthToken } from '../lib/supabaseClient';
 
-const BACKEND_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+const BACKEND_BASE = (
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  ''
+).replace(/\/+$/, '');
+
+function requireBackend(): string {
+  if (!BACKEND_BASE) {
+    throw new Error('Backend API URL is not configured. Set VITE_API_URL for this deployment.');
+  }
+  return BACKEND_BASE;
+}
+
+function keyTransportIsSecure(): boolean {
+  if (BACKEND_BASE.startsWith('https://')) return true;
+  if (!import.meta.env.DEV) return false;
+  try {
+    const host = new URL(BACKEND_BASE, window.location.origin).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
+  }
+}
 
 function getBenchmarkHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   };
-  const orKey = getOpenRouterKey();
-  if (orKey) {
-    headers['X-OpenRouter-Key'] = orKey;
-  }
-  const groqKey = getGroqKey();
-  if (groqKey) {
-    headers['X-Groq-Key'] = groqKey;
-  }
-  const user = getCurrentUser();
-  if (user && user.id) {
-    headers['X-User-Id'] = user.id;
-  }
+
   const token = getStoredAuthToken();
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  }
+
+  const orKey = getOpenRouterKey();
+  const groqKey = getGroqKey();
+  if (orKey || groqKey) {
+    if (!keyTransportIsSecure()) {
+      throw new Error('Refusing to send a provider API key over a non-HTTPS connection.');
+    }
+    if (orKey) headers['X-OpenRouter-Key'] = orKey;
+    if (groqKey) headers['X-Groq-Key'] = groqKey;
   }
   return headers;
 }
@@ -77,6 +99,7 @@ export const FALLBACK_FRONTIER_MODELS: FrontierModelInfo[] = [
  * Fetch supported frontier models from backend.
  */
 export async function getBenchmarkModels(): Promise<FrontierModelInfo[]> {
+  if (!BACKEND_BASE) return FALLBACK_FRONTIER_MODELS;
   try {
     const res = await fetch(`${BACKEND_BASE}/api/benchmark/models`, {
       method: 'GET',
@@ -99,7 +122,7 @@ export async function evaluateBenchmark(
   prompt: string,
   models?: string[],
   scenarioTitle?: string,
-  userId?: string
+  _userId?: string
 ): Promise<BenchmarkEvaluateResponse> {
   const payload = {
     roe,
@@ -109,12 +132,7 @@ export async function evaluateBenchmark(
     temperature: 0.0,
   };
 
-  const effectiveUserId = userId || getCurrentUser()?.id;
-  const url = effectiveUserId
-    ? `${BACKEND_BASE}/api/benchmark/evaluate?user_id=${encodeURIComponent(effectiveUserId)}`
-    : `${BACKEND_BASE}/api/benchmark/evaluate`;
-
-  const res = await fetch(url, {
+  const res = await fetch(`${requireBackend()}/api/benchmark/evaluate`, {
     method: 'POST',
     headers: getBenchmarkHeaders(),
     body: JSON.stringify(payload),
@@ -131,24 +149,45 @@ export async function evaluateBenchmark(
   return result;
 }
 
-const LOCAL_BENCHMARK_KEY = 'vallum.benchmark_history';
+const LOCAL_BENCHMARK_PREFIX = 'vallum.benchmark_history';
+
+function localBenchmarkKey(userId?: string): string | null {
+  return userId ? `${LOCAL_BENCHMARK_PREFIX}.${userId}` : null;
+}
+
+function readLocalBenchmarkHistory(userId?: string): BenchmarkRunRecord[] {
+  const key = localBenchmarkKey(userId);
+  if (!key) return [];
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter(isBenchmarkRunRecord)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Fetch historical benchmark runs for the current user.
  */
 export async function getBenchmarkHistory(userId?: string): Promise<BenchmarkRunRecord[]> {
-  const effectiveUserId = userId || getCurrentUser()?.id;
-  if (effectiveUserId) {
+  if (!userId) return [];
+
+  if (BACKEND_BASE) {
     try {
-      const url = `${BACKEND_BASE}/api/benchmark/history?user_id=${encodeURIComponent(effectiveUserId)}`;
-      const res = await fetch(url, {
+      const res = await fetch(`${BACKEND_BASE}/api/benchmark/history?limit=100`, {
         method: 'GET',
         headers: getBenchmarkHeaders(),
       });
       if (res.ok) {
-        const records: BenchmarkRunRecord[] = await res.json();
-        // Update local cache
-        localStorage.setItem(LOCAL_BENCHMARK_KEY, JSON.stringify(records));
+        const parsed: unknown = await res.json();
+        const records = Array.isArray(parsed)
+          ? parsed.filter(isBenchmarkRunRecord)
+          : [];
+        const key = localBenchmarkKey(userId);
+        if (key) localStorage.setItem(key, JSON.stringify(records));
         return records;
       }
     } catch (err) {
@@ -156,29 +195,22 @@ export async function getBenchmarkHistory(userId?: string): Promise<BenchmarkRun
     }
   }
 
-  // Fallback to local storage
-  try {
-    const raw = localStorage.getItem(LOCAL_BENCHMARK_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  return readLocalBenchmarkHistory(userId);
 }
 
 /**
  * Permanently delete selected benchmark runs from Supabase PostgreSQL and local storage.
  */
 export async function deleteBenchmarkRuns(benchmarkIds: string[], userId?: string): Promise<boolean> {
-  let backendSuccess = true;
-  const effectiveUserId = userId || getCurrentUser()?.id;
+  if (!userId || benchmarkIds.length === 0) return false;
 
-  if (effectiveUserId && benchmarkIds.length > 0) {
+  let backendSuccess = true;
+  if (BACKEND_BASE) {
     try {
-      const url = `${BACKEND_BASE}/api/benchmark/history?user_id=${encodeURIComponent(effectiveUserId)}`;
-      const res = await fetch(url, {
+      const res = await fetch(`${BACKEND_BASE}/api/benchmark/history`, {
         method: 'DELETE',
         headers: getBenchmarkHeaders(),
-        body: JSON.stringify({ benchmark_ids: benchmarkIds, user_id: effectiveUserId }),
+        body: JSON.stringify({ benchmark_ids: benchmarkIds }),
       });
       backendSuccess = res.ok;
     } catch (err) {
@@ -187,16 +219,16 @@ export async function deleteBenchmarkRuns(benchmarkIds: string[], userId?: strin
     }
   }
 
-  // Update local storage
-  try {
-    const raw = localStorage.getItem(LOCAL_BENCHMARK_KEY);
-    if (raw) {
-      const current: BenchmarkRunRecord[] = JSON.parse(raw);
+  // Update only this user's local cache
+  const key = localBenchmarkKey(userId);
+  if (key) {
+    try {
+      const current = readLocalBenchmarkHistory(userId);
       const updated = current.filter((item) => !benchmarkIds.includes(item.benchmark_id));
-      localStorage.setItem(LOCAL_BENCHMARK_KEY, JSON.stringify(updated));
+      localStorage.setItem(key, JSON.stringify(updated));
+    } catch {
+      // Ignore storage errors
     }
-  } catch {
-    // Ignore storage errors
   }
 
   return backendSuccess;

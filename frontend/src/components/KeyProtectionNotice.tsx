@@ -9,7 +9,7 @@ export function KeyProtectionNotice({ compact = false }: Props) {
   const [isHovered, setIsHovered] = useState(false);
 
   const explanation =
-    'We use military-grade AES-256-GCM encryption on our server before your key ever touches our database. Because your key is encrypted using an isolated server-side master key, anyone looking at our database only sees a random, useless string of text.';
+    'Signed-in keys are sent once to the backend, encrypted at rest and never returned to the browser. In guest mode the key stays in this tab only.';
 
   return (
     <div

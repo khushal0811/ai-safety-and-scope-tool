@@ -43,10 +43,12 @@ export function parseIPv4(raw: string): ParsedIPv4 | null {
   const mapped = /^(?:::|(?:0{1,4}:){5})ffff:(.+)$/i.exec(s);
   if (mapped) {
     viaMapped = true;
-    s = mapped[1];
+    s = mapped[1] ?? s;
     const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(s);
-    if (hex) {
-      const value = parseInt(hex[1], 16) * 0x10000 + parseInt(hex[2], 16);
+    const high = hex?.[1];
+    const low = hex?.[2];
+    if (high && low) {
+      const value = parseInt(high, 16) * 0x10000 + parseInt(low, 16);
       return { value, normalized: intToIPv4(value), obfuscated: true };
     }
   }
@@ -59,20 +61,37 @@ export function parseIPv4(raw: string): ParsedIPv4 | null {
 
   let value: number;
   switch (n.length) {
-    case 1:
-      value = n[0];
+    case 1: {
+      const a = n[0];
+      if (a === undefined) return null;
+      value = a;
       break;
-    case 2:
-      if (n[0] > 255 || n[1] > 0xffffff) return null;
-      value = n[0] * 2 ** 24 + n[1];
+    }
+    case 2: {
+      const a = n[0];
+      const b = n[1];
+      if (a === undefined || b === undefined || a > 255 || b > 0xffffff) return null;
+      value = a * 2 ** 24 + b;
       break;
-    case 3:
-      if (n[0] > 255 || n[1] > 255 || n[2] > 0xffff) return null;
-      value = n[0] * 2 ** 24 + n[1] * 2 ** 16 + n[2];
+    }
+    case 3: {
+      const a = n[0];
+      const b = n[1];
+      const c = n[2];
+      if (a === undefined || b === undefined || c === undefined) return null;
+      if (a > 255 || b > 255 || c > 0xffff) return null;
+      value = a * 2 ** 24 + b * 2 ** 16 + c;
       break;
-    default:
+    }
+    default: {
+      const a = n[0];
+      const b = n[1];
+      const c = n[2];
+      const d = n[3];
+      if (a === undefined || b === undefined || c === undefined || d === undefined) return null;
       if (n.some((x) => x > 255)) return null;
-      value = n[0] * 2 ** 24 + n[1] * 2 ** 16 + n[2] * 2 ** 8 + n[3];
+      value = a * 2 ** 24 + b * 2 ** 16 + c * 2 ** 8 + d;
+    }
   }
   if (value > MAX_U32) return null;
 
@@ -88,12 +107,25 @@ function maskFor(prefix: number): number {
 export function parseCidr(raw: string): ParsedCidr | null {
   const pieces = raw.trim().split('/');
   if (pieces.length > 2) return null;
-  const ip = parseIPv4(pieces[0]);
+  const address = pieces[0];
+  if (address === undefined) return null;
+  const ip = parseIPv4(address);
   if (!ip) return null;
   const prefix = pieces.length === 1 ? 32 : Number(pieces[1]);
   if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
   const network = (ip.value & maskFor(prefix)) >>> 0;
   return { network, prefix, normalized: `${intToIPv4(network)}/${prefix}` };
+}
+
+/**
+ * True when a token is an IPv6 literal. The scope engine only understands IPv4,
+ * so callers must treat a match as "unverifiable target" rather than "not a target".
+ */
+export function isIPv6Literal(raw: string): boolean {
+  const s = raw.trim().replace(/^\[/, '').replace(/\]$/, '');
+  if (!s.includes(':')) return false;
+  if (!/^[0-9a-f:.]+$/i.test(s)) return false;
+  return (s.match(/:/g)?.length ?? 0) >= 2;
 }
 
 export function cidrContainsIp(c: ParsedCidr, ip: number): boolean {

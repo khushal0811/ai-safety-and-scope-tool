@@ -1,24 +1,161 @@
-import type { AuditRequest, AuditResult, RoeScope } from '../types/audit';
+import type { AuditRequest, AuditResult, RoeScope, TargetFinding, Violation } from '../types/audit';
+import type { SandboxDryRunResult } from '../types/sandbox';
 import { ROE_PRESETS } from '../data/presets';
 import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
 import { getStoredAuthToken } from '../lib/supabaseClient';
 
-function getApiHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-  const openRouter = getOpenRouterKey();
-  if (openRouter) {
-    headers['X-OpenRouter-Key'] = openRouter;
+export const API_BASE_URL: string = (
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  ''
+).replace(/\/+$/, '');
+
+function requireApiBase(): string {
+  if (!API_BASE_URL) {
+    throw new Error('Backend API URL is not configured. Set VITE_API_URL for this deployment.');
   }
-  const groq = getGroqKey();
-  if (groq) {
-    headers['X-Groq-Key'] = groq;
+  return API_BASE_URL;
+}
+
+function keyTransportIsSecure(): boolean {
+  if (API_BASE_URL.startsWith('https://')) return true;
+  if (!import.meta.env.DEV) return false;
+  try {
+    const host = new URL(API_BASE_URL, window.location.origin).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value);
+}
+
+export function isRoeScope(value: unknown): value is RoeScope {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.roe_id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.engagement_type === 'string' &&
+    typeof value.summary === 'string' &&
+    isStringArray(value.allowed_cidrs) &&
+    isStringArray(value.allowed_domains) &&
+    isStringArray(value.target_hosts) &&
+    isStringArray(value.prohibited_ips) &&
+    isStringArray(value.allowed_tools) &&
+    isStringArray(value.prohibited_tools) &&
+    isStringArray(value.prohibited_flags) &&
+    isStringArray(value.prohibited_actions) &&
+    typeof value.max_nmap_timing === 'number' &&
+    Number.isFinite(value.max_nmap_timing)
+  );
+}
+
+function isRoeScopeArray(value: unknown): value is RoeScope[] {
+  return Array.isArray(value) && value.every(isRoeScope);
+}
+
+function isTargetFinding(value: unknown): value is TargetFinding {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.token === 'string' &&
+    typeof value.normalized === 'string' &&
+    isOneOf(value.kind, ['ip', 'cidr', 'domain'] as const) &&
+    isOneOf(value.status, ['in_scope', 'out_of_scope', 'prohibited'] as const) &&
+    typeof value.obfuscated === 'boolean'
+  );
+}
+
+function isViolation(value: unknown): value is Violation {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.rule === 'string' &&
+    isOneOf(value.category, ['scope', 'destructive', 'policy', 'accuracy'] as const) &&
+    isOneOf(value.severity, ['CRITICAL', 'WARNING', 'INFO'] as const) &&
+    typeof value.detail === 'string' &&
+    (value.command === undefined || typeof value.command === 'string')
+  );
+}
+
+export function isAuditResult(value: unknown): value is AuditResult {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.audit_id === 'string' &&
+    typeof value.timestamp === 'string' &&
+    isOneOf(value.mode, ['demo', 'live'] as const) &&
+    typeof value.selected_model === 'string' &&
+    typeof value.user_prompt === 'string' &&
+    typeof value.raw_model_output === 'string' &&
+    isStringArray(value.extracted_commands) &&
+    Array.isArray(value.targets) &&
+    value.targets.every(isTargetFinding) &&
+    isOneOf(value.verdict, ['Correct', 'Incorrect', 'Unsafe', 'Refused'] as const) &&
+    Array.isArray(value.violation_details) &&
+    value.violation_details.every(isViolation) &&
+    (value.safe_sanitized_command === null || typeof value.safe_sanitized_command === 'string') &&
+    isStringArray(value.modifications_made) &&
+    typeof value.explanation === 'string' &&
+    (value.trust_tier === undefined ||
+      isOneOf(value.trust_tier, ['hybrid', 'deterministic'] as const)) &&
+    (value.ai_judge_notes === undefined || isStringArray(value.ai_judge_notes))
+  );
+}
+
+export function isSandboxDryRunResult(value: unknown): value is SandboxDryRunResult {
+  if (!isRecord(value)) return false;
+  const isolation = value.isolation;
+  return (
+    typeof value.command === 'string' &&
+    typeof value.tool === 'string' &&
+    typeof value.syntax_valid === 'boolean' &&
+    typeof value.exit_code === 'number' &&
+    typeof value.sandbox_tier === 'string' &&
+    isRecord(isolation) &&
+    typeof isolation.network_isolated === 'boolean' &&
+    typeof isolation.network_egress === 'string' &&
+    typeof isolation.packets_transmitted === 'number' &&
+    typeof isolation.zero_host_execution === 'boolean' &&
+    typeof isolation.filesystem_mode === 'string' &&
+    isStringArray(value.diagnostics) &&
+    typeof value.simulated_stdout === 'string' &&
+    typeof value.simulated_stderr === 'string' &&
+    typeof value.elapsed_ms === 'number'
+  );
+}
+
+/**
+ * Signed-in callers authenticate with the JWT only; the backend resolves the
+ * provider key from the encrypted vault. Guest BYOK is the only path that sends
+ * a provider key, and never over plaintext (AUDIT_004 M1).
+ */
+function getApiHeaders(json = true): Record<string, string> {
+  const headers: Record<string, string> = json
+    ? { 'Content-Type': 'application/json', Accept: 'application/json' }
+    : { Accept: 'application/json' };
+
   const token = getStoredAuthToken();
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+  }
+
+  const openRouter = getOpenRouterKey();
+  const groq = getGroqKey();
+  if (openRouter || groq) {
+    if (!keyTransportIsSecure()) {
+      throw new Error('Refusing to send a provider API key over a non-HTTPS connection.');
+    }
+    if (openRouter) headers['X-OpenRouter-Key'] = openRouter;
+    if (groq) headers['X-Groq-Key'] = groq;
   }
   return headers;
 }
@@ -26,11 +163,10 @@ function getApiHeaders(): Record<string, string> {
 /**
  * Single entry point the UI uses for safety and scope audits.
  *
- * Phase 2+: Automatically connects to the FastAPI verification engine
- * at VITE_API_BASE_URL (defaults to http://localhost:8000).
- * Gracefully falls back to the client-side demo engine if the backend is offline.
+ * Connects to the FastAPI verification engine at VITE_API_URL. No implicit
+ * localhost fallback: an unconfigured build fails closed instead of sending
+ * credentials to whatever happens to listen on the developer port.
  */
-export const API_BASE_URL: string = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 let _liveBackendAvailable: boolean | null = null;
 const _listeners: Set<(live: boolean) => void> = new Set();
@@ -58,6 +194,10 @@ export function isLiveMode(): boolean {
  * Perform health probe against the backend verification service.
  */
 export async function checkBackendHealth(): Promise<boolean> {
+  if (!API_BASE_URL) {
+    notifyStatus(false);
+    return false;
+  }
   try {
     const res = await fetch(`${API_BASE_URL}/api/health`, {
       method: 'GET',
@@ -84,13 +224,15 @@ if (typeof window !== 'undefined') {
  * Fetch authoritative RoE presets from backend, falling back to local presets.
  */
 export async function fetchRoePresets(): Promise<RoeScope[]> {
+  if (!API_BASE_URL) return ROE_PRESETS;
   try {
     const res = await fetch(`${API_BASE_URL}/api/roe/presets`, {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(3000),
     });
     if (res.ok) {
-      return (await res.json()) as RoeScope[];
+      const data: unknown = await res.json();
+      if (isRoeScopeArray(data)) return data;
     }
   } catch {
     // Fallback to local
@@ -102,7 +244,7 @@ export async function fetchRoePresets(): Promise<RoeScope[]> {
  * Audit model output against RoE rules.
  */
 export async function runAudit(req: AuditRequest, _userId?: string): Promise<AuditResult> {
-  const url = `${API_BASE_URL}/api/audit`;
+  const url = `${requireApiBase()}/api/audit`;
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -112,7 +254,10 @@ export async function runAudit(req: AuditRequest, _userId?: string): Promise<Aud
     });
 
     if (res.ok) {
-      const data = (await res.json()) as AuditResult;
+      const data: unknown = await res.json();
+      if (!isAuditResult(data)) {
+        throw new Error('Backend returned a malformed audit result.');
+      }
       notifyStatus(true);
       return data;
     }
@@ -130,7 +275,7 @@ export async function runAudit(req: AuditRequest, _userId?: string): Promise<Aud
  * Parse raw pasted RoE text using backend LLM extraction.
  */
 export async function parseRoeText(content: string, filename?: string, _userId?: string): Promise<RoeScope> {
-  const url = `${API_BASE_URL}/api/roe/parse-text`;
+  const url = `${requireApiBase()}/api/roe/parse-text`;
   const res = await fetch(url, {
     method: 'POST',
     headers: getApiHeaders(),
@@ -143,40 +288,12 @@ export async function parseRoeText(content: string, filename?: string, _userId?:
     throw new Error(err.detail || 'Failed to parse RoE document');
   }
 
-  notifyStatus(true);
-  return (await res.json()) as RoeScope;
-}
-
-/**
- * Upload and parse an RoE file (.md or .txt) using backend LLM extraction.
- */
-export async function parseRoeFile(file: File, _userId?: string): Promise<RoeScope> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const url = `${API_BASE_URL}/api/roe/parse-document`;
-  const fileHeaders: Record<string, string> = {};
-  const openRouter = getOpenRouterKey();
-  if (openRouter) fileHeaders['X-OpenRouter-Key'] = openRouter;
-  const groq = getGroqKey();
-  if (groq) fileHeaders['X-Groq-Key'] = groq;
-  const token = getStoredAuthToken();
-  if (token) fileHeaders['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: fileHeaders,
-    body: formData,
-    signal: AbortSignal.timeout(60000),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Failed to parse RoE file' }));
-    throw new Error(err.detail || 'Failed to parse RoE file');
+  const data: unknown = await res.json();
+  if (!isRoeScope(data)) {
+    throw new Error('Backend returned a malformed RoE scope.');
   }
-
   notifyStatus(true);
-  return (await res.json()) as RoeScope;
+  return data;
 }
 
 /**
@@ -188,6 +305,9 @@ export async function queryLiveModel(
   modelId: string,
   _userId?: string
 ): Promise<{ text: string; latencyMs: number; error?: string }> {
+  if (!API_BASE_URL) {
+    return { text: '', latencyMs: 0, error: 'Backend API URL is not configured for this deployment.' };
+  }
   const headers = getApiHeaders();
 
   try {
@@ -256,7 +376,7 @@ export async function downloadComplianceReport(
     params.set('audit_id', auditId);
   }
 
-  const url = `${API_BASE_URL}/api/audit/report?${params.toString()}`;
+  const url = `${requireApiBase()}/api/audit/report?${params.toString()}`;
   const token = getStoredAuthToken();
   const headers: Record<string, string> = {};
   if (token) {
@@ -297,8 +417,8 @@ export async function executeSandboxDryRun(
   command: string,
   roeId?: string,
   strictSyntax: boolean = true
-): Promise<import('../types/sandbox').SandboxDryRunResult> {
-  const url = `${API_BASE_URL}/api/sandbox/dry-run`;
+): Promise<SandboxDryRunResult> {
+  const url = `${requireApiBase()}/api/sandbox/dry-run`;
   const res = await fetch(url, {
     method: 'POST',
     headers: getApiHeaders(),
@@ -315,8 +435,12 @@ export async function executeSandboxDryRun(
     throw new Error(`Micro-sandbox evaluation failed: HTTP ${res.status} ${errText.slice(0, 200)}`);
   }
 
+  const data: unknown = await res.json();
+  if (!isSandboxDryRunResult(data)) {
+    throw new Error('Backend returned a malformed sandbox result.');
+  }
   notifyStatus(true);
-  return (await res.json()) as import('../types/sandbox').SandboxDryRunResult;
+  return data;
 }
 
 

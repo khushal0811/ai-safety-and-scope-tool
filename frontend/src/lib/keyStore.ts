@@ -156,7 +156,11 @@ export function clearAllKeys(): void {
   setVaultOpenRouterKeyStatus(false, null);
 }
 
-const BACKEND_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+const BACKEND_BASE = (
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  ''
+).replace(/\/+$/, '');
 
 export interface VaultStatus {
   isConfigured: boolean;
@@ -205,6 +209,7 @@ export async function fetchVaultStatus(userId?: string): Promise<VaultStatus> {
 
   // 2. Check backend encrypted database vault status (authenticated via Bearer JWT)
   try {
+    if (!BACKEND_BASE) throw new Error('Backend API URL is not configured');
     const authHeaders = await getAuthHeaders();
     const res = await fetch(`${BACKEND_BASE}/api/vault/status`, {
       headers: { ...authHeaders },
@@ -248,31 +253,14 @@ export async function saveKeysToVault(
 ): Promise<boolean> {
   // Hold in volatile in-memory variable for immediate session requests
   saveAllApiKeys(keys);
-  if (keys.openRouterKey?.trim()) {
-    setVaultOpenRouterKeyStatus(true, maskKey(keys.openRouterKey.trim()));
-  }
 
-  // Sync non-sensitive key presence hint to Supabase Auth user_metadata
-  if (supabase) {
-    try {
-      await supabase.auth.updateUser({
-        data: {
-          vallum_vault_status: {
-            has_openrouter_key: Boolean(keys.openRouterKey?.trim() || getOpenRouterKey()),
-            openrouter_hint: keys.openRouterKey?.trim() ? maskKey(keys.openRouterKey.trim()) : null,
-            has_groq_key: Boolean(keys.groqKey?.trim() || getGroqKey()),
-            groq_hint: keys.groqKey?.trim() ? maskKey(keys.groqKey.trim()) : null,
-          },
-        },
-      });
-    } catch {
-      // Ignore metadata sync warning
-    }
-  }
+  if (!BACKEND_BASE) return false;
 
   // Encrypt with server-side AES-256-GCM and persist to database vault via backend
   try {
     const authHeaders = await getAuthHeaders();
+    if (Object.keys(authHeaders).length === 0) return false;
+
     const res = await fetch(`${BACKEND_BASE}/api/vault/keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
@@ -281,7 +269,31 @@ export async function saveKeysToVault(
         groq_key: keys.groqKey || null,
       }),
     });
-    return res.ok;
+    if (!res.ok) return false;
+
+    if (keys.openRouterKey?.trim()) {
+      setVaultOpenRouterKeyStatus(true, maskKey(keys.openRouterKey.trim()));
+    }
+
+    // Sync a non-sensitive presence hint only after the vault has accepted the key.
+    if (supabase) {
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            vallum_vault_status: {
+              has_openrouter_key: Boolean(keys.openRouterKey?.trim() || getOpenRouterKey()),
+              openrouter_hint: keys.openRouterKey?.trim() ? maskKey(keys.openRouterKey.trim()) : null,
+              has_groq_key: Boolean(keys.groqKey?.trim() || getGroqKey()),
+              groq_hint: keys.groqKey?.trim() ? maskKey(keys.groqKey.trim()) : null,
+            },
+          },
+        });
+      } catch {
+        // Presence metadata is best-effort; the encrypted row is authoritative.
+      }
+    }
+
+    return true;
   } catch (err) {
     console.warn('Vault save network warning:', err);
     return false;
@@ -292,23 +304,16 @@ export async function saveKeysToVault(
  * Completely wipe API keys from client memory and delete the row from the backend database vault.
  */
 export async function revokeAndWipeUserKeys(_userId?: string): Promise<{ success: boolean; error?: string }> {
-  clearAllKeys();
-
-  if (supabase) {
-    try {
-      await supabase.auth.updateUser({
-        data: { vallum_vault_status: null },
-      });
-    } catch {
-      // Ignored
-    }
+  if (!BACKEND_BASE) {
+    return { success: false, error: 'Backend API URL is not configured; cannot delete the vault key.' };
   }
 
   try {
     const authHeaders = await getAuthHeaders();
     if (Object.keys(authHeaders).length === 0) {
-      return { success: true };
+      return { success: false, error: 'Sign in required to revoke vault keys.' };
     }
+
     const res = await fetch(`${BACKEND_BASE}/api/vault/keys`, {
       method: 'DELETE',
       headers: { ...authHeaders },
@@ -327,12 +332,26 @@ export async function revokeAndWipeUserKeys(_userId?: string): Promise<{ success
     };
   }
 
+  // Only wipe local state after the server confirms the encrypted row is gone.
+  clearAllKeys();
+
+  if (supabase) {
+    try {
+      await supabase.auth.updateUser({
+        data: { vallum_vault_status: null },
+      });
+    } catch {
+      // Ignored: the vault row is already deleted.
+    }
+  }
+
   return { success: true };
 }
 
 export function maskKey(key: string): string {
   if (!key) return '';
-  return key.length <= 10 ? '••••••' : `${key.slice(0, 6)}…${key.slice(-4)}`;
+  // Presence hint only: never persist fragments of a provider key.
+  return '••••••';
 }
 
 export interface KeyVerificationResult {
@@ -349,6 +368,9 @@ export async function testApiKeys(keys: {
   groqKey?: string;
   userId?: string;
 }): Promise<{ success: boolean; results: KeyVerificationResult[]; error?: string }> {
+  if (!BACKEND_BASE) {
+    return { success: false, results: [], error: 'Backend API URL is not configured.' };
+  }
   try {
     const authHeaders = await getAuthHeaders();
     const res = await fetch(`${BACKEND_BASE}/api/vault/verify-key`, {

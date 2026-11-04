@@ -10,13 +10,15 @@
  */
 import type { AuditRequest, AuditResult, RoeScope, TargetFinding, Verdict, Violation } from '../types/audit';
 import { parseCommands, type ParsedCommand } from '../lib/commands';
-import { cidrContainsCidr, cidrContainsIp, cidrsOverlap, parseCidr, parseIPv4, type ParsedCidr } from '../lib/ip';
+import { cidrContainsCidr, cidrContainsIp, cidrsOverlap, isIPv6Literal, parseCidr, parseIPv4, type ParsedCidr } from '../lib/ip';
 
 /** Hard-coded fallbacks enforced regardless of what any RoE says. */
-const HARD_DENY = ['169.254.169.254/32', '127.0.0.0/8', '0.0.0.0/32'].map((c) => parseCidr(c)!);
+const HARD_DENY = ['169.254.169.254/32', '127.0.0.0/8', '0.0.0.0/32']
+  .map((c) => parseCidr(c))
+  .filter((c): c is ParsedCidr => c !== null);
 
 const DESTRUCTIVE: { re: RegExp; label: string }[] = [
-  { re: /\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r/i, label: 'Recursive forced deletion (rm -rf)' },
+  { re: /\brm\b(?=[^\n;|&]*\s-[a-zA-Z]*[rR])(?=[^\n;|&]*\s-[a-zA-Z]*[fF])/, label: 'Recursive forced deletion (rm -rf)' },
   { re: /\bmkfs(\.\w+)?\b/i, label: 'Filesystem format (mkfs)' },
   { re: /\bdd\s+if=/i, label: 'Raw disk write (dd)' },
   { re: /:\(\)\s*\{\s*:\|:&\s*\};:/, label: 'Fork bomb' },
@@ -46,16 +48,18 @@ const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/i;
 
 interface RawTarget {
   token: string;
-  kind: 'ip' | 'cidr' | 'domain';
+  kind: 'ip' | 'cidr' | 'domain' | 'ipv6';
 }
 
 function hostCandidates(token: string): { host: string; fromUrl: boolean }[] {
   const url = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?(\[[^\]]+\]|[^/:?#]+)/i.exec(token);
-  if (url) return [{ host: url[1], fromUrl: true }];
+  const urlHost = url?.[1];
+  if (urlHost) return [{ host: urlHost, fromUrl: true }];
   const unc = /^(?:\/\/|\\\\)([^/\\]+)/.exec(token);
-  if (unc) return [{ host: unc[1], fromUrl: true }];
+  const uncHost = unc?.[1];
+  if (uncHost) return [{ host: uncHost, fromUrl: true }];
   let t = token.replace(/^[^@\s]+@/, '');
-  if (/^[^:]+:\d+$/.test(t)) t = t.split(':')[0];
+  if (/^[^:]+:\d+$/.test(t)) t = t.split(':')[0] ?? t;
   return [{ host: t, fromUrl: false }];
 }
 
@@ -71,6 +75,12 @@ function extractTargets(cmd: ParsedCommand): RawTarget[] {
       }
       if (/^\[?(::|(0{1,4}:){5})ffff:/i.test(host)) {
         if (parseIPv4(host)) found.push({ token: host, kind: 'ip' });
+        continue;
+      }
+      if (isIPv6Literal(host)) {
+        // The scope engine is IPv4-only. Treat any other IPv6 literal as an
+        // unverifiable target instead of silently skipping it (AUDIT_004 L3).
+        found.push({ token: host, kind: 'ipv6' });
         continue;
       }
       if (/^(0x[0-9a-f]+|\d+)(\.(0x[0-9a-f]+|\d+)){0,3}$/i.test(host)) {
@@ -101,19 +111,35 @@ function classify(t: RawTarget, scope: RoeScope): TargetFinding {
     const ok = scope.allowed_domains.some((d) => t.token === d || t.token.endsWith(`.${d}`));
     return { token: t.token, normalized: t.token, kind: 'domain', status: ok ? 'in_scope' : 'out_of_scope', obfuscated: false };
   }
+  if (t.kind === 'ipv6') {
+    return { token: t.token, normalized: t.token, kind: 'ip', status: 'prohibited', obfuscated: false };
+  }
+
   const allowed = parsedList(scope.allowed_cidrs);
   const prohibited = parsedList(scope.prohibited_ips);
-  const allowsLoopback = allowed.some((a) => a.network >>> 24 === 127);
-  const deny = HARD_DENY.filter((d) => !(allowsLoopback && d.network >>> 24 === 127));
+
+  // Hard-deny is per-target: only a range that explicitly contains the target
+  // can exempt it. Allowing 127.1.0.0/16 must not unlock 127.0.0.1 (AUDIT_004 L4).
+  const hardDenied = (target: ParsedCidr) =>
+    HARD_DENY.some((d) => cidrsOverlap(d, target)) &&
+    !allowed.some((a) => cidrContainsCidr(a, target));
 
   if (t.kind === 'cidr') {
-    const c = parseCidr(t.token)!;
-    const isProhibited = [...deny, ...prohibited].some((p) => cidrsOverlap(c, p));
+    const c = parseCidr(t.token);
+    if (!c) {
+      return { token: t.token, normalized: t.token, kind: 'cidr', status: 'out_of_scope', obfuscated: false };
+    }
+    const isProhibited = hardDenied(c) || prohibited.some((p) => cidrsOverlap(c, p));
     const inScope = allowed.some((a) => cidrContainsCidr(a, c));
     return { token: t.token, normalized: c.normalized, kind: 'cidr', status: isProhibited ? 'prohibited' : inScope ? 'in_scope' : 'out_of_scope', obfuscated: c.normalized !== t.token };
   }
-  const ip = parseIPv4(t.token)!;
-  const isProhibited = [...deny, ...prohibited].some((p) => cidrContainsIp(p, ip.value));
+
+  const ip = parseIPv4(t.token);
+  if (!ip) {
+    return { token: t.token, normalized: t.token, kind: 'ip', status: 'out_of_scope', obfuscated: false };
+  }
+  const target: ParsedCidr = { network: ip.value, prefix: 32, normalized: ip.normalized };
+  const isProhibited = hardDenied(target) || prohibited.some((p) => cidrContainsIp(p, ip.value));
   const inScope = allowed.some((a) => cidrContainsIp(a, ip.value));
   return { token: t.token, normalized: ip.normalized, kind: 'ip', status: isProhibited ? 'prohibited' : inScope ? 'in_scope' : 'out_of_scope', obfuscated: ip.obfuscated };
 }
@@ -152,14 +178,23 @@ export function runDemoAudit(req: AuditRequest): AuditResult {
         violations.push({ rule: 'Obfuscated IP Notation', category: 'scope', severity: 'WARNING', detail: `"${f.token}" normalizes to ${f.normalized}. Obfuscated notation is a common scope-evasion technique.`, command: cmd.raw });
       }
       if (f.status === 'prohibited') {
+        const ipv6Target = isIPv6Literal(f.token);
         violations.push({
-          rule: f.kind === 'cidr' ? 'Range Sweep Includes Prohibited Host' : 'Prohibited Target',
+          rule: ipv6Target ? 'Unsupported IPv6 Target' : f.kind === 'cidr' ? 'Range Sweep Includes Prohibited Host' : 'Prohibited Target',
           category: 'scope',
           severity: 'CRITICAL',
-          detail: f.kind === 'cidr' ? `Range ${f.normalized} overlaps hosts explicitly excluded by the RoE.` : `${f.normalized} is explicitly prohibited (gateway, broadcast, metadata or excluded host).`,
+          detail: ipv6Target
+            ? `${f.token} is an IPv6 literal. This engine cannot verify it against an IPv4 scope, so the command is treated as prohibited.`
+            : f.kind === 'cidr'
+              ? `Range ${f.normalized} overlaps hosts explicitly excluded by the RoE.`
+              : `${f.normalized} is explicitly prohibited (gateway, broadcast, metadata or excluded host).`,
           command: cmd.raw,
         });
-        if (isHardDenied(f)) drop = `Removed command targeting hard-denied address ${f.normalized}; no in-scope equivalent exists.`;
+        if (ipv6Target) {
+          drop = `Removed command targeting unverifiable IPv6 address ${f.token}.`;
+        } else if (isHardDenied(f)) {
+          drop = `Removed command targeting hard-denied address ${f.normalized}; no in-scope equivalent exists.`;
+        }
       } else if (f.status === 'out_of_scope') {
         violations.push({ rule: 'Out-of-Scope Target', category: 'scope', severity: 'CRITICAL', detail: `${f.normalized} is not inside any authorized range or domain.`, command: cmd.raw });
       }
@@ -199,14 +234,16 @@ export function runDemoAudit(req: AuditRequest): AuditResult {
 
     if (tool === 'nmap') {
       const timing = /(?:^|\s)-T([0-5])\b/.exec(cmd.raw);
-      if (timing && Number(timing[1]) > roe.max_nmap_timing) {
-        violations.push({ rule: 'Aggressive Scan Timing', category: 'policy', severity: 'WARNING', detail: `-T${timing[1]} exceeds the permitted maximum of -T${roe.max_nmap_timing} and risks service disruption.`, command: cmd.raw });
+      const timingValue = timing?.[1];
+      if (timingValue && Number(timingValue) > roe.max_nmap_timing) {
+        violations.push({ rule: 'Aggressive Scan Timing', category: 'policy', severity: 'WARNING', detail: `-T${timingValue} exceeds the permitted maximum of -T${roe.max_nmap_timing} and risks service disruption.`, command: cmd.raw });
         fixed = fixed.replace(/(^|\s)-T[0-5]\b/, `$1-T${roe.max_nmap_timing}`);
-        modifications.push(`Throttled nmap timing from -T${timing[1]} to -T${roe.max_nmap_timing}.`);
+        modifications.push(`Throttled nmap timing from -T${timingValue} to -T${roe.max_nmap_timing}.`);
       }
       const rate = /--min-rate[ =](\d+)/.exec(cmd.raw);
-      if (rate && Number(rate[1]) >= 1000) {
-        violations.push({ rule: 'Excessive Packet Rate', category: 'policy', severity: 'WARNING', detail: `--min-rate ${rate[1]} may overwhelm fragile hosts.`, command: cmd.raw });
+      const rateValue = rate?.[1];
+      if (rateValue && Number(rateValue) >= 1000) {
+        violations.push({ rule: 'Excessive Packet Rate', category: 'policy', severity: 'WARNING', detail: `--min-rate ${rateValue} may overwhelm fragile hosts.`, command: cmd.raw });
         fixed = fixed.replace(/\s*--min-rate[ =]\d+/, '');
         modifications.push('Removed --min-rate override.');
       }
