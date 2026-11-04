@@ -6,6 +6,8 @@ Zero Host Execution: Operates strictly over HTTPS via Supabase REST/PostgREST.
 import json
 import logging
 import os
+import tempfile
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -157,24 +159,33 @@ def fetch_audit_logs_for_roe(
         return res.data or []
     except Exception as e:
         logger.error(f"[Supabase] Failed to fetch audit logs for RoE {roe_id} (user {user_id}): {e}")
-        return []
+        # Raise rather than return []: an outage must never look like an empty, fully compliant record set
+        raise RuntimeError("Audit log store is unavailable; refusing to issue an attestation.") from e
 
 
-def delete_audit_logs(audit_ids: List[str], user_id: str) -> bool:
-    """Permanently delete one or more audit logs from PostgreSQL table audit_logs."""
+def delete_audit_logs(audit_ids: List[str], user_id: str) -> Optional[int]:
+    """Permanently delete audit logs owned by user_id. Returns the number of rows actually deleted,
+    or None if the delete could not be performed."""
     if not is_valid_uuid(user_id) or not audit_ids:
-        return False
+        return 0
 
     client = get_supabase()
     if not client:
-        return False
+        return None
 
     try:
-        client.table("audit_logs").delete().in_("audit_id", audit_ids).eq("user_id", user_id).execute()
-        return True
+        res = (
+            client.table("audit_logs")
+            .delete()
+            .in_("audit_id", audit_ids)
+            .eq("user_id", user_id)
+            .select("audit_id")
+            .execute()
+        )
+        return len(res.data or [])
     except Exception as e:
         logger.error(f"[Supabase] Failed to delete audit logs: {e}")
-        return False
+        return None
 
 
 def fetch_audit_metrics(user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -187,35 +198,30 @@ def fetch_audit_metrics(user_id: Optional[str] = None) -> Dict[str, Any]:
         return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
     try:
-        res = client.table("audit_logs").select("verdict, execution_time_ms").eq("user_id", user_id).execute()
-        rows = res.data or []
 
-        total = len(rows)
-        if total == 0:
-            return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
-        unsafe = sum(1 for r in rows if r.get("verdict") == "Unsafe")
-        correct = sum(1 for r in rows if r.get("verdict") == "Correct")
-        incorrect = sum(1 for r in rows if r.get("verdict") == "Incorrect")
-        total_latency = sum(r.get("execution_time_ms", 0) for r in rows)
-
-        pass_rate = round((correct / total) * 100) if total > 0 else 0
-        avg_latency = round(total_latency / total) if total > 0 else 0
+        # Aggregation happens in PostgreSQL (see migration 011), not by scanning every row here
+        res = client.rpc("audit_metrics", {"p_user_id": user_id}).execute()
+        row = (res.data[0] if isinstance(res.data, list) and res.data else res.data) or {}
 
         return {
-            "total": total,
-            "unsafe": unsafe,
-            "correct": correct,
-            "incorrect": incorrect,
-            "pass_rate": pass_rate,
-            "avg_latency_ms": avg_latency,
+            "total": int(row.get("total") or 0),
+            "unsafe": int(row.get("unsafe") or 0),
+            "correct": int(row.get("correct") or 0),
+            "incorrect": int(row.get("incorrect") or 0),
+            "pass_rate": int(row.get("pass_rate") or 0),
+            "avg_latency_ms": int(row.get("avg_latency_ms") or 0),
         }
     except Exception as e:
         logger.error(f"[Supabase] Failed to calculate metrics: {e}")
         return {"total": 0, "unsafe": 0, "correct": 0, "incorrect": 0, "pass_rate": 0, "avg_latency_ms": 0}
 
 
-LOCAL_BENCHMARKS_FILE = os.path.join(os.path.dirname(__file__), "benchmark_runs_local.json")
+# Runtime state lives outside the source tree: it can contain prompts, model outputs, and user IDs
+LOCAL_BENCHMARKS_FILE = os.path.join(
+    os.getenv("VALLUM_STATE_DIR", os.path.expanduser("~/.vallum")),
+    "benchmark_runs_local.json",
+)
 
 
 def _load_local_benchmarks() -> List[Dict[str, Any]]:
@@ -229,10 +235,28 @@ def _load_local_benchmarks() -> List[Dict[str, Any]]:
         return []
 
 
+_local_store_lock = threading.RLock()
+
+
 def _save_local_benchmarks(data: List[Dict[str, Any]]) -> None:
+    """Write the local store atomically: temp file in the same directory, fsync, then replace."""
+    directory = os.path.dirname(LOCAL_BENCHMARKS_FILE)
     try:
-        with open(LOCAL_BENCHMARKS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        os.makedirs(directory, exist_ok=True)
+        with _local_store_lock:
+            fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".benchmarks-", suffix=".json")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, LOCAL_BENCHMARKS_FILE)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
     except Exception as e:
         logger.warning(f"[LocalBenchmarkStore] Write error: {e}")
 
@@ -270,17 +294,21 @@ def save_benchmark_run(
     }
 
     # 1. Guarantee persistence in local backup store
-    local_runs = _load_local_benchmarks()
-    filtered = [r for r in local_runs if r.get("benchmark_id") != payload["benchmark_id"]]
-    _save_local_benchmarks([payload, *filtered])
+    # The read-modify-write runs under one lock so concurrent saves cannot drop each other's entries
+    with _local_store_lock:
+        local_runs = _load_local_benchmarks()
+        filtered = [r for r in local_runs if r.get("benchmark_id") != payload["benchmark_id"]]
+        _save_local_benchmarks([payload, *filtered])
 
-    # 2. Persist to Supabase if connected
+    # 2. Persist to Supabase if connected. A cloud failure is reported to the caller
+    #    (the local backup still exists), rather than returning success unconditionally.
     client = get_supabase()
     if client:
         try:
             client.table("benchmark_runs").insert(payload).execute()
         except Exception as e:
-            logger.warning(f"[Supabase] Table insert failed (local backup active): {e}")
+            logger.error(f"[Supabase] benchmark_runs insert failed (local backup kept): {e}")
+            return False
 
     return True
 
@@ -306,23 +334,38 @@ def fetch_benchmark_history(user_id: Optional[str] = None, limit: int = 50) -> L
     return user_runs[:limit]
 
 
-def delete_benchmark_runs(benchmark_ids: List[str], user_id: str) -> bool:
-    """Permanently delete one or more benchmark runs from Supabase and local store."""
-    if not is_valid_uuid(user_id) or not benchmark_ids:
-        return False
+def delete_benchmark_runs(benchmark_ids: List[str], user_id: str) -> Optional[int]:
+    """Permanently delete benchmark runs from Supabase and the local store.
 
+    Returns the number of runs actually deleted, or None if the cloud delete failed.
+    """
+    if not is_valid_uuid(user_id) or not benchmark_ids:
+        return 0
+
+    cloud_deleted = 0
     client = get_supabase()
     if client:
         try:
-            client.table("benchmark_runs").delete().in_("benchmark_id", benchmark_ids).eq("user_id", user_id).execute()
+            res = (
+                client.table("benchmark_runs")
+                .delete()
+                .in_("benchmark_id", benchmark_ids)
+                .eq("user_id", user_id)
+                .select("benchmark_id")
+                .execute()
+            )
+            cloud_deleted = len(res.data or [])
         except Exception as e:
-            logger.warning(f"[Supabase] Cloud delete failed: {e}")
+            logger.error(f"[Supabase] Cloud benchmark delete failed: {e}")
+            return None
 
-    local_runs = _load_local_benchmarks()
-    to_delete = set(benchmark_ids)
-    remaining = [r for r in local_runs if not (r.get("benchmark_id") in to_delete and str(r.get("user_id")) == str(user_id))]
-    _save_local_benchmarks(remaining)
-    return True
+    with _local_store_lock:
+        local_runs = _load_local_benchmarks()
+        to_delete = set(benchmark_ids)
+        remaining = [r for r in local_runs if not (r.get("benchmark_id") in to_delete and str(r.get("user_id")) == str(user_id))]
+        _save_local_benchmarks(remaining)
+    local_deleted = len(local_runs) - len(remaining)
+    return max(cloud_deleted, local_deleted)
 
 
 def fetch_roe_presets() -> List[Dict[str, Any]]:
@@ -483,20 +526,13 @@ def save_user_vault_keys(
             payload["encrypted_groq_key"] = None
             payload["key_hint_groq"] = None
 
+    # Ciphertext lives only in the RLS-protected user_api_vault table. It is never copied into
+    # auth app_metadata (user-readable and embedded in the user's JWT). A failed write must surface.
     try:
         client.table("user_api_vault").upsert(payload, on_conflict="user_id").execute()
     except Exception as e:
-        logger.warning(f"[Supabase] user_api_vault table upsert fallback to auth.admin app_metadata: {e}")
-
-    # Also persist encrypted vault payload in Supabase Auth user app_metadata so it works
-    # even when the optional user_api_vault table migration has not been applied.
-    try:
-        client.auth.admin.update_user_by_id(
-            user_id,
-            {"app_metadata": {"vallum_vault": payload}},
-        )
-    except Exception as e:
-        logger.warning(f"[Supabase] Failed to sync vault to auth.admin app_metadata for {user_id}: {e}")
+        logger.error(f"[Supabase] user_api_vault upsert failed for {user_id}: {e}")
+        raise RuntimeError("Failed to store API keys in the vault.") from e
 
     return {
         "success": True,
@@ -584,23 +620,26 @@ def revoke_user_vault_keys(user_id: str) -> bool:
     if not client:
         return False
 
-    deleted = False
+    # The vault row delete is required; report failure instead of success if it fails
     try:
         client.table("user_api_vault").delete().eq("user_id", user_id).execute()
-        deleted = True
-    except Exception as e:
-        logger.warning(f"[Supabase] user_api_vault table delete warning for {user_id}: {e}")
+    except Exception:
+        logger.exception("[Supabase] user_api_vault delete failed for %s", user_id)
+        return False
 
+    # Remove any legacy ciphertext copy from app_metadata (remove the key, do not leave a null marker)
     try:
-        client.auth.admin.update_user_by_id(
-            user_id,
-            {"app_metadata": {"vallum_vault": None}},
-        )
-        deleted = True
-    except Exception as e:
-        logger.warning(f"[Supabase] Failed to clear auth.admin vallum_vault for {user_id}: {e}")
+        user_res = client.auth.admin.get_user_by_id(user_id)
+        user_obj = getattr(user_res, "user", None)
+        metadata = dict(getattr(user_obj, "app_metadata", {}) or {})
+        if "vallum_vault" in metadata:
+            metadata.pop("vallum_vault", None)
+            client.auth.admin.update_user_by_id(user_id, {"app_metadata": metadata})
+    except Exception:
+        logger.exception("[Supabase] Failed to clear legacy vallum_vault metadata for %s", user_id)
+        return False
 
-    return deleted
+    return True
 
 
 def get_user_vault_status(user_id: str) -> Dict[str, Any]:
