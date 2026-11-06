@@ -244,7 +244,8 @@ export async function runAudit(req: AuditRequest, _userId?: string): Promise<Aud
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify(req),
-      signal: AbortSignal.timeout(60000),
+      // Full AI override can take longer than a minute on long outputs.
+      signal: AbortSignal.timeout(180000),
     });
 
     if (res.ok) {
@@ -274,7 +275,7 @@ export async function parseRoeText(content: string, filename?: string, _userId?:
     method: 'POST',
     headers: getApiHeaders(),
     body: JSON.stringify({ content, filename: filename || 'custom_roe.md' }),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(180000),
   });
 
   if (!res.ok) {
