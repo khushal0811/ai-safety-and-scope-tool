@@ -19,10 +19,10 @@ from app.engine.ip_validator import (
     ScopeValidator,
     normalize_ip_candidate,
 )
-from app.engine.llm_client import llm_client
 from app.engine.parser import (
     extract_and_parse_all_commands,
     extract_command_blocks,
+    extract_embedded_payload_targets,
     ParsedCommand,
     is_model_refusal,
 )
@@ -386,7 +386,18 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
         # A. Target extraction & scope classification (head + nested stages)
         cmd_findings: List[TargetFinding] = []
         cmd_dynamic_targets: List[NormalizedTarget] = []
-        for target in _iter_invocation_targets(parsed):
+        seen_target_keys: Set[Tuple[str, str]] = set()
+        invocation_targets = list(_iter_invocation_targets(parsed)) + list(
+            extract_embedded_payload_targets(parsed.raw)
+        )
+        for target in invocation_targets:
+            target_key = (
+                getattr(target, "canonical", None) or target.raw_token,
+                target.kind.value,
+            )
+            if target_key in seen_target_keys:
+                continue
+            seen_target_keys.add(target_key)
             # A dynamic (unresolved shell-variable) target cannot be judged
             # literally: warning tier, never a critical scope breach, and never
             # allowed to masquerade as a verified target finding.
@@ -601,7 +612,9 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
 
     audit_id = f"AUDIT-{uuid.uuid4().hex[:10].upper()}"
     timestamp = datetime.now(timezone.utc).isoformat()
-    tier = "deterministic" if getattr(request, "deterministic_only", False) else "hybrid"
+    # Pass 1 is the internal candidate generator. The public audit path always
+    # runs Pass 2; this label is only truthful when the Judge is unavailable.
+    tier = "deterministic"
 
     return AuditResult(
         audit_id=audit_id,
@@ -639,45 +652,36 @@ def evaluate_deterministic_command(request: DeterministicAuditRequest) -> AuditR
         model_id=request.model_id,
         user_prompt=request.user_prompt,
         model_output=request.command,
-        deterministic_only=request.deterministic_only,
     )
     return evaluate_audit(full_req)
 
 
 async def evaluate_audit_async(request: AuditRequest) -> AuditResult:
-    """Evaluate audit using Dual-Pass Architecture: Pass 1 Deterministic Pre-Parser + Pass 2 Groq AI Judge.
+    """Evaluate an audit using the hybrid path: Pass 1 candidates + AI Judge.
 
-    If request.deterministic_only is True, Pass 1 deterministic verdict and violations are strictly
-    authoritative, and Pass 2 AI Judge runs in advisory mode (attaching observations to ai_judge_notes).
+    There is no deterministic-only mode. The deterministic engine always runs
+    as Pass 1; the AI Judge always reviews its candidates when configured. If
+    the Judge is unavailable, the Pass 1 result is returned with an explicit
+    warning and a deterministic trust tier.
     """
     pass1_result = evaluate_audit(request)
 
-    # Model refusal: model declined to provide offensive commands.
-    # Preserve Verdict.REFUSED and bypass Pass 2 AI Judge triage entirely.
+    # Model refusal: no actionable commands, so there is nothing for the Judge
+    # to adjudicate. Preserve Verdict.REFUSED.
     if pass1_result.verdict == Verdict.REFUSED:
-        return pass1_result
+        return pass1_result.model_copy(update={"trust_tier": "hybrid"})
 
-    # 1. Deterministic-Only Mode: Pass 1 verdict and violations are strictly authoritative
-    if request.deterministic_only:
-        pass1_result = pass1_result.model_copy(update={"trust_tier": "deterministic"})
-        if llm_client.is_configured:
-            try:
-                from app.engine.ai_judge import evaluate_with_ai_judge_advisory
-                return await evaluate_with_ai_judge_advisory(request, pass1_result)
-            except Exception as e:
-                logger.error(f"[AI Judge Advisory] Advisory pass failed: {e}")
-                return pass1_result
-        return pass1_result
+    try:
+        from app.engine.ai_judge import evaluate_with_ai_judge
 
-    # 2. Standard Hybrid Mode: Pass 1 + Pass 2 Groq AI Judge
-    if llm_client.is_configured:
-        try:
-            from app.engine.ai_judge import evaluate_with_ai_judge
-            return await evaluate_with_ai_judge(request, pass1_result)
-        except Exception as e:
-            logger.error(f"[AI Judge] Fallback to Pass 1 result due to error: {e}")
-            return pass1_result.model_copy(update={"trust_tier": "deterministic"})
-
-    return pass1_result.model_copy(update={"trust_tier": "deterministic"})
+        return await evaluate_with_ai_judge(request, pass1_result)
+    except Exception as e:
+        logger.error(f"[AI Judge] Fallback to Pass 1 result due to error: {e}")
+        return pass1_result.model_copy(
+            update={
+                "trust_tier": "deterministic",
+                "ai_judge_notes": [f"[AI Judge] Unavailable; Pass 1 result retained: {e}"],
+            }
+        )
 
 

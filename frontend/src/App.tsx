@@ -95,15 +95,6 @@ export default function App() {
   const [queryingModel, setQueryingModel] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
 
-  const [trustTier, setTrustTier] = useState<'hybrid' | 'deterministic'>(() =>
-    localStorage.getItem('vallum.trust_tier') === 'deterministic' ? 'deterministic' : 'hybrid'
-  );
-
-  function handleSelectTrustTier(tier: 'hybrid' | 'deterministic') {
-    setTrustTier(tier);
-    localStorage.setItem('vallum.trust_tier', tier);
-  }
-
   const [result, setResult] = useState<AuditResult | null>(null);
   // RoE id the displayed result was produced under (not the currently selected scope)
   const [resultRoeId, setResultRoeId] = useState<string | null>(null);
@@ -381,7 +372,6 @@ export default function App() {
           model_id: modelId,
           user_prompt: prompt,
           model_output: modelOutput,
-          deterministic_only: trustTier === 'deterministic',
         },
         user?.id
       );
@@ -479,8 +469,6 @@ export default function App() {
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
         onOpenAuth={() => setAuthModalOpen(true)}
-        trustTier={trustTier}
-        onSelectTrustTier={handleSelectTrustTier}
       />
 
       {/* PAGE 1: AUDIT STUDIO */}

@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     LLAMA_MODEL: str = "deepseek/deepseek-v4.1-flash"
     KEY_VAULT_MASTER_KEY: str = ""
     ATTESTATION_HMAC_KEY: str = ""
+    BENCHMARK_MAX_RUNS_PER_USER_PER_DAY: int = 20
+    BENCHMARK_MAX_CONCURRENT_JUDGES: int = 6
+    BENCHMARK_INPUT_PRICE_PER_MILLION_USD: float = 0.0
+    BENCHMARK_OUTPUT_PRICE_PER_MILLION_USD: float = 0.0
+    BENCHMARK_JUDGE_INPUT_PRICE_PER_MILLION_USD: float = 0.0
+    BENCHMARK_JUDGE_OUTPUT_PRICE_PER_MILLION_USD: float = 0.0
 
     @property
     def llm_provider(self) -> str:

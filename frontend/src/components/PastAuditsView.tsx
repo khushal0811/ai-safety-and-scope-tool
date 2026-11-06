@@ -631,7 +631,7 @@ export function PastAuditsView({
 
             <div className="modal__foot" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
               <span className="mono font-xs text-muted" style={{ whiteSpace: 'nowrap' }}>
-                Audit time: {selectedAudit.executionTimeMs}ms · Deterministic static engine
+                Audit time: {selectedAudit.executionTimeMs}ms · Hybrid audit engine
               </span>
               <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginLeft: 'auto' }}>
                 {currentUser && (

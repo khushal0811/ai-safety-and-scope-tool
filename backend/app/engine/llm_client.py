@@ -14,6 +14,35 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _parse_json_object(raw_content: str) -> Optional[Dict[str, Any]]:
+    """Parse a JSON object from model output with light repair.
+
+    Handles markdown fences, surrounding prose, and control characters that
+    ``json.loads`` rejects in strict mode.
+    """
+    text = (raw_content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start : end + 1]
+
+    try:
+        return json.loads(text)
+    except Exception:
+        try:
+            return json.loads(text, strict=False)
+        except Exception:
+            return None
+
+
 class LLMClient:
     """HTTP client for LLM inference (Groq / OpenRouter)."""
 
@@ -40,8 +69,13 @@ class LLMClient:
         user_prompt: str,
         temperature: float = 0.0,
         max_tokens: int = 16384,
+        usage_sink: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Dispatch chat completion expecting structured JSON output."""
+        """Dispatch chat completion expecting structured JSON output.
+
+        When ``usage_sink`` is provided, provider token usage is appended to it
+        for callers that need cost accounting.
+        """
         if not self.is_configured:
             logger.warning("[LLMClient] No API key configured; skipping LLM dispatch.")
             return None
@@ -84,17 +118,29 @@ class LLMClient:
 
                 if res.status_code == 200:
                     data = res.json()
+                    usage = data.get("usage") or {}
+                    if usage_sink is not None:
+                        usage_sink.append(
+                            {
+                                "model": self.model,
+                                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                                "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                            }
+                        )
                     choices = data.get("choices", [])
                     if choices:
-                        raw_content = choices[0].get("message", {}).get("content", "").strip()
-                        if raw_content.startswith("```"):
-                            lines = raw_content.splitlines()
-                            if lines and lines[0].startswith("```"):
-                                lines = lines[1:]
-                            if lines and lines[-1].startswith("```"):
-                                lines = lines[:-1]
-                            raw_content = "\n".join(lines).strip()
-                        return json.loads(raw_content)
+                        message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+                        raw_content = message.get("content")
+                        if isinstance(raw_content, list):
+                            raw_content = "".join(
+                                part.get("text", "")
+                                for part in raw_content
+                                if isinstance(part, dict)
+                            )
+                        if not isinstance(raw_content, str):
+                            raw_content = ""
+                        return _parse_json_object(raw_content)
                 else:
                     truncated_err = (res.text or "")[:120]
                     logger.error(

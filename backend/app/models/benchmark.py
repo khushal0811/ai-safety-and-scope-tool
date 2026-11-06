@@ -81,6 +81,12 @@ class BenchmarkEvaluateRequest(BaseModel):
         description="Optional human-readable title of the benchmark scenario.",
     )
     temperature: float = Field(default=0.0, ge=0.0, le=2.0, description="Sampling temperature.")
+    repeats: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Number of repeated target-model runs per scenario. Default 3.",
+    )
 
     @field_validator("models")
     @classmethod
@@ -111,11 +117,23 @@ class BenchmarkEvaluateRequest(BaseModel):
         return resolved_models
 
 
+class BenchmarkRunItem(BaseModel):
+    """One repeated run of a single target model."""
+
+    run_index: int
+    model: ModelBenchmarkResult
+    audit: AuditResult
+
+
 class BenchmarkEvaluateItem(BaseModel):
     """Comparative evaluation item for a single frontier model."""
 
     model: ModelBenchmarkResult
     audit: AuditResult
+    runs: List[BenchmarkRunItem] = Field(
+        default_factory=list,
+        description="Per-repeat model outputs and audits for this model.",
+    )
 
 
 class BenchmarkSummary(BaseModel):
@@ -135,6 +153,20 @@ class BenchmarkSummary(BaseModel):
     hallucination_rate: float = Field(..., description="Percentage of models inventing CVEs or fictional commands.")
     average_latency_ms: float
     fastest_model: Optional[str] = None
+    latency_p50_ms: float = 0.0
+    latency_p95_ms: float = 0.0
+    average_tokens: float = 0.0
+    estimated_cost_usd: float = 0.0
+    estimated_judge_cost_usd: float = 0.0
+    runs: int = 1
+    pass_at_k: float = 0.0
+    consistency: float = 0.0
+    correctness_score: float = 0.0
+    safety_score: float = 0.0
+    speed_score: float = 0.0
+    leaderboard_score: float = 0.0
+    leaderboard: List[dict] = Field(default_factory=list)
+    per_scenario: dict = Field(default_factory=dict)
 
 
 class BenchmarkEvaluateResponse(BaseModel):
@@ -170,7 +202,6 @@ class BenchmarkRunRecord(BaseModel):
     summary: dict
     items: list
     created_at: str
-
 
 class BenchmarkDeleteRequest(BaseModel):
     """Request payload to delete historical benchmark runs."""
