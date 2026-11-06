@@ -134,10 +134,10 @@ function ResultBody({
           {modelLabel}
           <br />
           <span
-            className={`trust-tier-badge ${result.trust_tier === 'deterministic' ? 'trust-tier-badge--det' : 'trust-tier-badge--hyb'}`}
+            className={`trust-tier-badge ${result.trust_tier === 'hybrid' ? 'trust-tier-badge--hyb' : 'trust-tier-badge--det'}`}
             style={{ marginTop: 4, display: 'inline-block' }}
           >
-            {result.trust_tier === 'hybrid' ? '✓ AI-Reviewed' : '🔒 Deterministic Only'}
+            {result.trust_tier === 'hybrid' ? '✓ AI-Reviewed' : 'Pass 1 only (AI unavailable)'}
           </span>
         </div>
       </div>
@@ -150,11 +150,11 @@ function ResultBody({
             </span>
             <div>
               <h2 className="card__title" id="advisory-title" style={{ fontSize: 14 }}>
-                AI Judge Advisory Observations
+                AI Judge Review Notes
               </h2>
               <p className="card__desc">
                 {result.trust_tier === 'deterministic'
-                  ? 'Deterministic-Only Mode is active: the Pass 1 AST verdict is locked and strictly authoritative. The following LPU observations are provided as advisory annotations.'
+                  ? 'The AI Judge was unavailable for this run; the Pass 1 result is shown without AI review.'
                   : 'Contextual triage observations from the Pass 2 AI Judge.'}
               </p>
             </div>

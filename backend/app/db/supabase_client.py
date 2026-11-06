@@ -418,6 +418,32 @@ def save_benchmark_run(
     return True
 
 
+def count_benchmark_runs_since(user_id: str, since_iso: str) -> int:
+    """Count a user's benchmark runs created at or after an ISO timestamp."""
+    if not is_valid_uuid(user_id):
+        return 0
+
+    client = get_supabase()
+    if client:
+        try:
+            res = (
+                _user_scoped_query(client, "benchmark_runs", user_id, columns="benchmark_id")
+                .gte("created_at", since_iso)
+                .execute()
+            )
+            return len(res.data or [])
+        except Exception as e:
+            logger.info(f"[Supabase] Benchmark quota count failed, using local store: {e}")
+
+    local_runs = _load_local_benchmarks()
+    return sum(
+        1
+        for run in local_runs
+        if str(run.get("user_id")) == str(user_id)
+        and str(run.get("created_at", "")) >= since_iso
+    )
+
+
 def fetch_benchmark_history(user_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """Retrieve benchmark run history from PostgreSQL benchmark_runs table or local store."""
     if not is_valid_uuid(user_id):

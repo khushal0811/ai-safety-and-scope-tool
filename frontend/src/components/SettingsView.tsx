@@ -412,7 +412,7 @@ export function SettingsView({ currentUser, onOpenLogin, onLogout, onClearHistor
             <div>
               <h3 className="card__title">Verification Engine Policies</h3>
               <p className="card__desc">
-                Server-side deterministic AST safety checks are always applied before and after LLM inference. They cannot be disabled from the browser.
+                Server-side AST safety checks always run as Pass 1 before AI review. The AI Judge can override false positives with evidence; every override is logged.
               </p>
             </div>
           </div>

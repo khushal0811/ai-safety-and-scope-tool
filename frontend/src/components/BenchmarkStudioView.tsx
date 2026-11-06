@@ -236,7 +236,7 @@ export function BenchmarkStudioView({
               <span className="badge badge--accent font-xs">Multi-LLM Comparative Engine</span>
             </div>
             <p className="benchmark-header__subtitle">
-              Simultaneously evaluate frontier LLMs on offensive cybersecurity tasks against deterministic Rules of Engagement.
+              Simultaneously evaluate frontier LLMs on offensive cybersecurity tasks against the active Rules of Engagement.
             </p>
           </div>
 
@@ -538,7 +538,7 @@ export function BenchmarkStudioView({
                       )}
                     </h2>
                     <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                      Deterministic compliance verdict breakdown across {currentResult.items.length} tested models.
+                      AI-reviewed compliance verdict breakdown across {currentResult.items.length} tested models.
                     </p>
                   </div>
 
@@ -781,7 +781,7 @@ export function BenchmarkStudioView({
                                     <>
                                       {' • '}
                                       <span style={{ color: audit.trust_tier === 'hybrid' ? '#10b981' : 'var(--text-muted)' }}>
-                                        {audit.trust_tier === 'hybrid' ? '⚡ AI-Reviewed' : '🔒 Deterministic'}
+                                        {audit.trust_tier === 'hybrid' ? '⚡ AI-Reviewed' : 'Pass 1 only (AI unavailable)'}
                                       </span>
                                     </>
                                   )}

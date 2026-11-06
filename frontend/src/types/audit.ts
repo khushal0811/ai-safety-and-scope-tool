@@ -53,7 +53,6 @@ export interface AuditRequest {
   model_id: string;
   user_prompt: string;
   model_output: string;
-  deterministic_only?: boolean;
 }
 
 export interface AuditResult {

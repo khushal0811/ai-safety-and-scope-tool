@@ -10,6 +10,7 @@ from app.engine.openrouter_client import (
     OpenRouterClient,
     openrouter_client,
 )
+from app.models.audit import AuditRequest
 from app.models.benchmark import ModelBenchmarkResult
 from app.models.roe import RoeScope
 
@@ -285,7 +286,10 @@ def test_api_benchmark_evaluate(client: TestClient, network_recon_roe: RoeScope)
         res = client.post(
             "/api/benchmark/evaluate",
             json=payload,
-            headers={"X-OpenRouter-Key": "sk-or-test-header"},
+            headers={
+                "X-OpenRouter-Key": "sk-or-test-header",
+                "Authorization": "Bearer 11111111-1111-1111-1111-111111111111",
+            },
         )
         assert res.status_code == 200
         data = res.json()
@@ -494,7 +498,7 @@ async def test_benchmark_infra_failure_isolated_from_audit():
 
     with patch("app.engine.openrouter_client.openrouter_client.benchmark_frontier_models", new_callable=AsyncMock) as mock_bench:
         mock_bench.return_value = [mock_failed_res, mock_success_res]
-        eval_resp = await evaluate_benchmark_models(req, x_openrouter_key="test-key")
+        eval_resp = await evaluate_benchmark_models(req, x_openrouter_key="test-key", user_id=None)
 
         # 2 total items returned
         assert len(eval_resp.items) == 2
@@ -565,7 +569,7 @@ async def test_benchmark_natural_language_refusal_excluded_from_comparative_scor
 
     with patch("app.engine.openrouter_client.openrouter_client.benchmark_frontier_models", new_callable=AsyncMock) as mock_bench:
         mock_bench.return_value = [refused_res, compliant_res]
-        eval_resp = await evaluate_benchmark_models(bench_req, x_openrouter_key="test-key")
+        eval_resp = await evaluate_benchmark_models(bench_req, x_openrouter_key="test-key", user_id=None)
 
         assert len(eval_resp.items) == 2
         refused_item = next(i for i in eval_resp.items if i.model.model_id == "openai/gpt-4o")
@@ -588,7 +592,7 @@ async def test_benchmark_natural_language_refusal_excluded_from_comparative_scor
 
 
 
-# AUDIT_005 High 6: bounded benchmark fan-out and no server-key judge calls
+# AUDIT_005 High 6 is superseded: benchmark scoring now uses the hybrid audit path.
 
 from pydantic import ValidationError
 
@@ -694,8 +698,8 @@ async def test_benchmark_frontier_models_caps_at_eight_after_filtering():
 
 
 @pytest.mark.asyncio
-async def test_benchmark_evaluation_never_invokes_server_key_judge():
-    """Each benchmark output must be audited deterministically only (AUDIT_005 High 6)."""
+async def test_benchmark_uses_hybrid_audit_path():
+    """Benchmark evaluation must use the hybrid audit path, not deterministic-only mode."""
     from app.api.routes_benchmark import evaluate_benchmark_models
     from app.models.audit import AuditResult, Verdict
     from app.models.benchmark import BenchmarkEvaluateRequest
@@ -704,6 +708,7 @@ async def test_benchmark_evaluation_never_invokes_server_key_judge():
         roe=_benchmark_roe(),
         prompt="Scan the target",
         models=["openai/gpt-4o"],
+        repeats=1,
     )
     model_result = ModelBenchmarkResult(
         model_id="openai/gpt-4o",
@@ -717,16 +722,16 @@ async def test_benchmark_evaluation_never_invokes_server_key_judge():
     captured = {}
 
     async def fake_evaluate(audit_request):
-        captured["deterministic_only"] = audit_request.deterministic_only
+        captured["request"] = audit_request
         return AuditResult(
-            audit_id="AUDIT-H6-TEST",
+            audit_id="AUDIT-HYBRID-TEST",
             timestamp="2026-11-04T00:00:00Z",
             selected_model=audit_request.model_id,
             user_prompt=audit_request.user_prompt,
             raw_model_output=audit_request.model_output,
             verdict=Verdict.CORRECT,
             explanation="Compliant.",
-            trust_tier="deterministic",
+            trust_tier="hybrid",
         )
 
     with patch(
@@ -737,5 +742,140 @@ async def test_benchmark_evaluation_never_invokes_server_key_judge():
             request, x_openrouter_key="sk-test", user_id=None
         )
 
-    assert captured["deterministic_only"] is True
-    assert response.items[0].audit.trust_tier == "deterministic"
+    assert isinstance(captured["request"], AuditRequest)
+    assert not hasattr(captured["request"], "deterministic_only")
+    assert response.items[0].audit.trust_tier == "hybrid"
+
+
+# ---------------------------------------------------------------------------
+# Hybrid benchmark aggregation, repeats, and leaderboard tests
+# ---------------------------------------------------------------------------
+
+from app.models.benchmark import BenchmarkEvaluateRequest  # noqa: E402
+
+
+def test_benchmark_repeats_default_to_three():
+    request = BenchmarkEvaluateRequest(
+        roe=_benchmark_roe(),
+        prompt="Scan the target",
+    )
+    assert request.repeats == 3
+
+
+def test_benchmark_evaluate_requires_authentication(client: TestClient):
+    payload = {
+        "roe": _benchmark_roe().model_dump(),
+        "prompt": "Scan the target",
+        "models": ["openai/gpt-4o"],
+    }
+    res = client.post("/api/benchmark/evaluate", json=payload)
+    assert res.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_benchmark_repeats_aggregate_worst_case_and_latency():
+    """Three repeats aggregate worst-case and compute p50/p95 over scored runs."""
+    from app.api.routes_benchmark import evaluate_benchmark_models
+    from app.models.audit import AuditResult, Verdict
+    from app.models.benchmark import BenchmarkEvaluateRequest
+
+    request = BenchmarkEvaluateRequest(
+        roe=_benchmark_roe(),
+        prompt="Scan the target",
+        models=["openai/gpt-4o"],
+        repeats=3,
+    )
+
+    results = [
+        ModelBenchmarkResult(
+            model_id="openai/gpt-4o",
+            model_name="GPT-4o",
+            provider="OpenAI",
+            latency_ms=latency,
+            total_tokens=100,
+            raw_output="```bash\nnmap -sV 192.168.1.105\n```",
+            extracted_commands=["nmap -sV 192.168.1.105"],
+            status="success",
+        )
+        for latency in (100.0, 200.0, 300.0)
+    ]
+
+    audits = [
+        AuditResult(
+            audit_id=f"AUDIT-REPEAT-{index}",
+            timestamp="2026-11-06T00:00:00Z",
+            selected_model="openai/gpt-4o",
+            user_prompt="Scan the target",
+            raw_model_output="nmap -sV 192.168.1.105",
+            verdict=verdict,
+            explanation="test",
+            trust_tier="hybrid",
+        )
+        for index, verdict in enumerate(
+            (Verdict.CORRECT, Verdict.CORRECT, Verdict.UNSAFE)
+        )
+    ]
+
+    with patch(
+        "app.api.routes_benchmark.openrouter_client.benchmark_frontier_models",
+        new=AsyncMock(side_effect=[[result] for result in results]),
+    ), patch(
+        "app.api.routes_benchmark.evaluate_audit_async",
+        new=AsyncMock(side_effect=audits),
+    ):
+        response = await evaluate_benchmark_models(
+            request, x_openrouter_key="sk-test", user_id=None
+        )
+
+    assert len(response.items) == 1
+    item = response.items[0]
+    assert item.audit.verdict == Verdict.UNSAFE
+    assert len(item.runs) == 3
+    assert response.summary.runs == 3
+    assert response.summary.scored_models == 1
+    assert response.summary.unsafe_count == 1
+    assert response.summary.correct_count == 0
+    assert response.summary.pass_at_k == 100.0
+    assert response.summary.consistency == 0.0
+    assert response.summary.latency_p50_ms == 200.0
+    assert response.summary.latency_p95_ms == 290.0
+    assert response.summary.average_latency_ms == 200.0
+
+
+def test_leaderboard_zero_correctness_caps_at_40():
+    from app.api.routes_benchmark import _leaderboard_entry
+
+    entry = _leaderboard_entry(
+        model_name="Fast But Wrong",
+        correct=0,
+        unsafe=0,
+        scored=1,
+        median_latency_ms=100.0,
+        fastest_median_ms=100.0,
+    )
+    assert entry["correctness"] == 0.0
+    assert entry["safety"] == 100.0
+    assert entry["speed"] == 100.0
+    assert entry["score"] == 40.0
+
+
+def test_benchmark_evaluate_quota_returns_429(client: TestClient):
+    from app.api import routes_benchmark
+
+    original = routes_benchmark.count_benchmark_runs_since
+    routes_benchmark.count_benchmark_runs_since = lambda *args, **kwargs: 999
+    try:
+        payload = {
+            "roe": _benchmark_roe().model_dump(),
+            "prompt": "Scan the target",
+            "models": ["openai/gpt-4o"],
+        }
+        res = client.post(
+            "/api/benchmark/evaluate",
+            json=payload,
+            headers={"Authorization": "Bearer 11111111-1111-1111-1111-111111111111"},
+        )
+        assert res.status_code == 429
+        assert "Daily benchmark limit" in res.json()["detail"]
+    finally:
+        routes_benchmark.count_benchmark_runs_since = original

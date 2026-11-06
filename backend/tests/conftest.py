@@ -51,3 +51,24 @@ def _uuid_bearer_tokens_for_tests(monkeypatch):
         return real_verify(authorization)
 
     monkeypatch.setattr(deps, "verify_supabase_jwt", fake_verify)
+
+
+@pytest.fixture(autouse=True)
+def _disable_real_llm_calls(monkeypatch):
+    """Never let the test suite spend a real LLM key.
+
+    Tests that exercise the Judge explicitly patch ``api_key`` and/or
+    ``generate_json`` themselves. Without this guard, a developer's local
+    ``backend/.env`` would make ordinary tests call the live provider.
+    """
+    from app.engine.llm_client import llm_client
+
+    monkeypatch.setattr(llm_client, "api_key", "", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_benchmark_quota(monkeypatch):
+    """Default the benchmark quota to zero usage; quota tests override it."""
+    from app.api import routes_benchmark
+
+    monkeypatch.setattr(routes_benchmark, "count_benchmark_runs_since", lambda *args, **kwargs: 0)
