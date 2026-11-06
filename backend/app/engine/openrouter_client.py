@@ -5,6 +5,7 @@ Target frontier models:
 - Anthropic Claude Sonnet 4.6 (`anthropic/claude-sonnet-4.6`)
 - Google Gemini 3.8 Flash (`google/gemini-3.8-flash`)
 - Anthropic Claude Haiku 5.5 (`anthropic/claude-haiku-5.5`)
+- DeepSeek V4.1 Flash (`deepseek/deepseek-v4.1-flash`)
 
 Strict Zero Host Execution: Model recommendations are purely parsed and evaluated
 against the active Rules of Engagement; no subprocess commands are ever executed.
@@ -63,6 +64,15 @@ FRONTIER_MODELS: Dict[str, FrontierModelInfo] = {
         tier="frontier",
         recommended=True,
     ),
+    "deepseek/deepseek-v4.1-flash": FrontierModelInfo(
+        id="deepseek/deepseek-v4.1-flash",
+        name="DeepSeek V4.1 Flash",
+        provider="DeepSeek",
+        context_length=1000000,
+        description="Cost-efficient frontier reasoning model; pinned to max-effort thinking for methodical pentest command synthesis.",
+        tier="frontier",
+        recommended=True,
+    ),
 }
 
 # Supported aliases for backward compatibility or flexible slug resolution
@@ -87,6 +97,10 @@ MODEL_ALIASES: Dict[str, str] = {
     "haiku": "anthropic/claude-haiku-5.5",
     "anthropic/claude-haiku-latest": "anthropic/claude-haiku-5.5",
     "~anthropic/claude-haiku-latest": "anthropic/claude-haiku-5.5",
+    "deepseek/deepseek-v4.1-flash": "deepseek/deepseek-v4.1-flash",
+    "deepseek-v4.1-flash": "deepseek/deepseek-v4.1-flash",
+    "deepseek-v4.1": "deepseek/deepseek-v4.1-flash",
+    "deepseek": "deepseek/deepseek-v4.1-flash",
 }
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -178,6 +192,10 @@ class OpenRouterClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+
+        # DeepSeek runs with max-effort thinking, consistent with the system LLM client
+        if "deepseek" in resolved_id.lower():
+            payload["reasoning"] = {"effort": "max"}
 
         start_time = time.perf_counter()
 

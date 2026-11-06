@@ -39,7 +39,7 @@ class BenchmarkQueryRequest(BaseModel):
         description="Optional system prompt framing the assistant's persona.",
     )
     temperature: float = Field(default=0.0, ge=0.0, le=2.0, description="Sampling temperature.")
-    max_tokens: int = Field(default=1024, ge=64, le=4096, description="Maximum token generation budget.")
+    max_tokens: int = Field(default=4096, ge=64, le=16384, description="Maximum token generation budget; reasoning models spend part of it on internal thinking.")
 
 
 class ModelBenchmarkResult(BaseModel):
@@ -74,7 +74,7 @@ class BenchmarkEvaluateRequest(BaseModel):
     models: Optional[List[str]] = Field(
         default=None,
         max_length=MAX_BENCHMARK_MODELS,
-        description="List of frontier model slugs to benchmark, or None for all 4 frontier models.",
+        description="List of frontier model slugs to benchmark, or None for all frontier models.",
     )
     scenario_title: Optional[str] = Field(
         default="Custom Benchmark",

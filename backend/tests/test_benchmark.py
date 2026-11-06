@@ -17,18 +17,20 @@ from app.models.roe import RoeScope
 def test_list_frontier_models():
     """Verify that canonical frontier models are listed."""
     models = openrouter_client.list_frontier_models()
-    assert len(models) == 4
+    assert len(models) == 5
     model_ids = {m.id for m in models}
     assert "openai/gpt-4o" in model_ids
     assert "anthropic/claude-sonnet-4.6" in model_ids
     assert "google/gemini-3.8-flash" in model_ids
     assert "anthropic/claude-haiku-5.5" in model_ids
+    assert "deepseek/deepseek-v4.1-flash" in model_ids
 
     # Check providers and names
     providers = {m.provider for m in models}
     assert "OpenAI" in providers
     assert "Anthropic" in providers
     assert "Google" in providers
+    assert "DeepSeek" in providers
 
 
 def test_resolve_model_id():
@@ -42,6 +44,8 @@ def test_resolve_model_id():
     assert openrouter_client.resolve_model_id("haiku") == "anthropic/claude-haiku-5.5"
     assert openrouter_client.resolve_model_id("claude-sonnet-4.6") == "anthropic/claude-sonnet-4.6"
     assert openrouter_client.resolve_model_id("sonnet-4.6") == "anthropic/claude-sonnet-4.6"
+    assert openrouter_client.resolve_model_id("deepseek") == "deepseek/deepseek-v4.1-flash"
+    assert openrouter_client.resolve_model_id("deepseek-v4.1-flash") == "deepseek/deepseek-v4.1-flash"
     # Unmapped custom slug passed as-is
     assert openrouter_client.resolve_model_id("custom/frontier-v1") == "custom/frontier-v1"
 
@@ -116,6 +120,52 @@ async def test_query_model_success_with_mock():
 
 
 @pytest.mark.asyncio
+async def test_query_model_pins_deepseek_max_reasoning():
+    """DeepSeek queries request max reasoning effort; other models must not receive it."""
+    mock_response = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "```bash\nnmap -sV -p 80,443 192.168.1.100\n```",
+                }
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+    }
+
+    mock_http_res = MagicMock()
+    mock_http_res.status_code = 200
+    mock_http_res.json.return_value = mock_response
+
+    captured: dict = {}
+
+    def capture_post(*_args, **kwargs):
+        captured.update(kwargs)
+        return mock_http_res
+
+    mock_async_client = AsyncMock()
+    mock_async_client.post.side_effect = capture_post
+    mock_async_client.__aenter__.return_value = mock_async_client
+    mock_async_client.__aexit__.return_value = None
+
+    client = OpenRouterClient(default_api_key="sk-or-test-key")
+    with patch("httpx.AsyncClient", return_value=mock_async_client):
+        res = await client.query_model(
+            model_id="deepseek/deepseek-v4.1-flash",
+            prompt="Test",
+            api_key="sk-or-test-key",
+        )
+        assert res.status == "success"
+        assert captured["json"]["model"] == "deepseek/deepseek-v4.1-flash"
+        assert captured["json"]["reasoning"] == {"effort": "max"}
+
+        captured.clear()
+        await client.query_model(model_id="openai/gpt-4o", prompt="Test", api_key="sk-or-test-key")
+        assert "reasoning" not in captured["json"]
+
+
+@pytest.mark.asyncio
 async def test_query_model_handles_rate_limit_and_error():
     """Test error handling for rate limits (429) and invalid keys (401)."""
     # 429 Rate limit
@@ -156,12 +206,13 @@ def test_api_get_benchmark_models(client: TestClient):
     assert res.status_code == 200
     data = res.json()
     assert isinstance(data, list)
-    assert len(data) == 4
+    assert len(data) == 5
     ids = [m["id"] for m in data]
     assert "openai/gpt-4o" in ids
     assert "anthropic/claude-sonnet-4.6" in ids
     assert "google/gemini-3.8-flash" in ids
     assert "anthropic/claude-haiku-5.5" in ids
+    assert "deepseek/deepseek-v4.1-flash" in ids
 
 
 def test_api_benchmark_query(client: TestClient):

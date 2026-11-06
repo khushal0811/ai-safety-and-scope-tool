@@ -12,6 +12,7 @@ export const MODELS: ModelOption[] = [
   { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', vendor: 'Anthropic', requiresOpenRouter: true },
   { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', vendor: 'Google', requiresOpenRouter: true },
   { id: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', vendor: 'Anthropic', requiresOpenRouter: true },
+  { id: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', vendor: 'DeepSeek', requiresOpenRouter: true },
 ];
 
 export interface PromptExample {

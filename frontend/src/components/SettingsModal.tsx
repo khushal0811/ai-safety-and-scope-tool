@@ -104,7 +104,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setDraftOpenRouter(e.target.value)}
             />
             <p className="font-xs muted" style={{ marginTop: 4 }}>
-              Unlocks real-time benchmarking across GPT-4o, Claude Sonnet 4.6, Gemini 1.5 Pro, and Claude Haiku.
+              Unlocks real-time benchmarking across GPT-4o, Claude Sonnet 4.6, Gemini 3.8 Flash, Claude Haiku 5.5, and DeepSeek V4.1 Flash.
             </p>
           </div>
 

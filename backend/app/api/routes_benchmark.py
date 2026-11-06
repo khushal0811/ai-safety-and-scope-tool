@@ -1,7 +1,7 @@
 """FastAPI routes for frontier LLM benchmarking via OpenRouter.
 
 Endpoints:
-- GET  /api/benchmark/models    : List canonical frontier models (GPT-4o, Claude 3.5 Sonnet, Gemini 1.5 Pro, Llama 3.1)
+- GET  /api/benchmark/models    : List canonical frontier models (GPT-4o, Claude Sonnet 4.6, Gemini 3.8 Flash, Claude Haiku 5.5, DeepSeek V4.1 Flash)
 - POST /api/benchmark/query     : Query single or all models and return outputs with latency telemetry
 - POST /api/benchmark/evaluate  : Query models and simultaneously verify outputs against active RoE
 """

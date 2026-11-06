@@ -297,8 +297,10 @@ export async function parseRoeText(content: string, filename?: string, _userId?:
 }
 
 /**
- * Query a selected model live via the backend engine.
- * Supports Claude Sonnet 4.6 via OpenRouter (system tier) or frontier models (if key provided).
+ * Query a selected model live via the backend benchmark endpoint.
+ * Frontier models (GPT-4o, Claude Sonnet 4.6, Gemini 3.8 Flash, Claude Haiku 5.5,
+ * DeepSeek V4.1 Flash) run on the user's OpenRouter key; server keys are disabled
+ * for user tasks.
  */
 export async function queryLiveModel(
   prompt: string,
