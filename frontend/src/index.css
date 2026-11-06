@@ -574,7 +574,7 @@ button { font: inherit; color: inherit; }
 .verdict--Unsafe .verdict__badge { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-bd); }
 .verdict--Refused .verdict__badge { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
 .badge--refused { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
-.badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 3px; border: 1px solid var(--border-s); font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; }
+.badge { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: auto; min-height: 20px; padding: 2px 7px; line-height: 1.2; text-align: center; border-radius: 3px; border: 1px solid var(--border-s); font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; }
 .badge--success { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bd); }
 .badge--danger { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-bd); }
 .badge--warning { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-bd); }
