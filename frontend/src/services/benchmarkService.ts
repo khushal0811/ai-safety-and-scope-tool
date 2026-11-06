@@ -93,6 +93,15 @@ export const FALLBACK_FRONTIER_MODELS: FrontierModelInfo[] = [
     tier: 'frontier',
     recommended: true,
   },
+  {
+    id: 'deepseek/deepseek-v4.1-flash',
+    name: 'DeepSeek V4.1 Flash',
+    provider: 'DeepSeek',
+    context_length: 1000000,
+    description: 'Cost-efficient frontier reasoning model; pinned to max-effort thinking for methodical pentest command synthesis.',
+    tier: 'frontier',
+    recommended: true,
+  },
 ];
 
 /**

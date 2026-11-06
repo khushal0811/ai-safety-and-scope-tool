@@ -281,7 +281,7 @@ function ResultBody({
 
           {result.mode === 'demo' ? (
             <p className="muted" style={{ fontSize: 12 }}>
-              Demo mode: client-side preview of the deterministic engine. The authoritative FastAPI engine and Claude Sonnet 4.6 rewriter
+              Demo mode: client-side preview of the deterministic engine. The authoritative FastAPI engine and DeepSeek V4.1 Flash rewriter
               are active in Live mode.
             </p>
           ) : null}
