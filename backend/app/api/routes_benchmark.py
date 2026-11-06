@@ -234,6 +234,7 @@ async def query_benchmark_models(
             api_key=x_openrouter_key,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
+            timeout=120.0,
         )
         results = [single_res]
     else:
