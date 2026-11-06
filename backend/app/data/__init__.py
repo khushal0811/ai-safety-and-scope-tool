@@ -1,5 +1,5 @@
-"""Data assets export."""
+"""Data assets export.
 
-from app.data.presets import ROE_PRESETS
-
-__all__ = ["ROE_PRESETS"]
+Scope definitions are custom-only (text or uploaded document); the product no
+longer ships pre-built presets.
+"""

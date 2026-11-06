@@ -3,9 +3,8 @@ import type { AuditResult, RoeScope } from './types/audit';
 import type { PastAudit } from './types/history';
 import type { UserProfile } from './types/user';
 import type { BenchmarkEvaluateResponse, BenchmarkRunRecord } from './types/benchmark';
-import { ROE_PRESETS } from './data/presets';
 import { buildExamples, MODELS, type PromptExample } from './data/models';
-import { runAudit, queryLiveModel } from './services/auditService';
+import { runAudit, queryLiveModel, fetchCustomRoeById } from './services/auditService';
 import { loadAuthenticatedUser, saveUser, initSupabaseAuthListener } from './lib/authStore';
 import { getPastAudits, savePastAudit, deletePastAudits, clearPastAudits, syncPastAuditsFromCloud } from './lib/historyStore';
 import {
@@ -17,7 +16,7 @@ import {
 } from './lib/benchmarkStore';
 import { getOpenRouterKey, hasVaultOpenRouterKey, fetchVaultStatus, clearAllKeys } from './lib/keyStore';
 import { NavBar, type AppPage } from './components/NavBar';
-import { RoeSelector, type RoeMode } from './components/RoeSelector';
+import { RoeSelector } from './components/RoeSelector';
 import { PromptComposer } from './components/PromptComposer';
 import { AuditResultView } from './components/AuditResultView';
 import { PastAuditsView } from './components/PastAuditsView';
@@ -31,24 +30,6 @@ import { ShieldIcon } from './components/Icons';
 
 type Theme = 'light' | 'dark';
 type Step = 1 | 2 | 3;
-
-// The static preset list is non-empty in every build; this keeps strict mode
-// honest without a non-null assertion or an undefined render path.
-const DEFAULT_ROE: RoeScope = ROE_PRESETS[0] ?? {
-  roe_id: 'ROE-UNCONFIGURED',
-  name: 'No scope configured',
-  engagement_type: 'custom',
-  summary: '',
-  allowed_cidrs: [],
-  allowed_domains: [],
-  target_hosts: [],
-  prohibited_ips: [],
-  allowed_tools: [],
-  prohibited_tools: [],
-  prohibited_flags: [],
-  prohibited_actions: [],
-  max_nmap_timing: 3,
-};
 
 function initialTheme(): Theme {
   const saved = localStorage.getItem('sst.theme');
@@ -78,8 +59,6 @@ export default function App() {
   );
 
   // Studio state
-  const [roeMode, setRoeMode] = useState<RoeMode>('preset');
-  const [presetId, setPresetId] = useState(DEFAULT_ROE.roe_id);
   const [customRoe, setCustomRoe] = useState('');
   const [customScope, setCustomScope] = useState<RoeScope | null>(null);
 
@@ -304,8 +283,8 @@ export default function App() {
     }
   }
 
-  const activeScope = roeMode === 'preset' ? ROE_PRESETS.find((p) => p.roe_id === presetId) ?? null : customScope;
-  const examples = useMemo(() => buildExamples(activeScope ?? DEFAULT_ROE), [activeScope]);
+  const activeScope = customScope;
+  const examples = useMemo(() => (activeScope ? buildExamples(activeScope) : []), [activeScope]);
 
   // Keep a loaded example in sync with the selected preset's addresses.
   useEffect(() => {
@@ -349,9 +328,7 @@ export default function App() {
   const blockedReason = !hasOpenRouterKey
     ? 'An OpenRouter API key is required to audit recommendations or benchmark models. Server system keys are disabled.'
     : !activeScope
-      ? roeMode === 'custom'
-        ? 'Upload a document or paste RoE text and click "Extract Scope" to define boundaries.'
-        : 'Select a preset scope to continue.'
+      ? 'Upload a document or paste RoE text and click "Extract Scope" to define boundaries.'
       : !modelOutput.trim()
         ? 'Click "Ask Model Live ⚡" to query the model or paste commands into the box to audit.'
         : null;
@@ -417,18 +394,19 @@ export default function App() {
     setStep(2);
   }
 
-  function handleLoadAuditIntoStudio(audit: PastAudit) {
-    // Restore state from selected historical audit
-    const preset = ROE_PRESETS.find((p) => p.roe_id === audit.roeId);
-    if (preset) {
-      setRoeMode('preset');
-      setPresetId(preset.roe_id);
-    }
+  async function handleLoadAuditIntoStudio(audit: PastAudit) {
+    // Restore state from the selected historical audit. Scope restore is
+    // custom-only: fetch the saved custom RoE; if it is gone, the user must
+    // define the scope again.
     setModelId(audit.modelId);
     setPrompt(audit.prompt);
     setModelOutput(audit.proposedCommand);
     setResult(audit.result);
     setResultRoeId(audit.roeId);
+    if (audit.roeId) {
+      const scope = await fetchCustomRoeById(audit.roeId);
+      setCustomScope(scope);
+    }
     setStep(3);
     setPage('studio');
   }
@@ -532,10 +510,6 @@ export default function App() {
           {/* Step 1: RoE Selector */}
           {step === 1 && (
             <RoeSelector
-              mode={roeMode}
-              onModeChange={setRoeMode}
-              presetId={presetId}
-              onPresetChange={setPresetId}
               customText={customRoe}
               onCustomTextChange={setCustomRoe}
               activeScope={activeScope}
@@ -612,12 +586,8 @@ export default function App() {
       {/* PAGE 3: BENCHMARK STUDIO */}
       {page === 'benchmark' && (
         <BenchmarkStudioView
-          activeRoe={activeScope ?? DEFAULT_ROE}
-          allRoes={ROE_PRESETS}
-          onSelectRoe={(newRoe) => {
-            setPresetId(newRoe.roe_id);
-            setRoeMode('preset');
-          }}
+          activeRoe={activeScope}
+          onNavigateStudio={() => setPage('studio')}
           currentUser={user}
           onNavigateSettings={() => setPage('settings')}
           onNavigatePastBenchmarks={() => setPage('past-benchmarks')}

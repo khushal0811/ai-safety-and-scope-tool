@@ -18,7 +18,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 import pytest
 
-from app.data.presets import get_roe_preset_by_id
+from scopes import get_test_scope as get_roe_preset_by_id
 from app.engine.attestation import compute_record_signature, genesis_hash
 from app.engine.reporter import (
     compute_hash_chain,
@@ -30,6 +30,18 @@ from app.engine.roe_integrity import canonical_roe_dict, compute_roe_hash, roe_s
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _custom_scope_rows(monkeypatch):
+    """Serve the test scopes as saved custom RoEs (presets were removed)."""
+    from scopes import TEST_SCOPES
+
+    rows = {scope.roe_id: scope.model_dump(mode="json") for scope in TEST_SCOPES}
+    monkeypatch.setattr(
+        "app.engine.reporter.fetch_custom_roe_by_id",
+        lambda roe_id, user_id=None: rows.get(roe_id),
+    )
 
 
 # Sample audit log fixtures

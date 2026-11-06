@@ -1,7 +1,7 @@
 """Unit tests for intelligent remediation and double-verification loop."""
 
 import pytest
-from app.data.presets import ROE_PRESETS
+from scopes import TEST_SCOPES as ROE_PRESETS
 from app.engine.verifier import evaluate_audit_async
 from app.models.audit import AuditRequest, Verdict
 

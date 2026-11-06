@@ -56,14 +56,12 @@ class Colors:
 CONFIG_DIR = Path.home() / ".vallum"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 DEFAULT_DAEMON_URL = os.environ.get("VALLUM_DAEMON_URL", "http://127.0.0.1:8000")
-DEFAULT_ROE_ID = "ROE-PRESET-NET-001"
 
 
 def get_config() -> Dict[str, Any]:
     """Load persistent CLI configuration or return sensible defaults."""
     default_config = {
         "daemon_url": DEFAULT_DAEMON_URL,
-        "active_roe_id": DEFAULT_ROE_ID,
         "active_roe_file": None,
         "mode": "deterministic",
         "strict": False,
@@ -104,14 +102,11 @@ def load_local_engine():
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
 
-    from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
     from app.engine.verifier import evaluate_deterministic_command
     from app.models.audit import DeterministicAuditRequest
     from app.models.roe import RoeScope
 
     return {
-        "ROE_PRESETS": ROE_PRESETS,
-        "get_roe_preset_by_id": get_roe_preset_by_id,
         "evaluate_deterministic_command": evaluate_deterministic_command,
         "DeterministicAuditRequest": DeterministicAuditRequest,
         "RoeScope": RoeScope,
@@ -119,42 +114,39 @@ def load_local_engine():
 
 
 def resolve_roe_locally(roe_id_or_file: Optional[str]) -> Any:
-    """Resolve an RoE scope object from a preset ID or custom file."""
+    """Resolve an RoE scope object from an explicit .md, .txt, or .json file."""
     engine = load_local_engine()
-    preset_lookup = engine["get_roe_preset_by_id"]
     RoeScope = engine["RoeScope"]
-    ROE_PRESETS = engine["ROE_PRESETS"]
 
     if not roe_id_or_file:
-        return ROE_PRESETS[0]
+        raise SystemExit(
+            "No scope configured. Pass a RoE file with --roe <file.md|file.txt|file.json> "
+            "or set one with `vallum roe set <file>`."
+        )
 
-    # Check if path to file exists
     file_path = Path(roe_id_or_file).expanduser().resolve()
-    if file_path.exists() and file_path.is_file():
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                if file_path.suffix.lower() == ".json":
-                    data = json.loads(content)
-                    return RoeScope(**data)
-                else:
-                    # Markdown or text RoE: parse with the async LLM extractor.
-                    import asyncio
-                    from app.engine.roe_parser import parse_unstructured_roe
+    if not file_path.exists() or not file_path.is_file():
+        raise SystemExit(
+            f"Scope file not found: {roe_id_or_file}. Presets were removed; provide a RoE document."
+        )
 
-                    scope = asyncio.run(parse_unstructured_roe(content, filename=file_path.name))
-                    if scope is None:
-                        raise ValueError("RoE parser returned no scope definition")
-                    return scope
-        except Exception as e:
-            # Fail closed: never audit or execute against a scope the user did not request
-            raise SystemExit(f"Could not parse custom RoE file '{roe_id_or_file}': {e}")
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            if file_path.suffix.lower() == ".json":
+                data = json.loads(content)
+                return RoeScope(**data)
+            # Markdown or text RoE: parse with the async LLM extractor.
+            import asyncio
+            from app.engine.roe_parser import parse_unstructured_roe
 
-    preset = preset_lookup(roe_id_or_file)
-    if preset:
-        return preset
-
-    raise SystemExit(f"Unknown RoE id or unreadable file: {roe_id_or_file}")
+            scope = asyncio.run(parse_unstructured_roe(content, filename=file_path.name))
+            if scope is None:
+                raise ValueError("RoE parser returned no scope definition")
+            return scope
+    except Exception as e:
+        # Fail closed: never audit or execute against a scope the user did not request
+        raise SystemExit(f"Could not parse custom RoE file '{roe_id_or_file}': {e}")
 
 
 def query_daemon_audit(
@@ -206,11 +198,11 @@ def evaluate_command_audit(
 ) -> Tuple[Dict[str, Any], str]:
     """Evaluate command either via the daemon or local in-process fallback."""
     config = get_config()
-    # Prefer an explicitly selected file, then the persisted file, then the id.
-    active_roe = roe_spec or config.get("active_roe_file") or config.get("active_roe_id") or DEFAULT_ROE_ID
+    # Prefer an explicitly selected file, then the persisted file.
+    active_roe = roe_spec or config.get("active_roe_file")
 
     # Resolve the scope exactly before contacting the daemon. This guarantees a
-    # typo or missing file exits non-zero instead of silently using NET-001.
+    # typo or missing file exits non-zero instead of auditing against no scope.
     roe = resolve_roe_locally(active_roe)
     roe_payload = roe.model_dump(mode="json")
 
@@ -357,7 +349,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"{Colors.CYAN}[DRY-RUN] Command passed inspection. Execution skipped.{Colors.RESET}")
             from app.engine.sandbox import IsolatedVirtualSandbox
             config = get_config()
-            active_roe = args.roe or config.get("active_roe_file") or config.get("active_roe_id") or DEFAULT_ROE_ID
+            active_roe = args.roe or config.get("active_roe_file")
             scope = resolve_roe_locally(active_roe)
             sb_res = IsolatedVirtualSandbox.dry_run(command, roe=scope)
             render_sandbox_report(sb_res)
@@ -386,47 +378,57 @@ def cmd_intercept(args: argparse.Namespace) -> int:
 
 
 def cmd_roe(args: argparse.Namespace) -> int:
-    """Manage active Rules of Engagement."""
-    engine = load_local_engine()
-    presets = engine["ROE_PRESETS"]
+    """Manage the active Rules of Engagement scope file."""
     config = get_config()
 
     action = args.action or "show"
 
     if action == "list":
-        print(f"\n{Colors.BOLD}{Colors.WHITE}Available Rules of Engagement Presets:{Colors.RESET}\n")
-        active_id = config.get("active_roe_id")
-        for p in presets:
-            is_active = p.roe_id == active_id
-            marker = f"{Colors.GREEN}* [ACTIVE]{Colors.RESET}" if is_active else "         "
-            print(f"{marker} {Colors.CYAN}{Colors.BOLD}{p.roe_id}{Colors.RESET} — {Colors.WHITE}{p.name}{Colors.RESET}")
-            print(f"           Type: {p.engagement_type} | CIDRs: {', '.join(p.allowed_cidrs) or 'None'}")
-            print(f"           Summary: {Colors.DIM}{p.summary}{Colors.RESET}\n")
+        active_file = config.get("active_roe_file")
+        print(f"\n{Colors.BOLD}{Colors.WHITE}Active Rules of Engagement File:{Colors.RESET}\n")
+        if active_file:
+            print(f"  {Colors.GREEN}* [ACTIVE]{Colors.RESET} {Colors.CYAN}{active_file}{Colors.RESET}")
+        else:
+            print("  No scope file configured.")
+        print(
+            f"\n{Colors.DIM}Presets were removed. Provide a .md, .txt, or .json RoE file with "
+            f"`vallum roe set <file>` or `--roe <file>`.{Colors.RESET}\n"
+        )
         return 0
 
     elif action == "set":
         target = args.target
         if not target:
-            sys.stderr.write(f"{Colors.RED}[!] Please specify a preset ID or RoE file path.{Colors.RESET}\n")
+            sys.stderr.write(
+                f"{Colors.RED}[!] Please specify a RoE file path (.md, .txt, .json).{Colors.RESET}\n"
+            )
+            return 1
+        target_path = Path(target).expanduser()
+        if not target_path.exists() or not target_path.is_file():
+            sys.stderr.write(
+                f"{Colors.RED}[!] Scope file not found: {target}. "
+                f"Presets were removed; provide a RoE document.{Colors.RESET}\n"
+            )
             return 1
         # Test resolution before persisting anything
-        scope = resolve_roe_locally(target)
-        target_path = Path(target).expanduser()
-        is_file = target_path.exists() and target_path.is_file()
-        config["active_roe_id"] = scope.roe_id
-        # Persist the file path so later checks reload the same document rather
-        # than resolving the generated id to an unrelated preset.
-        config["active_roe_file"] = str(target_path.resolve()) if is_file else None
+        scope = resolve_roe_locally(str(target_path))
+        config["active_roe_file"] = str(target_path.resolve())
         save_config(config)
         print(f"{Colors.GREEN}[✓] Active Scope updated to: {Colors.BOLD}{scope.name} [{scope.roe_id}]{Colors.RESET}")
-        if is_file:
-            print(f"{Colors.DIM}    Loaded from: {config['active_roe_file']}{Colors.RESET}")
+        print(f"{Colors.DIM}    Loaded from: {config['active_roe_file']}{Colors.RESET}")
         return 0
 
     else:  # show
-        active_spec = config.get("active_roe_file") or config.get("active_roe_id", DEFAULT_ROE_ID)
-        scope = resolve_roe_locally(active_spec)
+        active_file = config.get("active_roe_file")
+        if not active_file:
+            sys.stderr.write(
+                f"{Colors.YELLOW}[!] No scope configured. Set one with `vallum roe set <file>` "
+                f"or pass `--roe <file>`.{Colors.RESET}\n"
+            )
+            return 1
+        scope = resolve_roe_locally(active_file)
         print(f"\n{Colors.BOLD}{Colors.WHITE}Active Scope Configuration:{Colors.RESET}")
+        print(f"  Source file:      {Colors.CYAN}{active_file}{Colors.RESET}")
         print(f"  ID:               {Colors.CYAN}{scope.roe_id}{Colors.RESET}")
         print(f"  Name:             {Colors.WHITE}{scope.name}{Colors.RESET}")
         print(f"  Engagement Type:  {scope.engagement_type}")
@@ -514,7 +516,13 @@ def cmd_report(args: argparse.Namespace) -> int:
     from app.engine.reporter import generate_compliance_report
 
     config = get_config()
-    roe_id = args.roe or config.get("active_roe_id", DEFAULT_ROE_ID)
+    roe_id = args.roe
+    if not roe_id:
+        sys.stderr.write(
+            f"{Colors.RED}[!] A saved custom scope id is required: pass --roe <roe_id>. "
+            f"Presets were removed and reports resolve custom RoEs only.{Colors.RESET}\n"
+        )
+        return 1
     fmt = args.format or "markdown"
     user_id = getattr(args, "user_id", None) or config.get("user_id") or os.getenv("VALLUM_USER_ID")
 
@@ -587,7 +595,8 @@ def cmd_sandbox(args: argparse.Namespace) -> int:
         sys.stderr.write(f"{Colors.RED}[!] No command provided for sandbox dry-run.{Colors.RESET}\n")
         return 1
 
-    scope = resolve_roe_locally(args.roe or DEFAULT_ROE_ID)
+    config = get_config()
+    scope = resolve_roe_locally(args.roe or config.get("active_roe_file"))
     sb_res = IsolatedVirtualSandbox.dry_run(command, roe=scope, strict_syntax=not args.permissive)
 
     if args.json:
@@ -617,7 +626,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 1. check
     p_check = subparsers.add_parser("check", help="Pre-screen a command string against active RoE")
     p_check.add_argument("command", nargs="+", help="CLI command to audit")
-    p_check.add_argument("--roe", default=None, help="Preset ID or path to custom RoE file")
+    p_check.add_argument("--roe", default=None, help="Path to a custom RoE file (.md, .txt, .json)")
     p_check.add_argument("-q", "--quiet", action="store_true", help="Quiet mode (exit code only)")
     p_check.add_argument("--json", action="store_true", help="Output raw JSON evaluation result")
     p_check.add_argument("--strict", action="store_true", help="Fail on warning findings (Verdict.INCORRECT)")
@@ -625,7 +634,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 2. run
     p_run = subparsers.add_parser("run", help="Audit command and execute only if compliant")
     p_run.add_argument("command", nargs="+", help="CLI command to audit and run")
-    p_run.add_argument("--roe", default=None, help="Preset ID or path to custom RoE file")
+    p_run.add_argument("--roe", default=None, help="Path to a custom RoE file (.md, .txt, .json)")
     p_run.add_argument("-q", "--quiet", action="store_true", help="Quiet mode")
     p_run.add_argument("--strict", action="store_true", help="Fail on warning findings")
     p_run.add_argument("--dry-run", action="store_true", help="Audit only; do not execute even if safe")
@@ -635,14 +644,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_intercept = subparsers.add_parser("intercept", help="Interceptor wrapper for individual tool aliases")
     p_intercept.add_argument("tool", help="Offensive tool name (e.g. nmap, gobuster)")
     p_intercept.add_argument("tool_args", nargs="*", help="Arguments passed to tool")
-    p_intercept.add_argument("--roe", default=None, help="Preset ID or custom RoE file")
+    p_intercept.add_argument("--roe", default=None, help="Path to a custom RoE file (.md, .txt, .json)")
     p_intercept.add_argument("-q", "--quiet", action="store_true", help="Quiet mode")
     p_intercept.add_argument("--strict", action="store_true", help="Strict mode")
 
     # 4. roe
     p_roe = subparsers.add_parser("roe", help="Manage active Rules of Engagement scope")
     p_roe.add_argument("action", nargs="?", choices=["list", "show", "set"], default="show")
-    p_roe.add_argument("target", nargs="?", help="Preset ID or path to RoE file (for set)")
+    p_roe.add_argument("target", nargs="?", help="Path to a RoE file (.md, .txt, .json)")
 
     # 5. daemon
     p_daemon = subparsers.add_parser("daemon", help="Inspect or launch local Vallum daemon")
@@ -655,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # 7. report
     p_report = subparsers.add_parser("report", help="Generate formal signed RoE compliance attestation (PDF/Markdown)")
-    p_report.add_argument("--roe", default=None, help="Preset ID or custom RoE ID")
+    p_report.add_argument("--roe", default=None, help="Saved custom RoE ID")
     p_report.add_argument("--user-id", dest="user_id", default=None, help="Authenticated user UUID to scope audit logs")
     p_report.add_argument("--format", choices=["markdown", "pdf", "json"], default="markdown", help="Report format")
     p_report.add_argument("-o", "--output", default=None, help="Output destination file path")
@@ -663,7 +672,7 @@ def build_parser() -> argparse.ArgumentParser:
     # 8. sandbox
     p_sandbox = subparsers.add_parser("sandbox", help="Dry-run command in network-egress disabled ephemeral micro-sandbox")
     p_sandbox.add_argument("command", nargs="+", help="CLI command to dry-run")
-    p_sandbox.add_argument("--roe", default=None, help="Preset ID or path to custom RoE file")
+    p_sandbox.add_argument("--roe", default=None, help="Path to a custom RoE file (.md, .txt, .json)")
     p_sandbox.add_argument("--json", action="store_true", help="Output raw JSON dry-run telemetry")
     p_sandbox.add_argument("--permissive", action="store_true", help="Allow unrecognized non-critical flags")
 

@@ -1,4 +1,4 @@
-"""FastAPI endpoints for Rules of Engagement (RoE) presets and document ingestion."""
+"""FastAPI endpoints for Rules of Engagement document ingestion and custom scopes."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 from app.api.deps import get_authenticated_user_id, require_authenticated_user_id
-from app.data.presets import ROE_PRESETS
-from app.db import fetch_custom_roes, fetch_roe_presets, save_custom_roe
+from app.db import fetch_custom_roes, save_custom_roe
 from app.engine.roe_parser import parse_unstructured_roe
 from app.models.roe import RoeScope
 
@@ -23,48 +22,27 @@ class ParseTextRequest(BaseModel):
     filename: Optional[str] = Field(default="custom_roe.md", description="Optional source filename.")
 
 
-@router.get("/presets", response_model=List[RoeScope])
-async def get_roe_presets() -> List[RoeScope]:
-    """Retrieve all privacy-preserving pre-configured RoE templates.
-    
-    Tries Supabase PostgreSQL first; falls back cleanly to local static presets.
-    """
-    try:
-        db_presets = fetch_roe_presets()
-        if db_presets:
-            # Map database records to RoeScope instances
-            cleaned = []
-            for r in db_presets:
-                cleaned.append(
-                    RoeScope(
-                        roe_id=r.get("roe_id"),
-                        name=r.get("name"),
-                        engagement_type=r.get("engagement_type"),
-                        summary=r.get("summary"),
-                        allowed_cidrs=r.get("allowed_cidrs") or [],
-                        allowed_domains=r.get("allowed_domains") or [],
-                        target_hosts=r.get("target_hosts") or [],
-                        prohibited_ips=r.get("prohibited_ips") or [],
-                        allowed_tools=r.get("allowed_tools") or [],
-                        prohibited_tools=r.get("prohibited_tools") or [],
-                        prohibited_flags=r.get("prohibited_flags") or [],
-                        prohibited_actions=r.get("prohibited_actions") or [],
-                        max_nmap_timing=r.get("max_nmap_timing", 3),
-                    )
-                )
-            return cleaned
-    except Exception as e:
-        logger.warning(f"Could not load presets from Supabase: {e}; falling back to static.")
-
-    return ROE_PRESETS
-
-
 @router.get("/custom", response_model=List[Dict[str, Any]])
 async def get_custom_roes(
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> List[Dict[str, Any]]:
     """Retrieve custom scopes uploaded and saved to Supabase PostgreSQL."""
     return fetch_custom_roes(user_id=user_id)
+
+
+@router.get("/custom/{roe_id}", response_model=RoeScope)
+async def get_custom_roe_by_id(
+    roe_id: str,
+    user_id: Optional[str] = Depends(get_authenticated_user_id),
+) -> RoeScope:
+    """Retrieve one saved custom scope so a historical audit can restore it."""
+    from app.db import fetch_custom_roe_by_id
+    from app.engine.roe_integrity import roe_scope_from_row
+
+    row = fetch_custom_roe_by_id(roe_id, user_id=user_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Unknown custom scope: {roe_id!r}")
+    return roe_scope_from_row(row)
 
 
 @router.post("/parse-document", response_model=RoeScope)

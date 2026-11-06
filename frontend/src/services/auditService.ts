@@ -1,6 +1,5 @@
 import type { AuditRequest, AuditResult, RoeScope, TargetFinding, Violation } from '../types/audit';
 import type { SandboxDryRunResult } from '../types/sandbox';
-import { ROE_PRESETS } from '../data/presets';
 import { getOpenRouterKey, getGroqKey } from '../lib/keyStore';
 import { getStoredAuthToken } from '../lib/supabaseClient';
 
@@ -58,10 +57,6 @@ export function isRoeScope(value: unknown): value is RoeScope {
     typeof value.max_nmap_timing === 'number' &&
     Number.isFinite(value.max_nmap_timing)
   );
-}
-
-function isRoeScopeArray(value: unknown): value is RoeScope[] {
-  return Array.isArray(value) && value.every(isRoeScope);
 }
 
 function isTargetFinding(value: unknown): value is TargetFinding {
@@ -221,23 +216,22 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Fetch authoritative RoE presets from backend, falling back to local presets.
+ * Fetch one saved custom RoE so a historical audit can restore its scope.
+ * Presets were removed; scope definitions are custom-only.
  */
-export async function fetchRoePresets(): Promise<RoeScope[]> {
-  if (!API_BASE_URL) return ROE_PRESETS;
+export async function fetchCustomRoeById(roeId: string): Promise<RoeScope | null> {
+  if (!API_BASE_URL || !roeId) return null;
   try {
-    const res = await fetch(`${API_BASE_URL}/api/roe/presets`, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(3000),
+    const res = await fetch(`${API_BASE_URL}/api/roe/custom/${encodeURIComponent(roeId)}`, {
+      headers: getApiHeaders(),
+      signal: AbortSignal.timeout(5000),
     });
-    if (res.ok) {
-      const data: unknown = await res.json();
-      if (isRoeScopeArray(data)) return data;
-    }
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    return isRoeScope(data) ? data : null;
   } catch {
-    // Fallback to local
+    return null;
   }
-  return ROE_PRESETS;
 }
 
 /**
@@ -420,13 +414,16 @@ export async function executeSandboxDryRun(
   roeId?: string,
   strictSyntax: boolean = true
 ): Promise<SandboxDryRunResult> {
+  if (!roeId) {
+    throw new Error('A parsed custom scope is required for a sandbox dry-run.');
+  }
   const url = `${requireApiBase()}/api/sandbox/dry-run`;
   const res = await fetch(url, {
     method: 'POST',
     headers: getApiHeaders(),
     body: JSON.stringify({
       command,
-      roe_id: roeId || 'ROE-PRESET-NET-001',
+      roe_id: roeId,
       strict_syntax: strictSyntax,
     }),
     signal: AbortSignal.timeout(30000),

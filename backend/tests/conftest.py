@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 
 # Ensure app is discoverable on python path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Ensure the test-only scope fixtures are importable
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.data.presets import ROE_PRESETS
+from scopes import TEST_SCOPES as ROE_PRESETS
 from app.main import app
 from app.models.roe import RoeScope
 

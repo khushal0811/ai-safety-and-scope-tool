@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from app.data.presets import ROE_PRESETS
+from scopes import TEST_SCOPES as ROE_PRESETS
 
 
 def test_root_endpoint(client: TestClient):
@@ -23,12 +23,9 @@ def test_health_endpoint(client: TestClient):
     assert set(data.keys()) == {"status"}
 
 
-def test_get_roe_presets(client: TestClient):
+def test_roe_presets_endpoint_removed(client: TestClient):
     response = client.get("/api/roe/presets")
-    assert response.status_code == 200
-    presets = response.json()
-    assert len(presets) == 5
-    assert presets[0]["roe_id"] == "ROE-PRESET-NET-001"
+    assert response.status_code == 404
 
 
 def test_normalize_ip_endpoint(client: TestClient):

@@ -94,7 +94,7 @@ Interactive OpenAPI documentation will be accessible at: `http://127.0.0.1:8000/
 
 Execute the following migrations in order via the Supabase Dashboard SQL Editor or Supabase CLI:
 
-1. `supabase/migrations/001_initial_schema.sql`: Core tables (`profiles`, `roe_presets`, `custom_roes`, `audit_logs`) and Row Level Security (RLS) policies.
+1. `supabase/migrations/001_initial_schema.sql`: Core tables (`profiles`, `custom_roes`, `audit_logs`) and Row Level Security (RLS) policies. (The legacy `roe_presets` table is dropped by migration 015.)
 2. `supabase/migrations/002_user_api_vault.sql`: Zero-knowledge encrypted user API key vault (`user_api_vault`) with AES-256-GCM ciphertext storage.
 3. `supabase/migrations/003_benchmark_runs.sql`: Benchmark telemetry store (`benchmark_runs`) with compliance rate indices.
 4. `supabase/migrations/004_auth_rbac_hardening.sql`: Purges mock/testing accounts, configures verified signup requirements, and establishes the immutable Super Admin rule.

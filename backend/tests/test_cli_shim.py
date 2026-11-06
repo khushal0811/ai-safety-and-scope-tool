@@ -22,11 +22,21 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_cli_evaluate_command_safe_in_scope():
+def _write_net_scope_file(tmp_path):
+    """JSON scope file for CLI tests (production presets were removed)."""
+    from scopes import get_test_scope
+
+    scope = get_test_scope("ROE-PRESET-NET-001")
+    path = tmp_path / "net-scope.json"
+    path.write_text(json.dumps(scope.model_dump(mode="json")), encoding="utf-8")
+    return path
+
+
+def test_cli_evaluate_command_safe_in_scope(tmp_path):
     """Verify that an in-scope target returns Correct verdict and 0 violations."""
     result, source = evaluate_command_audit(
         command="nmap -sS -p 80 192.168.1.105",
-        roe_spec="ROE-PRESET-NET-001",
+        roe_spec=str(_write_net_scope_file(tmp_path)),
         force_offline=True,
     )
     assert result["verdict"] == "Correct"
@@ -36,11 +46,11 @@ def test_cli_evaluate_command_safe_in_scope():
     assert result["targets"][0]["token"] == "192.168.1.105"
 
 
-def test_cli_evaluate_command_out_of_scope():
+def test_cli_evaluate_command_out_of_scope(tmp_path):
     """Verify that an out-of-scope target returns Unsafe verdict with CRITICAL violation."""
     result, source = evaluate_command_audit(
         command="nmap -sS -p 80 10.0.0.5",
-        roe_spec="ROE-PRESET-NET-001",
+        roe_spec=str(_write_net_scope_file(tmp_path)),
         force_offline=True,
     )
     assert result["verdict"] == "Unsafe"
@@ -50,11 +60,12 @@ def test_cli_evaluate_command_out_of_scope():
     assert result["safe_sanitized_command"] is None
 
 
-def test_cli_cmd_check_exit_codes(capsys):
+def test_cli_cmd_check_exit_codes(tmp_path, capsys):
     """Verify exit codes: 0 for compliant, 1 for security breach."""
+    scope_file = str(_write_net_scope_file(tmp_path))
     args_safe = argparse.Namespace(
         command=["nmap", "-sS", "-p", "80", "192.168.1.105"],
-        roe="ROE-PRESET-NET-001",
+        roe=scope_file,
         daemon_url=None,
         offline=True,
         quiet=False,
@@ -68,7 +79,7 @@ def test_cli_cmd_check_exit_codes(capsys):
 
     args_unsafe = argparse.Namespace(
         command=["nmap", "-sS", "-p", "80", "10.0.0.5"],
-        roe="ROE-PRESET-NET-001",
+        roe=scope_file,
         daemon_url=None,
         offline=True,
         quiet=False,
@@ -81,11 +92,12 @@ def test_cli_cmd_check_exit_codes(capsys):
     assert "[✗] VALLUM: BLOCKED" in captured_unsafe.out
 
 
-def test_cli_cmd_check_quiet_mode(capsys):
+def test_cli_cmd_check_quiet_mode(tmp_path, capsys):
     """Verify quiet mode suppresses all stdout while preserving return codes."""
+    scope_file = str(_write_net_scope_file(tmp_path))
     args_quiet_safe = argparse.Namespace(
         command=["nmap", "-sS", "192.168.1.105"],
-        roe="ROE-PRESET-NET-001",
+        roe=scope_file,
         daemon_url=None,
         offline=True,
         quiet=True,
@@ -99,7 +111,7 @@ def test_cli_cmd_check_quiet_mode(capsys):
 
     args_quiet_unsafe = argparse.Namespace(
         command=["rm", "-rf", "/"],
-        roe="ROE-PRESET-NET-001",
+        roe=scope_file,
         daemon_url=None,
         offline=True,
         quiet=True,
@@ -112,11 +124,11 @@ def test_cli_cmd_check_quiet_mode(capsys):
     assert captured.out == ""
 
 
-def test_cli_cmd_check_json_output(capsys):
+def test_cli_cmd_check_json_output(tmp_path, capsys):
     """Verify --json emits parseable structured JSON."""
     args_json = argparse.Namespace(
         command=["nmap", "-sS", "192.168.1.105"],
-        roe="ROE-PRESET-NET-001",
+        roe=str(_write_net_scope_file(tmp_path)),
         daemon_url=None,
         offline=True,
         quiet=False,
@@ -131,32 +143,32 @@ def test_cli_cmd_check_json_output(capsys):
     assert "audit_id" in parsed
 
 
-def test_cli_roe_command(capsys):
-    """Verify RoE preset listing, resolution, and inspection."""
-    # List presets
-    args_list = argparse.Namespace(action="list", target=None)
-    rc_list = cmd_roe(args_list)
+def test_cli_roe_command(tmp_path, monkeypatch, capsys):
+    """Verify scope file listing, resolution, and inspection."""
+    from app.cli import shim
+
+    monkeypatch.setattr(shim, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(shim, "CONFIG_FILE", tmp_path / "config.json")
+
+    # List with nothing configured
+    rc_list = cmd_roe(argparse.Namespace(action="list", target=None))
     out_list = capsys.readouterr().out
     assert rc_list == 0
-    assert "ROE-PRESET-NET-001" in out_list
-    assert "ROE-PRESET-WEB-002" in out_list
+    assert "No scope file configured" in out_list
+    assert "Presets were removed" in out_list
 
-    # Show active scope
-    args_show = argparse.Namespace(action="show", target=None)
-    rc_show = cmd_roe(args_show)
+    # Set a scope file
+    scope_file = _write_net_scope_file(tmp_path)
+    rc_set = cmd_roe(argparse.Namespace(action="set", target=str(scope_file)))
+    out_set = capsys.readouterr().out
+    assert rc_set == 0
+    assert "ROE-PRESET-NET-001" in out_set
+
+    # Show the active scope
+    rc_show = cmd_roe(argparse.Namespace(action="show", target=None))
     out_show = capsys.readouterr().out
     assert rc_show == 0
     assert "Active Scope Configuration:" in out_show
-
-    # Set active scope
-    args_set = argparse.Namespace(action="set", target="web")
-    rc_set = cmd_roe(args_set)
-    out_set = capsys.readouterr().out
-    assert rc_set == 0
-    assert "ROE-PRESET-WEB-002" in out_set
-
-    # Reset back to net
-    cmd_roe(argparse.Namespace(action="set", target="net"))
 
 
 def test_cli_init_shell_wrapper(capsys):
@@ -169,11 +181,11 @@ def test_cli_init_shell_wrapper(capsys):
     assert "vallum-cli check" in out
 
 
-def test_cli_run_dry_run(capsys):
+def test_cli_run_dry_run(tmp_path, capsys):
     """Verify run --dry-run validates without executing command on host."""
     args_dry = argparse.Namespace(
         command=["nmap", "-sS", "192.168.1.105"],
-        roe="ROE-PRESET-NET-001",
+        roe=str(_write_net_scope_file(tmp_path)),
         daemon_url=None,
         offline=True,
         quiet=False,
@@ -187,11 +199,14 @@ def test_cli_run_dry_run(capsys):
     assert "[DRY-RUN] Command passed inspection. Execution skipped." in out
 
 
-def test_api_deterministic_endpoint_with_roe_id():
-    """Verify POST /api/audit/deterministic resolves roe_id without full RoeScope payload."""
+def test_api_deterministic_endpoint_with_full_roe():
+    """Verify POST /api/audit/deterministic accepts a full custom RoeScope payload."""
+    from scopes import get_test_scope
+
+    scope = get_test_scope("ROE-PRESET-NET-001")
     payload = {
         "command": "nmap -sS 192.168.1.105",
-        "roe_id": "ROE-PRESET-NET-001",
+        "roe": scope.model_dump(mode="json"),
     }
     resp = client.post("/api/audit/deterministic", json=payload)
     assert resp.status_code == 200
@@ -275,7 +290,6 @@ def test_cli_roe_set_persists_active_file(tmp_path, monkeypatch):
     assert rc == 0
 
     config = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
-    assert config["active_roe_id"] == "ROE-CUSTOM-CLI-FILE"
     assert config["active_roe_file"] == str(roe_file.resolve())
 
     # Subsequent checks reload the file rather than falling back to NET-001.
