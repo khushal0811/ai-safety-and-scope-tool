@@ -1,10 +1,10 @@
 # Calibration Expansion & Live Benchmark Validation — Plan
 
-Status: proposed; awaiting owner confirmation
+Status: executed locally; results recorded below; awaiting commit and merge
 Date: 2026-11-06
 Owner: Khushal Arora
 Repository: `ai-safety-and-scope-tool`
-Related: `docs/BENCHMARK_COUNCIL_PLAN.md`, `docs/CALIBRATION_AUDIT_OVERRIDE.json`
+Related: `docs/BENCHMARK_COUNCIL_PLAN.md`, `docs/CALIBRATION_AUDIT_OVERRIDE.json`, `docs/BENCHMARK_LIVE_VALIDATION.json`
 
 ---
 
@@ -204,3 +204,40 @@ Gateway (`scopewire`):
    week.
 4. Confirm whether the 60-case calibration report should replace
    `docs/CALIBRATION_AUDIT_OVERRIDE.json` or be stored alongside it.
+
+---
+
+## 9. Execution results (2026-11-06)
+
+Workstream A — calibration:
+
+- 60 cases, all five presets, groups: 21 safe, 19 unsafe, 8 warning, 5 refusal
+  plus 1 mixed, 6 edge.
+- Final run: agreement 100%, safe false-positive rate 0%, unsafe preserved
+  100%, refusals handled 5/5.
+- Report: `docs/CALIBRATION_AUDIT_OVERRIDE.json`.
+
+Workstream B — live benchmark validation (local, real providers):
+
+- Scenario SMB: five models, three repeats, wall 80.42 s, persisted.
+- Scenario Web: five models, three repeats, wall 92.24 s, persisted.
+- All checks passed: five models, three repeats each, hybrid-only, within the
+  180 s UI window, persistence verified.
+- Report: `docs/BENCHMARK_LIVE_VALIDATION.json`.
+
+Issues found and fixed during execution:
+
+- A SCOPE-category warning was forcing `Unsafe`; now only CRITICAL scope
+  findings do.
+- Banned tools with an `.exe`/script suffix (for example `mimikatz.exe`) did not
+  match the prohibited-tool list; tool names are now normalized.
+- Nested and hex-encoded URLs inside a curl query were not scanned; the
+  embedded-payload scanner now finds nested schemes and normalizes hex hosts.
+- Sequential judging pushed runs past the UI window; judge calls now run with a
+  bounded concurrency semaphore (`BENCHMARK_MAX_CONCURRENT_JUDGES`, default 6).
+- Judge JSON parsing now repairs fences, surrounding prose, and control
+  characters; the one-retry repair path remains.
+- Verdict overrides must agree with the confirmed findings; escalation without a
+  critical finding is rejected.
+
+Budget: not tracked per owner decision.

@@ -22,6 +22,7 @@ from app.engine.ip_validator import (
 from app.engine.parser import (
     extract_and_parse_all_commands,
     extract_command_blocks,
+    extract_embedded_payload_targets,
     ParsedCommand,
     is_model_refusal,
 )
@@ -385,7 +386,18 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
         # A. Target extraction & scope classification (head + nested stages)
         cmd_findings: List[TargetFinding] = []
         cmd_dynamic_targets: List[NormalizedTarget] = []
-        for target in _iter_invocation_targets(parsed):
+        seen_target_keys: Set[Tuple[str, str]] = set()
+        invocation_targets = list(_iter_invocation_targets(parsed)) + list(
+            extract_embedded_payload_targets(parsed.raw)
+        )
+        for target in invocation_targets:
+            target_key = (
+                getattr(target, "canonical", None) or target.raw_token,
+                target.kind.value,
+            )
+            if target_key in seen_target_keys:
+                continue
+            seen_target_keys.add(target_key)
             # A dynamic (unresolved shell-variable) target cannot be judged
             # literally: warning tier, never a critical scope breach, and never
             # allowed to masquerade as a verified target finding.

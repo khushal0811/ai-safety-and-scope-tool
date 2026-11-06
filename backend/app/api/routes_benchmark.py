@@ -329,53 +329,68 @@ async def evaluate_benchmark_models(
     judge_prompt_tokens = 0
     judge_completion_tokens = 0
 
+    # 2. Evaluate every run through the hybrid audit engine. Judge calls are
+    #    parallelized with a semaphore; target queries already completed.
+    semaphore = asyncio.Semaphore(max(1, settings.BENCHMARK_MAX_CONCURRENT_JUDGES))
+
+    async def _evaluate_run(res: ModelBenchmarkResult) -> AuditResult:
+        if res.status != "success":
+            return _refused_audit(
+                res,
+                request.prompt,
+                timestamp,
+                f"Model query did not complete ({res.status}): {res.error_message or 'no response'}. Excluded from scoring.",
+            )
+        output_text = res.raw_output or ""
+        if not output_text.strip() and res.extracted_commands:
+            output_text = "\n".join(f"```bash\n{c}\n```" for c in res.extracted_commands)
+        if not output_text.strip():
+            return _refused_audit(
+                res,
+                request.prompt,
+                timestamp,
+                "Model returned empty output. Excluded from scoring.",
+            )
+        async with semaphore:
+            return await evaluate_audit_async(
+                AuditRequest(
+                    roe=request.roe,
+                    model_id=res.model_id,
+                    user_prompt=request.prompt,
+                    model_output=output_text,
+                )
+            )
+
+    task_specs = [
+        (model_id, run_index, res, _evaluate_run(res))
+        for model_id in model_order
+        for run_index, res in enumerate(runs_by_model[model_id])
+    ]
+    evaluated = await asyncio.gather(*(spec[3] for spec in task_specs))
+
+    audits_by_model: Dict[str, List[AuditResult]] = {model_id: [] for model_id in model_order}
+    run_items_by_model: Dict[str, List[BenchmarkRunItem]] = {model_id: [] for model_id in model_order}
+    successful_by_model: Dict[str, List[ModelBenchmarkResult]] = {model_id: [] for model_id in model_order}
+    for (model_id, run_index, res, _), audit in zip(task_specs, evaluated):
+        audits_by_model[model_id].append(audit)
+        run_items_by_model[model_id].append(BenchmarkRunItem(run_index=run_index, model=res, audit=audit))
+
+        if res.status == "success":
+            successful_by_model[model_id].append(res)
+            estimated_cost_usd += (
+                res.prompt_tokens * settings.BENCHMARK_INPUT_PRICE_PER_MILLION_USD
+                + res.completion_tokens * settings.BENCHMARK_OUTPUT_PRICE_PER_MILLION_USD
+            ) / 1_000_000
+
+        if audit.ai_judge_usage:
+            judge_prompt_tokens += int(audit.ai_judge_usage.get("prompt_tokens", 0) or 0)
+            judge_completion_tokens += int(audit.ai_judge_usage.get("completion_tokens", 0) or 0)
+
     for model_id in model_order:
         model_runs = runs_by_model[model_id]
-        run_items: List[BenchmarkRunItem] = []
-        audits: List[AuditResult] = []
-        successful_runs: List[ModelBenchmarkResult] = []
-
-        for run_index, res in enumerate(model_runs):
-            if res.status != "success":
-                audit = _refused_audit(
-                    res,
-                    request.prompt,
-                    timestamp,
-                    f"Model query did not complete ({res.status}): {res.error_message or 'no response'}. Excluded from scoring.",
-                )
-            else:
-                output_text = res.raw_output or ""
-                if not output_text.strip() and res.extracted_commands:
-                    output_text = "\n".join(f"```bash\n{c}\n```" for c in res.extracted_commands)
-                if not output_text.strip():
-                    audit = _refused_audit(
-                        res,
-                        request.prompt,
-                        timestamp,
-                        "Model returned empty output. Excluded from scoring.",
-                    )
-                else:
-                    successful_runs.append(res)
-                    audit_req = AuditRequest(
-                        roe=request.roe,
-                        model_id=res.model_id,
-                        user_prompt=request.prompt,
-                        model_output=output_text,
-                    )
-                    audit = await evaluate_audit_async(audit_req)
-
-            audits.append(audit)
-            run_items.append(BenchmarkRunItem(run_index=run_index, model=res, audit=audit))
-
-            if res.status == "success":
-                estimated_cost_usd += (
-                    res.prompt_tokens * settings.BENCHMARK_INPUT_PRICE_PER_MILLION_USD
-                    + res.completion_tokens * settings.BENCHMARK_OUTPUT_PRICE_PER_MILLION_USD
-                ) / 1_000_000
-
-            if audit.ai_judge_usage:
-                judge_prompt_tokens += int(audit.ai_judge_usage.get("prompt_tokens", 0) or 0)
-                judge_completion_tokens += int(audit.ai_judge_usage.get("completion_tokens", 0) or 0)
+        run_items = run_items_by_model[model_id]
+        audits = audits_by_model[model_id]
+        successful_runs = successful_by_model[model_id]
 
         if not audits:
             continue

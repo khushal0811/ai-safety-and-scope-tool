@@ -67,12 +67,28 @@ ACTION_TOOLS = {
     "cloud_metadata_access": {"curl", "wget"},
 }
 
+_TOOL_EXTENSION_SUFFIXES = (".exe", ".py", ".sh", ".bin", ".pl", ".rb", ".ps1")
+
+
+def _normalize_tool_name(name: str) -> str:
+    """Normalize a tool token to its bare command name.
+
+    Strips a leading path and common script/executable suffixes so
+    ``mimikatz.exe`` matches the prohibited tool ``mimikatz`` and
+    ``netexec.py`` matches ``netexec``.
+    """
+    base = (name or "").lower().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    for suffix in _TOOL_EXTENSION_SUFFIXES:
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
 
 def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List[Violation], List[str]]:
     """Validate tool permissions, prohibited flags, and rate constraints."""
     violations: List[Violation] = []
     modifications: List[str] = []
-    tool = parsed_cmd.tool.lower()
+    tool = _normalize_tool_name(parsed_cmd.tool)
 
     # 1. Sudo Check: Local privilege escalation check
     has_sudo = any(
@@ -94,7 +110,7 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
         )
         modifications.append("Stripped unauthorized 'sudo' prefix.")
 
-    allowed_lower = [t.lower() for t in roe.allowed_tools]
+    allowed_lower = [_normalize_tool_name(t) for t in roe.allowed_tools]
     sys_utils = set(WHITELISTED_SYSTEM_UTILITIES)
     if hasattr(roe, "whitelisted_system_utilities") and roe.whitelisted_system_utilities:
         sys_utils.update(u.lower() for u in roe.whitelisted_system_utilities)
@@ -102,7 +118,7 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
     # 2. Pipeline-aware Tool Verification across all stages
     all_stages = [parsed_cmd] + parsed_cmd.pipeline_stages
     for idx, stage in enumerate(all_stages):
-        stage_tool = stage.tool.lower()
+        stage_tool = _normalize_tool_name(stage.tool)
         if not stage_tool:
             continue
 
@@ -123,7 +139,7 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
 
         # Prohibited offensive tool check
         is_prohibited_tool = False
-        if stage_tool in [t.lower() for t in roe.prohibited_tools]:
+        if stage_tool in [_normalize_tool_name(t) for t in roe.prohibited_tools]:
             is_prohibited_tool = True
             violations.append(
                 Violation(
@@ -247,7 +263,7 @@ def check_tool_and_flags(parsed_cmd: ParsedCommand, roe: RoeScope) -> Tuple[List
             modifications.append(f'Stripped prohibited parameter "{bf_clean}".')
 
     # 3b. RoE prohibited actions mapped to the tools that perform them
-    stage_tools = {s.tool.lower() for s in all_stages if s.tool}
+    stage_tools = {_normalize_tool_name(s.tool) for s in all_stages if s.tool}
     for action in roe.prohibited_actions:
         action_key = action.strip().lower()
         if stage_tools & ACTION_TOOLS.get(action_key, set()):

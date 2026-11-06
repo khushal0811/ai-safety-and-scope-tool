@@ -1258,15 +1258,21 @@ def extract_embedded_payload_targets(payload: str) -> List[NormalizedTarget]:
     # Percent-decode first so url-encoded payloads (url=http%3A%2F%2F...) are visible
     decoded = unquote(payload)
 
-    # 1. Embedded URLs (e.g. http://169.254.169.254/..., http://[fd00:ec2::254]/, http://user:pass@10.0.10.1/)
-    url_matches = re.finditer(
-        r"(?:https?|ftp|gopher|ldap|dict)://[^\s'\"<>]+",
+    # 1. Embedded URLs, including nested URLs in query strings
+    #    (e.g. http://host/?url=http://0xA9FEA9FE/latest/meta-data/).
+    scheme_matches = re.finditer(
+        r"(?:https?|ftp|gopher|ldap|dict)://",
         decoded,
         re.IGNORECASE,
     )
-    for match in url_matches:
+    for scheme in scheme_matches:
+        remainder = decoded[scheme.start():]
+        match = re.match(r"[^\s'\"<>]+", remainder)
+        if not match:
+            continue
+        candidate_url = match.group(0)
         try:
-            host = urlsplit(match.group(0)).hostname
+            host = urlsplit(candidate_url).hostname
         except ValueError:
             continue
         if host and host not in seen:
