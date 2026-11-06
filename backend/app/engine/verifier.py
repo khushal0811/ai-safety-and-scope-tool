@@ -639,10 +639,9 @@ def evaluate_deterministic_command(request: DeterministicAuditRequest) -> AuditR
     """Convenience helper to evaluate a single raw CLI command."""
     roe = request.roe
     if roe is None:
-        from app.data.presets import get_roe_preset_by_id
-        roe = get_roe_preset_by_id(request.roe_id)
-        if roe is None:
-            raise ValueError(f"Unknown RoE id: {request.roe_id!r}")
+        raise ValueError(
+            "A resolved Rules of Engagement scope is required; the preset fallback was removed."
+        )
 
     if "```" in request.command:
         raise ValueError("Command contains a code-fence marker and cannot be audited reliably.")

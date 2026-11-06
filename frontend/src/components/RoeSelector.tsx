@@ -1,17 +1,10 @@
 import { useRef, useState, type DragEvent } from 'react';
 import type { RoeScope } from '../types/audit';
-import { ROE_PRESETS } from '../data/presets';
 import { MAX_ROE_BYTES, validateRoeFile } from '../lib/roeFile';
 import { parseRoeText } from '../services/auditService';
-import { AlertIcon, ChevronIcon, FileIcon, InfoIcon, UploadIcon, XIcon } from './Icons';
-
-export type RoeMode = 'preset' | 'custom';
+import { AlertIcon, FileIcon, InfoIcon, UploadIcon, XIcon } from './Icons';
 
 interface Props {
-  mode: RoeMode;
-  onModeChange: (m: RoeMode) => void;
-  presetId: string;
-  onPresetChange: (id: string) => void;
   customText: string;
   onCustomTextChange: (t: string) => void;
   activeScope: RoeScope | null;
@@ -28,29 +21,16 @@ export function RoeSelector(p: Props) {
         <span className="step-index">STEP 01</span>
         <div>
           <h2 className="card__title" id="step1-title">Define Rules of Engagement (RoE)</h2>
-          <p className="card__desc">Choose an engagement preset or upload your client's scope document to define boundaries.</p>
+          <p className="card__desc">Paste the client's scope text or upload a Markdown / text document to define boundaries.</p>
         </div>
       </div>
       <div className="card__body">
-        <div className="segmented" role="group" aria-label="Scope source">
-          <button id="roe-mode-preset" className="segmented__btn" aria-pressed={p.mode === 'preset'} onClick={() => p.onModeChange('preset')}>
-            Pre-Built Scope Presets (Privacy Preserving)
-          </button>
-          <button id="roe-mode-custom" className="segmented__btn" aria-pressed={p.mode === 'custom'} onClick={() => p.onModeChange('custom')}>
-            Upload Custom RoE (.md / .txt)
-          </button>
-        </div>
-
-        {p.mode === 'preset' ? (
-          <PresetList presetId={p.presetId} onChange={p.onPresetChange} />
-        ) : (
-          <CustomRoe
-            text={p.customText}
-            onChange={p.onCustomTextChange}
-            onScopeParsed={p.onCustomScopeParsed}
-            activeScope={p.activeScope}
-          />
-        )}
+        <CustomRoe
+          text={p.customText}
+          onChange={p.onCustomTextChange}
+          onScopeParsed={p.onCustomScopeParsed}
+          activeScope={p.activeScope}
+        />
 
         {p.activeScope ? <ScopeSummary scope={p.activeScope} /> : null}
 
@@ -62,7 +42,7 @@ export function RoeSelector(p: Props) {
                   Locked on: <strong>{p.activeScope.name}</strong> ({p.activeScope.allowed_cidrs.join(', ')})
                 </span>
               ) : (
-                'Select a preset or upload scope to continue'
+                'Upload a document or paste RoE text and extract the scope to continue'
               )}
             </div>
             <button
@@ -77,36 +57,6 @@ export function RoeSelector(p: Props) {
         ) : null}
       </div>
     </section>
-  );
-}
-
-function PresetList({ presetId, onChange }: { presetId: string; onChange: (id: string) => void }) {
-  return (
-    <div className="preset-list" role="radiogroup" aria-label="RoE presets">
-      {ROE_PRESETS.map((preset) => {
-        const active = preset.roe_id === presetId;
-        return (
-          <div key={preset.roe_id} className={`preset ${active ? 'preset--active' : ''}`}>
-            <button
-              id={`preset-${preset.roe_id}`}
-              className="preset__head"
-              role="radio"
-              aria-checked={active}
-              onClick={() => onChange(preset.roe_id)}
-            >
-              <span className="preset__radio" />
-              <span>
-                <span className="preset__name">{preset.name}</span>
-                <br />
-                <span className="preset__type">{preset.engagement_type}</span>
-              </span>
-              <ChevronIcon className="preset__chev" />
-            </button>
-            {active ? <div className="preset__body">{preset.summary}</div> : null}
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -283,7 +233,7 @@ function CustomRoe({
       <div className="note note--info" style={{ marginTop: 8 }}>
         <InfoIcon />
         <span>
-          {activeScope && activeScope.roe_id.startsWith('ROE-CUSTOM')
+          {activeScope
             ? `Active Scope Locked: "${activeScope.name}" (${activeScope.allowed_cidrs.length} subnets, ${activeScope.target_hosts.length} hosts, max -T${activeScope.max_nmap_timing}).`
             : 'Unstructured text is isolated in XML boundaries and validated with deterministic Pydantic schemas.'}
         </span>

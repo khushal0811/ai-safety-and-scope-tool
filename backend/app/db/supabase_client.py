@@ -63,7 +63,7 @@ def is_database_connected() -> bool:
     if client is None:
         return False
     try:
-        res = client.table("roe_presets").select("roe_id").limit(1).execute()
+        res = client.table("profiles").select("id").limit(1).execute()
         return res is not None
     except Exception:
         return False
@@ -506,20 +506,6 @@ def delete_benchmark_runs(benchmark_ids: List[str], user_id: str) -> Optional[in
     return max(cloud_deleted, local_deleted)
 
 
-def fetch_roe_presets() -> List[Dict[str, Any]]:
-    """Retrieve canonical RoE presets from Supabase PostgreSQL table roe_presets."""
-    client = get_supabase()
-    if not client:
-        return []
-
-    try:
-        res = client.table("roe_presets").select("*").order("created_at", desc=False).execute()
-        return res.data or []
-    except Exception as e:
-        logger.error(f"[Supabase] Failed to fetch roe_presets: {e}")
-        return []
-
-
 _MISSING_ROW = object()
 
 
@@ -597,12 +583,11 @@ def save_custom_roe(
 
 
 def fetch_custom_roes(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve custom RoEs belonging to the given user, plus any system-seeded public (user_id IS NULL) presets.
+    """Retrieve custom RoEs belonging to the given user.
 
-    Note: Rows with `user_id IS NULL` are strictly read-only system presets seeded by
-    administrators; `save_custom_roe` rejects any write where `user_id` is not a valid UUID.
-    An unauthenticated or invalid caller sees only public RoEs — never another
-    user's private custom scope.
+    Scope definitions are custom-only; there are no system-seeded public presets.
+    An unauthenticated or invalid caller sees no rows unless a user scope is
+    provided — never another user's private custom scope.
     """
     client = get_supabase()
     if not client:

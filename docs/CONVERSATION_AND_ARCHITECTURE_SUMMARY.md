@@ -11,7 +11,7 @@
 
 We started with **Vallum (AI Safety & Scope Boundary Engine)** — a full-stack security verification platform designed to sit between an LLM (or human penetration tester) and offensive command execution. Its core premise is **Strict Zero Host Execution**:
 
-1. **Scope Definition (RoE):** Users select a preset Rules of Engagement (RoE) scope or upload/paste a custom penetration testing contract (`.md` / `.txt`), which is extracted into a structured `RoeScope` schema (`allowed_cidrs`, `allowed_domains`, `target_hosts`, `prohibited_ips`, `allowed_tools`, `prohibited_tools`, `prohibited_flags`, `max_nmap_timing`).
+1. **Scope Definition (RoE):** Users paste a Rules of Engagement (RoE) scope or upload a `.md` / `.txt` document, which is extracted into a structured `RoeScope` schema (`allowed_cidrs`, `allowed_domains`, `target_hosts`, `prohibited_ips`, `allowed_tools`, `prohibited_tools`, `prohibited_flags`, `max_nmap_timing`). Pre-built presets were removed; scope is custom-only.
 2. **Command Auditing (Two-Pass Hybrid Engine):**
    - **Pass 1 (Deterministic Engine):** Parses commands, normalizes obfuscated IPs (hex, octal, decimal dword, IPv6-mapped, 2/3-part notation), validates targets against CIDR/domain scope and RFC1918/link-local/cloud metadata (`169.254.169.254`) rules, checks destructive patterns, and validates CVE references.
    - **Pass 2 (AI Judge & Remediation):** Uses an LLM judge to filter false positives from contextual explanations and synthesize safe, scope-compliant replacement commands.
@@ -130,8 +130,8 @@ All database migrations live in `supabase/migrations/`:
 |---|---|---|
 | **`profiles`** | `id` (`UUID`, FK → `auth.users.id`) | Stores `email`, `full_name`, `avatar_url`, and `role` (`admin` \| `penetration_tester`). Auto-populated on signup via `handle_new_user()` trigger. |
 | **`user_api_vault`** | `user_id` (`UUID`, PK, FK → `auth.users.id`) | Stores `encrypted_openrouter_key`, `encrypted_groq_key`, `key_hint_openrouter`, and `key_hint_groq`. Ciphertexts are encrypted by the backend using **AES-256-GCM** with `KEY_VAULT_MASTER_KEY` and bound to `user_id` via AAD (`vallum-vault:v1:{user_id}`). |
-| **`roe_presets`** | `id` (`UUID`), `roe_id` (`TEXT UNIQUE`) | Built-in canonical Rules of Engagement presets (e.g., Internal Network Recon, Web App Bug Bounty, Cloud Perimeter). Read-only for all users. |
-| **`custom_roes`** | `id` (`UUID`), `roe_id` (`TEXT UNIQUE`), `user_id` (`UUID`) | Custom Rules of Engagement uploaded or extracted by users. Strictly isolated by `user_id` (plus read-only `user_id IS NULL` system presets), with ownership verification preventing cross-user overwrite on `roe_id`. |
+| **`roe_presets`** (legacy) | `roe_id` | Removed: dropped by migration 015. Scope definitions are custom-only. |
+| **`custom_roes`** | `id` (`UUID`), `roe_id` (`TEXT UNIQUE`), `user_id` (`UUID`) | Custom Rules of Engagement uploaded or extracted by users. Strictly isolated by `user_id`, with ownership verification preventing cross-user overwrite on `roe_id`. |
 | **`audit_logs`** | `id` (`UUID`), `audit_id` (`TEXT UNIQUE`), `user_id` (`UUID`) | Complete ledger of every audited command/prompt, extracted commands, target findings, `verdict` (`Correct` / `Incorrect` / `Unsafe`), violations, `safe_sanitized_command`, and latency. Used to build the chronological SHA-256 hash chain for compliance attestation reports. |
 | **`benchmark_runs`** | `id` (`UUID`), `benchmark_id` (`TEXT UNIQUE`), `user_id` (`UUID`) | Stores multi-model comparative benchmark runs (`compliance_rate`, `scope_violation_rate`, `hallucination_rate`, `average_latency_ms`, `fastest_model`, `summary`, `items`). |
 

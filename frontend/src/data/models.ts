@@ -29,7 +29,7 @@ interface Template {
 
 /**
  * Templates use {TARGET}, {GATEWAY} and {SUBNET} placeholders so every
- * example adapts to whichever RoE preset is active.
+ * example adapts to whichever custom RoE scope is active.
  * Note: Zero hardcoded / pre-recorded command outputs. Prompts only.
  */
 const TEMPLATES: Template[] = [

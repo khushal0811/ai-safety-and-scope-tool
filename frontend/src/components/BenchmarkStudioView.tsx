@@ -29,9 +29,8 @@ import {
 import { computeSplitDiff } from '../lib/diff';
 
 interface Props {
-  activeRoe: RoeScope;
-  allRoes: RoeScope[];
-  onSelectRoe: (roe: RoeScope) => void;
+  activeRoe: RoeScope | null;
+  onNavigateStudio?: () => void;
   currentUser: UserProfile | null;
   onNavigateSettings: () => void;
   onNavigatePastBenchmarks?: () => void;
@@ -41,8 +40,7 @@ interface Props {
 
 export function BenchmarkStudioView({
   activeRoe,
-  allRoes,
-  onSelectRoe,
+  onNavigateStudio,
   currentUser,
   onNavigateSettings,
   onNavigatePastBenchmarks,
@@ -110,7 +108,7 @@ export function BenchmarkStudioView({
 
   // Update prompt whenever active scenario or active RoE changes
   useEffect(() => {
-    if (selectedScenarioId === 'custom') return;
+    if (selectedScenarioId === 'custom' || !activeRoe) return;
     const scen = BENCHMARK_SCENARIOS.find((s) => s.id === selectedScenarioId);
     if (scen) {
       setPrompt(formatScenarioPrompt(scen.promptTemplate, activeRoe));
@@ -137,6 +135,10 @@ export function BenchmarkStudioView({
 
   // Run benchmark evaluation
   async function handleRunBenchmark() {
+    if (!activeRoe) {
+      onNavigateStudio?.();
+      return;
+    }
     if (!prompt.trim() || running) return;
     setRunning(true);
     setRunError(null);
@@ -268,47 +270,43 @@ export function BenchmarkStudioView({
                 <div>
                   <span className="benchmark-scope-strip__label">Active Rules of Engagement Scope</span>
                   <div className="benchmark-scope-strip__name">
-                    {activeRoe.name}{' '}
-                    <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>
-                      ({activeRoe.engagement_type})
-                    </span>
+                    {activeRoe ? (
+                      <>
+                        {activeRoe.name}{' '}
+                        <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12 }}>
+                          ({activeRoe.engagement_type})
+                        </span>
+                      </>
+                    ) : (
+                      'No scope defined'
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Scope constraints quick chips */}
-              <div className="benchmark-scope-strip__chips">
-                <span className="benchmark-chip">
-                  Target: <strong>{activeRoe.target_hosts[0] || activeRoe.allowed_cidrs[0] || '127.0.0.1'}</strong>
-                </span>
-                <span className="benchmark-chip">
-                  Subnet: <strong>{activeRoe.allowed_cidrs[0] || '192.168.1.0/24'}</strong>
-                </span>
-                <span className="benchmark-chip benchmark-chip--banned">
-                  Banned: {activeRoe.prohibited_ips.slice(0, 2).join(', ')}
-                </span>
-
-                {/* Scope Switcher Dropdown */}
-                <select
-                  aria-label="Active Rules of Engagement Scope"
-                  className="benchmark-scope-select"
-                  value={activeRoe.roe_id}
-                  onChange={(e) => {
-                    const target = allRoes.find((r) => r.roe_id === e.target.value);
-                    if (target) onSelectRoe(target);
-                  }}
-                >
-                  {!allRoes.some((r) => r.roe_id === activeRoe.roe_id) && (
-                    // A custom scope is not a preset: show it as the current selection so the select stays truthful
-                    <option value={activeRoe.roe_id}>{activeRoe.name}</option>
-                  )}
-                  {allRoes.map((r) => (
-                    <option key={r.roe_id} value={r.roe_id}>
-                      Switch to: {r.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {activeRoe ? (
+                <div className="benchmark-scope-strip__chips">
+                  <span className="benchmark-chip">
+                    Target: <strong>{activeRoe.target_hosts[0] || activeRoe.allowed_cidrs[0] || '127.0.0.1'}</strong>
+                  </span>
+                  <span className="benchmark-chip">
+                    Subnet: <strong>{activeRoe.allowed_cidrs[0] || '192.168.1.0/24'}</strong>
+                  </span>
+                  <span className="benchmark-chip benchmark-chip--banned">
+                    Banned: {activeRoe.prohibited_ips.slice(0, 2).join(', ')}
+                  </span>
+                </div>
+              ) : (
+                <div className="benchmark-scope-strip__chips">
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--primary"
+                    onClick={onNavigateStudio}
+                  >
+                    Define Scope in Audit Studio →
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* 2. Scenario Presets Selector */}
@@ -376,7 +374,7 @@ export function BenchmarkStudioView({
                   2. Pentest Prompt Dispatched to Models
                 </span>
                 <span className="mono font-xs" style={{ color: 'var(--text-subtle)' }}>
-                  {prompt.length} chars • auto-adapted to {activeRoe.name}
+                  {prompt.length} chars • auto-adapted to {activeRoe ? activeRoe.name : 'no scope'}
                 </span>
               </div>
               <textarea
@@ -486,7 +484,16 @@ export function BenchmarkStudioView({
                 Benchmarking <strong style={{ color: 'var(--text)' }}>{activeSelectedModelIds.length} model{activeSelectedModelIds.length === 1 ? '' : 's'}</strong> in parallel with Zero Host Execution guarantee.
               </div>
 
-              {!hasOpenRouterKey ? (
+              {!activeRoe ? (
+                <button
+                  type="button"
+                  className="benchmark-dispatch-btn"
+                  onClick={onNavigateStudio}
+                  style={{ background: 'var(--warn-fg)', borderColor: 'var(--warn-fg)' }}
+                >
+                  <span>Define Scope to Run ⚡</span>
+                </button>
+              ) : !hasOpenRouterKey ? (
                 <button
                   type="button"
                   className="benchmark-dispatch-btn"

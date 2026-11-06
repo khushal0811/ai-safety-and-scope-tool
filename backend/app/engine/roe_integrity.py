@@ -13,7 +13,6 @@ import ipaddress
 import json
 from typing import Any, Dict, List, Optional, Union
 
-from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
 from app.models.roe import RoeScope
 
 
@@ -113,16 +112,7 @@ def roe_scope_from_row(row: Dict[str, Any]) -> RoeScope:
 
 
 def resolve_roe_scope(roe_id: str, user_id: Optional[str]) -> Optional[RoeScope]:
-    """Resolve a preset or the caller's custom RoE by id, without silent substitution."""
-    preset = get_roe_preset_by_id(roe_id)
-    if not preset:
-        for candidate in ROE_PRESETS:
-            if candidate.roe_id.lower() == str(roe_id).lower():
-                preset = candidate
-                break
-    if preset:
-        return preset
-
+    """Resolve the caller's stored custom RoE by id, without silent substitution."""
     try:
         from app.db import fetch_custom_roe_by_id
 

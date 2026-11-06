@@ -20,7 +20,6 @@ import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 from xml.sax.saxutils import escape as _xml_escape
 
-from app.data.presets import ROE_PRESETS, get_roe_preset_by_id
 from app.db import fetch_audit_logs_for_roe, fetch_custom_roe_by_id
 from app.engine.attestation import (
     attestation_key,
@@ -641,23 +640,14 @@ def generate_compliance_report(
     Returns:
         (content_bytes_or_string, media_type, download_filename)
     """
-    # 1. Resolve RoE — check static presets first, then the user's own custom RoEs,
-    #    and fail loudly rather than silently substituting the wrong scope.
-    roe = get_roe_preset_by_id(roe_id)
-    if not roe:
-        for p in ROE_PRESETS:
-            if p.roe_id.lower() == roe_id.lower():
-                roe = p
-                break
-
-    if not roe:
-        custom_row = fetch_custom_roe_by_id(roe_id, user_id=user_id)
-        if custom_row:
-            roe = roe_scope_from_row(custom_row)
+    # 1. Resolve the caller's saved custom scope and fail loudly rather than
+    #    silently substituting the wrong scope.
+    custom_row = fetch_custom_roe_by_id(roe_id, user_id=user_id)
+    roe = roe_scope_from_row(custom_row) if custom_row else None
 
     if not roe:
         raise ValueError(
-            f"No preset or custom Rules of Engagement found for roe_id='{roe_id}'. "
+            f"No custom Rules of Engagement found for roe_id='{roe_id}'. "
             "Cannot generate a compliance report for an unknown scope."
         )
 

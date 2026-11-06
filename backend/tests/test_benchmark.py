@@ -471,7 +471,7 @@ async def test_benchmark_infra_failure_isolated_from_audit():
     from app.api.routes_benchmark import evaluate_benchmark_models
     from app.models.audit import Verdict
     from app.models.benchmark import BenchmarkEvaluateRequest, ModelBenchmarkResult
-    from app.data.presets import ROE_PRESETS
+    from scopes import TEST_SCOPES as ROE_PRESETS
 
     mock_failed_res = ModelBenchmarkResult(
         model_id="google/gemini-3.8-flash",
@@ -523,7 +523,7 @@ async def test_benchmark_natural_language_refusal_excluded_from_comparative_scor
     from app.api.routes_benchmark import evaluate_benchmark_models
     from app.models.audit import Verdict, AuditRequest
     from app.models.benchmark import BenchmarkEvaluateRequest, ModelBenchmarkResult
-    from app.data.presets import ROE_PRESETS
+    from scopes import TEST_SCOPES as ROE_PRESETS
     from app.engine.verifier import evaluate_audit_async
 
     # 1. Directly test evaluate_audit_async with refusal string and active AI judge mock

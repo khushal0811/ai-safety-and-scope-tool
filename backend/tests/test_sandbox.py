@@ -12,11 +12,23 @@ Verifies:
 from fastapi.testclient import TestClient
 import pytest
 
-from app.data.presets import get_roe_preset_by_id
+from scopes import get_test_scope as get_roe_preset_by_id
 from app.engine.sandbox import IsolatedVirtualSandbox
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _custom_scope_rows(monkeypatch):
+    """Serve the test scopes as saved custom RoEs (presets were removed)."""
+    from scopes import TEST_SCOPES
+
+    rows = {scope.roe_id: scope.model_dump(mode="json") for scope in TEST_SCOPES}
+    monkeypatch.setattr(
+        "app.api.routes_sandbox.fetch_custom_roe_by_id",
+        lambda roe_id, user_id=None: rows.get(roe_id),
+    )
 
 
 # ==============================================================================
@@ -216,11 +228,18 @@ def test_api_sandbox_status_endpoint():
 # 5. CLI Subcommand Integration
 # ==============================================================================
 
-def test_cli_sandbox_command_execution():
+def test_cli_sandbox_command_execution(tmp_path):
+    import json as _json
+
     from app.cli.shim import build_parser, cmd_sandbox
+    from scopes import get_test_scope
+
+    scope = get_test_scope("ROE-PRESET-NET-001")
+    scope_file = tmp_path / "net-scope.json"
+    scope_file.write_text(_json.dumps(scope.model_dump(mode="json")), encoding="utf-8")
 
     parser = build_parser()
-    args = parser.parse_args(["sandbox", "nmap -sS -p 80 192.168.1.50"])
+    args = parser.parse_args(["sandbox", "nmap -sS -p 80 192.168.1.50", "--roe", str(scope_file)])
     exit_code = cmd_sandbox(args)
     assert exit_code == 0
 
@@ -277,7 +296,7 @@ def test_audit005_medium_sandbox_unknown_roe_returns_404(monkeypatch):
         json={"command": "nmap -sS 192.168.1.50", "roe_id": "ROE-CUSTOM-DOESNOTEXIST"},
     )
     assert response.status_code == 404
-    assert "Unknown Rules of Engagement" in response.json()["detail"]
+    assert "Unknown custom Rules of Engagement" in response.json()["detail"]
 
 
 def test_audit005_medium_sandbox_resolves_custom_roe(monkeypatch):

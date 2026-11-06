@@ -87,13 +87,20 @@ async def audit_command_deterministic(
     user_id: Optional[str] = Depends(get_authenticated_user_id),
 ) -> AuditResult:
     """Perform instant deterministic inspection on a CLI command string."""
-    from app.data.presets import get_roe_preset_by_id
-
     effective_roe = request.roe
     if effective_roe is None:
-        effective_roe = get_roe_preset_by_id(request.roe_id)
-        if effective_roe is None:
-            raise HTTPException(status_code=404, detail=f"Unknown RoE id: {request.roe_id!r}")
+        if not request.roe_id:
+            raise HTTPException(
+                status_code=422,
+                detail="A scope is required: provide a parsed RoE object or a saved custom roe_id.",
+            )
+        from app.db import fetch_custom_roe_by_id
+        from app.engine.roe_integrity import roe_scope_from_row
+
+        row = fetch_custom_roe_by_id(request.roe_id, user_id=user_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Unknown custom scope: {request.roe_id!r}")
+        effective_roe = roe_scope_from_row(row)
         request = request.model_copy(update={"roe": effective_roe})
 
     try:

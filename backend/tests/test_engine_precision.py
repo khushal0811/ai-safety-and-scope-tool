@@ -18,7 +18,7 @@ comparative benchmark against the External Perimeter Recon RoE:
 
 import pytest
 
-from app.data.presets import get_roe_preset_by_id
+from scopes import get_test_scope as get_roe_preset_by_id
 from app.engine.verifier import evaluate_audit
 from app.models.audit import (
     AuditRequest,

@@ -26,6 +26,22 @@ from app.models.audit import (
 from app.models.roe import RoeScope
 
 
+@pytest.fixture(autouse=True)
+def _custom_scope_rows(monkeypatch):
+    """Serve the test scopes as saved custom RoEs (presets were removed)."""
+    from scopes import TEST_SCOPES
+
+    rows = {scope.roe_id: scope.model_dump(mode="json") for scope in TEST_SCOPES}
+    monkeypatch.setattr(
+        "app.db.fetch_custom_roe_by_id",
+        lambda roe_id, user_id=None: rows.get(roe_id),
+    )
+    monkeypatch.setattr(
+        "app.engine.reporter.fetch_custom_roe_by_id",
+        lambda roe_id, user_id=None: rows.get(roe_id),
+    )
+
+
 @pytest.fixture
 def standard_net_roe() -> RoeScope:
     return RoeScope(
@@ -567,7 +583,7 @@ def test_audit005_high4_benign_output_paths_are_allowed(standard_net_roe: RoeSco
 
 
 # AUDIT_005 High 5: attestation scope binding, append-only deletion and signatures
-from app.data.presets import ROE_PRESETS
+from scopes import TEST_SCOPES as ROE_PRESETS
 from app.engine.attestation import compute_record_signature, genesis_hash
 from app.engine.roe_integrity import (
     RoeScopeMismatchError,
@@ -769,7 +785,7 @@ def test_audit005_high5_report_rejects_tampered_verdict():
 def test_audit005_medium_critical_policy_destructive_findings_are_dropped(command):
     from app.engine.verifier import evaluate_deterministic_command
     from app.models.audit import DeterministicAuditRequest
-    from app.data.presets import get_roe_preset_by_id
+    from scopes import get_test_scope as get_roe_preset_by_id
 
     result = evaluate_deterministic_command(
         DeterministicAuditRequest(
@@ -810,7 +826,7 @@ def test_audit005_medium_never_retargets_dangerous_commands(standard_net_roe: Ro
 # AUDIT_005 Medium: unambiguous long-option abbreviations are still prohibited
 
 def test_audit005_medium_sqlmap_os_shell_abbreviation_detected_and_stripped():
-    from app.data.presets import get_roe_preset_by_id
+    from scopes import get_test_scope as get_roe_preset_by_id
     from app.engine.verifier import evaluate_deterministic_command
     from app.models.audit import DeterministicAuditRequest
 
@@ -830,7 +846,7 @@ def test_audit005_medium_sqlmap_os_shell_abbreviation_detected_and_stripped():
 
 
 def test_audit005_medium_nmap_script_abbreviation_detected_and_removed():
-    from app.data.presets import get_roe_preset_by_id
+    from scopes import get_test_scope as get_roe_preset_by_id
     from app.engine.verifier import evaluate_deterministic_command
     from app.models.audit import DeterministicAuditRequest
 
@@ -849,7 +865,7 @@ def test_audit005_medium_nmap_script_abbreviation_detected_and_removed():
 
 
 def test_audit005_medium_unrelated_long_option_does_not_match_prohibited_flag():
-    from app.data.presets import get_roe_preset_by_id
+    from scopes import get_test_scope as get_roe_preset_by_id
     from app.engine.tool_rules import flag_token_matches
 
     roe = get_roe_preset_by_id("ROE-PRESET-WEB-002")

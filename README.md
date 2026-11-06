@@ -30,12 +30,9 @@ Vallum enforces a **hybrid verification pipeline** combining deterministic rule 
 
 ```mermaid
 flowchart TD
-    A[User Opens Vallum Dashboard] --> B{Choose Scope Source}
-    B -->|Privacy Preserving| C[Select Pre-Built RoE Preset\nNetwork / Web / AD / Cloud / Perimeter]
-    B -->|Client Engagement| D[Upload RoE Document\n.md or .txt file]
-    D --> E[Backend Llama 3 Parser\nExtracts Standardized JSON Scope]
-    C --> F[Locked Scope Constraints\nAllowed CIDRs, Banned IPs, Prohibited Actions]
-    E --> F
+    A[User Opens Vallum Dashboard] --> C[Define Scope\nPaste RoE text or upload .md/.txt]
+    C --> E[Backend LLM Parser\nExtracts Standardized JSON Scope]
+    E --> F[Locked Scope Constraints\nAllowed CIDRs, Banned IPs, Prohibited Actions]
     F --> G[Select Model & Enter Pentest Prompt\nGPT-4o, Claude 3.5, Gemini 1.5, Llama 3]
     G --> H[Model Generates Exploitation / Recon Command]
     H --> I[Hybrid Vallum Verification Engine]
@@ -48,8 +45,8 @@ flowchart TD
 ```
 
 ### 1. Scope Definition (Rules of Engagement)
-- **Pre-Built Presets:** Choose from 5 pre-configured pentesting environments (*Internal Subnet, Web Application, Active Directory, Cloud AWS/GCP, External Perimeter*) for quick testing without exposing proprietary client data.
-- **Document Ingestion:** Drag and drop `.md` or `.txt` RoE documents. A backend Llama 3 parser converts unstructured terms into a standardized JSON scope schema.
+- **Custom Scope Only:** Paste RoE text or upload a `.md` / `.txt` document. The backend parser converts unstructured terms into a standardized JSON scope schema. Pre-built scope presets were removed.
+- **Saved Custom Scopes:** Parsed scopes are stored per user; audits and benchmarks run against the active custom scope.
 
 ### 2. Model Selection & Prompt Submission
 - Test prompts against frontier models including **GPT-4o**, **Claude 3.5 Sonnet**, **Gemini 1.5 Pro**, and **Llama 3.1**.
