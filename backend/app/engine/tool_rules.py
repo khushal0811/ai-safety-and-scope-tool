@@ -16,6 +16,7 @@ WHITELISTED_SYSTEM_UTILITIES: Set[str] = {
     "tee", "head", "tail", "sort", "uniq", "cut", "tr", "wc", "echo",
     "printf", "xargs", "column", "base64", "strings", "hexdump", "xxd",
     "od", "fold", "find", "diff", "less", "more", "sleep", "true", "false",
+    "mkdir", "touch", "mktemp", "dirname", "basename",
 }
 
 # Local package managers prohibited from modifying execution environment at runtime

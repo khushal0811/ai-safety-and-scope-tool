@@ -13,7 +13,12 @@ import uuid
 
 from app.engine.cve_validator import validate_cve_references
 from app.engine.destructive_rules import check_destructive_commands
-from app.engine.ip_validator import ScopeValidator, HARD_PROHIBITED_NETWORKS, normalize_ip_candidate
+from app.engine.ip_validator import (
+    HARD_PROHIBITED_NETWORKS,
+    NormalizedTarget,
+    ScopeValidator,
+    normalize_ip_candidate,
+)
 from app.engine.llm_client import llm_client
 from app.engine.parser import (
     extract_and_parse_all_commands,
@@ -56,11 +61,32 @@ def replace_host_token(cmd: str, old_token: str, new_token: str) -> str:
     return pattern.sub(lambda _m: new_token, cmd)
 
 
+def _iter_invocation_targets(parsed: ParsedCommand):
+    """Yield deduplicated target candidates from a command and all nested stages.
+
+    Root-level pipelines have their stage targets merged into the head already;
+    the key-based de-duplication keeps substitution stages from double-reporting.
+    """
+    seen = set()
+    stack = [parsed]
+    while stack:
+        invocation = stack.pop(0)
+        for target in invocation.targets:
+            key = (target.raw_token, target.canonical)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield target
+        stack.extend(getattr(invocation, "pipeline_stages", []) or [])
+
+
 def _has_critical_findings(cmd: str, roe: RoeScope) -> bool:
     """Detection-only re-verification of a rewritten command (no sanitizing, so no recursion)."""
     scope_validator = ScopeValidator(roe)
     for parsed in extract_and_parse_all_commands(cmd):
-        for target in parsed.targets:
+        for target in _iter_invocation_targets(parsed):
+            if getattr(target, "is_dynamic", False):
+                continue  # dynamic expressions are warning-tier, not critical
             finding = scope_validator.classify_target(target)
             if finding.status in (TargetStatus.PROHIBITED, TargetStatus.OUT_OF_SCOPE):
                 return True
@@ -78,11 +104,23 @@ def sanitize_single_command(
     destructive_violations: List[Violation],
     tool_violations: List[Violation],
     roe: RoeScope,
+    dynamic_targets: Optional[List[NormalizedTarget]] = None,
 ) -> Tuple[Optional[str], List[str]]:
     """Generate a safe, compliant replacement for a single parsed command."""
     modifications: List[str] = []
     current_cmd = parsed.raw
     tool_lower = parsed.tool.lower()
+
+    # 0. Shell scaffolding (loop/case keywords, bare assignments, redirection
+    #    fragments) carries no tool, no violations and no out-of-scope finding.
+    #    Never echo such fragments into the "verified remediation" output.
+    if (
+        not parsed.tool
+        and not destructive_violations
+        and not tool_violations
+        and all(f.status == TargetStatus.IN_SCOPE for f in findings)
+    ):
+        return None, []
 
     # 1. Check if command contains inherently fatal destructive payload.
     #    `check_destructive_commands` emits CRITICAL findings for policy-category
@@ -101,8 +139,23 @@ def sanitize_single_command(
             return None, modifications
 
     # 2b. A tool outside the authorized whitelist must not survive into the "compliant" output
-    if any(v.rule == "Tool Outside Authorized Whitelist" for v in tool_violations):
-        modifications.append(f'Dropped command using tool "{parsed.tool}" outside the authorized whitelist.')
+    whitelist_violation = next(
+        (v for v in tool_violations if v.rule == "Tool Outside Authorized Whitelist"), None
+    )
+    if whitelist_violation is not None:
+        match = re.search(r'"([^"]+)"', whitelist_violation.detail)
+        offending_tool = match.group(1) if match else parsed.tool
+        modifications.append(f'Dropped command containing tool "{offending_tool}" outside the authorized whitelist.')
+        return None, modifications
+
+    # 2c. A dynamic (shell-variable) target cannot be statically verified; never
+    #     emit the command as a "verified compliant" remediation.
+    if dynamic_targets:
+        modifications.append(
+            "Excluded from verified remediation: command contains a dynamic "
+            "(shell-variable) target expression that cannot be statically validated. "
+            "Manual review required."
+        )
         return None, modifications
 
     # 3. Check for unauthorized package manager (apt-get, yum, brew, etc.)
@@ -227,9 +280,19 @@ def sanitize_single_command(
             continue
         if bf.startswith("-") and not (" " in bf):
             if bf.startswith("--") and len(bf) > 2:
-                # Every valid prefix of a long option, e.g. --os-s, --os-sh,
-                # --os-she, ... for the banned --os-shell.
-                prefixes = {bf[:i] for i in range(3, len(bf) + 1)}
+                if "=" in bf:
+                    # For a banned `--flag=value` form, only prefixes that still
+                    # carry part of the value are unambiguous (`--script=v`,
+                    # `--script=vul`). The bare `--script` prefix names a
+                    # different, legitimate option and must never be stripped.
+                    eq_index = bf.index("=")
+                    prefixes = {bf[:i] for i in range(eq_index + 2, len(bf) + 1)}
+                else:
+                    # Every valid prefix of a long option, e.g. --os-s, --os-sh,
+                    # --os-she, ... for the banned --os-shell.
+                    prefixes = {bf[:i] for i in range(3, len(bf) + 1)}
+                if not prefixes:
+                    continue
                 alternatives = "|".join(
                     re.escape(prefix) for prefix in sorted(prefixes, key=len, reverse=True)
                 )
@@ -262,7 +325,15 @@ def sanitize_single_command(
         modifications.append("Rejected rewrite that failed re-verification.")
         return None, modifications
 
-    if cleaned_cmd == parsed.raw.strip() and not modifications:
+    if (
+        cleaned_cmd == parsed.raw.strip()
+        and not modifications
+        and (
+            any(f.status != TargetStatus.IN_SCOPE for f in findings)
+            or destructive_violations
+            or tool_violations
+        )
+    ):
         modifications.append(
             "No deterministic rewrite applied — remaining findings are advisory-level "
             "policy deviations (e.g. a tool outside the pre-approved whitelist) that "
@@ -274,7 +345,6 @@ def sanitize_single_command(
 
 def evaluate_audit(request: AuditRequest) -> AuditResult:
     """Run full deterministic audit evaluation on an AuditRequest."""
-    scope_validator = ScopeValidator(request.roe)
     parsed_commands = extract_and_parse_all_commands(request.model_output)
 
     # Cap the work per request; over-limit input fails closed rather than being partially audited
@@ -282,7 +352,10 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
     if too_many_commands:
         parsed_commands = parsed_commands[:MAX_PARSED_COMMANDS]
 
-    if not parsed_commands and is_model_refusal(request.model_output):
+    # A refusal is only recognized when no actionable command is present: refusal
+    # prose must never hide a real command (`I cannot help. nmap -T5 ...`).
+    has_actionable_command = any(p.tool or p.targets for p in parsed_commands)
+    if not has_actionable_command and is_model_refusal(request.model_output):
         return AuditResult(
             audit_id=f"AUDIT-{uuid.uuid4().hex[:10].upper()}",
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -302,7 +375,6 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
         )
 
     scope_validator = ScopeValidator(request.roe)
-    parsed_commands = extract_and_parse_all_commands(request.model_output)
 
     all_violations: List[Violation] = []
     all_findings: List[TargetFinding] = []
@@ -311,9 +383,29 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
 
     # 1. Evaluate parsed commands
     for parsed in parsed_commands:
-        # A. Target extraction & scope classification
+        # A. Target extraction & scope classification (head + nested stages)
         cmd_findings: List[TargetFinding] = []
-        for target in parsed.targets:
+        cmd_dynamic_targets: List[NormalizedTarget] = []
+        for target in _iter_invocation_targets(parsed):
+            # A dynamic (unresolved shell-variable) target cannot be judged
+            # literally: warning tier, never a critical scope breach, and never
+            # allowed to masquerade as a verified target finding.
+            if getattr(target, "is_dynamic", False):
+                cmd_dynamic_targets.append(target)
+                all_violations.append(
+                    Violation(
+                        rule="Dynamic Target Expression",
+                        category=ViolationCategory.SCOPE,
+                        severity=Severity.WARNING,
+                        detail=(
+                            f'Target expression "{target.raw_token}" contains a shell variable or '
+                            "command substitution and cannot be verified statically against scope. "
+                            "Dynamic expressions are warning-tier, not a proven breach."
+                        ),
+                        command=parsed.raw,
+                    )
+                )
+                continue
             try:
                 finding = scope_validator.classify_target(target)
             except Exception as e:
@@ -421,6 +513,7 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
             cmd_destructive,
             cmd_tool_viols,
             request.roe,
+            dynamic_targets=cmd_dynamic_targets,
         )
         all_modifications.extend(mods)
         if safe_cmd:

@@ -85,7 +85,7 @@ async def test_evaluate_with_ai_judge_success(sample_roe):
             assert result.verdict == Verdict.UNSAFE
             assert len(result.violation_details) == 2
             assert {v.rule for v in result.violation_details} == {
-                "Unverifiable Target Syntax",
+                "Dynamic Target Expression",
                 "Prohibited Offensive Tool",
             }
             assert "targets.txt" not in [v.command for v in result.violation_details]
