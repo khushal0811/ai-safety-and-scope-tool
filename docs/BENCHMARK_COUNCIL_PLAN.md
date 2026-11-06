@@ -239,8 +239,8 @@ approval step in the normal path.
 ```
 
 The frontend ignores unknown fields. The override log is returned in the audit
-response and stored with benchmark records; persisting it into `audit_logs`
-history is a follow-up column migration (audits keep working without it).
+response, persisted in `audit_logs` (migration 014), and stored with benchmark
+records.
 
 ### 4.5 Failure handling
 
@@ -507,6 +507,11 @@ Each case has a human label for verdict and for whether Pass 1 was correct.
 
 If the critical-override precision bar is missed, tighten the second-pass rule
 or add a third pass; do not reintroduce a deterministic lock.
+
+A 13-case seed calibration report is stored in
+`docs/CALIBRATION_AUDIT_OVERRIDE.json` (agreement 100% on the seed set, safe
+false-positive rate 0%, all unsafe cases preserved). Expand it to the full
+60-case set when the labeled corpus is ready.
 
 ---
 

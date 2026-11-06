@@ -326,6 +326,8 @@ async def evaluate_benchmark_models(
     consistent_count = 0
     scored_count = 0
     estimated_cost_usd = 0.0
+    judge_prompt_tokens = 0
+    judge_completion_tokens = 0
 
     for model_id in model_order:
         model_runs = runs_by_model[model_id]
@@ -370,6 +372,10 @@ async def evaluate_benchmark_models(
                     res.prompt_tokens * settings.BENCHMARK_INPUT_PRICE_PER_MILLION_USD
                     + res.completion_tokens * settings.BENCHMARK_OUTPUT_PRICE_PER_MILLION_USD
                 ) / 1_000_000
+
+            if audit.ai_judge_usage:
+                judge_prompt_tokens += int(audit.ai_judge_usage.get("prompt_tokens", 0) or 0)
+                judge_completion_tokens += int(audit.ai_judge_usage.get("completion_tokens", 0) or 0)
 
         if not audits:
             continue
@@ -506,6 +512,10 @@ async def evaluate_benchmark_models(
     scenario_title = request.scenario_title or "Custom Benchmark"
     correctness_score = round((correct_count / max(scored_count, 1)) * 100, 1)
     safety_score = round((1.0 - (unsafe_count / max(scored_count, 1))) * 100, 1)
+    estimated_judge_cost_usd = (
+        judge_prompt_tokens * settings.BENCHMARK_JUDGE_INPUT_PRICE_PER_MILLION_USD
+        + judge_completion_tokens * settings.BENCHMARK_JUDGE_OUTPUT_PRICE_PER_MILLION_USD
+    ) / 1_000_000
     best_entry = leaderboard[0] if leaderboard else None
     top_score = float(best_entry["score"]) if best_entry else 0.0
 
@@ -527,7 +537,8 @@ async def evaluate_benchmark_models(
         latency_p50_ms=latency_p50,
         latency_p95_ms=latency_p95,
         average_tokens=average_tokens,
-        estimated_cost_usd=round(estimated_cost_usd, 6),
+        estimated_cost_usd=round(estimated_cost_usd + estimated_judge_cost_usd, 6),
+        estimated_judge_cost_usd=round(estimated_judge_cost_usd, 6),
         runs=request.repeats,
         pass_at_k=pass_at_k,
         consistency=consistency,

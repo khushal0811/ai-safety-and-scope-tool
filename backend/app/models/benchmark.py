@@ -157,6 +157,7 @@ class BenchmarkSummary(BaseModel):
     latency_p95_ms: float = 0.0
     average_tokens: float = 0.0
     estimated_cost_usd: float = 0.0
+    estimated_judge_cost_usd: float = 0.0
     runs: int = 1
     pass_at_k: float = 0.0
     consistency: float = 0.0

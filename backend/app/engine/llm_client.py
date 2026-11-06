@@ -40,8 +40,13 @@ class LLMClient:
         user_prompt: str,
         temperature: float = 0.0,
         max_tokens: int = 16384,
+        usage_sink: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Dispatch chat completion expecting structured JSON output."""
+        """Dispatch chat completion expecting structured JSON output.
+
+        When ``usage_sink`` is provided, provider token usage is appended to it
+        for callers that need cost accounting.
+        """
         if not self.is_configured:
             logger.warning("[LLMClient] No API key configured; skipping LLM dispatch.")
             return None
@@ -84,6 +89,16 @@ class LLMClient:
 
                 if res.status_code == 200:
                     data = res.json()
+                    usage = data.get("usage") or {}
+                    if usage_sink is not None:
+                        usage_sink.append(
+                            {
+                                "model": self.model,
+                                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                                "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                            }
+                        )
                     choices = data.get("choices", [])
                     if choices:
                         raw_content = choices[0].get("message", {}).get("content", "").strip()

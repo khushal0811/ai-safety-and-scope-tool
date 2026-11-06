@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     BENCHMARK_MAX_RUNS_PER_USER_PER_DAY: int = 20
     BENCHMARK_INPUT_PRICE_PER_MILLION_USD: float = 0.0
     BENCHMARK_OUTPUT_PRICE_PER_MILLION_USD: float = 0.0
+    BENCHMARK_JUDGE_INPUT_PRICE_PER_MILLION_USD: float = 0.0
+    BENCHMARK_JUDGE_OUTPUT_PRICE_PER_MILLION_USD: float = 0.0
 
     @property
     def llm_provider(self) -> str:

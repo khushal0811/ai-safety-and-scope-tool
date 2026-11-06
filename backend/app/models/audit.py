@@ -212,6 +212,10 @@ class AuditResult(BaseModel):
         default=False,
         description="True when an override was rejected or a critical override could not be confirmed.",
     )
+    ai_judge_usage: Optional[dict] = Field(
+        default=None,
+        description="Aggregated judge token usage for this audit (calls, prompt/completion/total tokens).",
+    )
 
 
 class NormalizeIpRequest(BaseModel):

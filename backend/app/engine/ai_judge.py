@@ -56,6 +56,9 @@ CORE OBJECTIVES:
      * Explicitly prohibited offensive tools (e.g. `hydra`, `metasploit`, `masscan` when banned).
      * Destructive payloads (`rm -rf /`, formatting disks, fork bombs, `--os-shell`).
      * Piped shell execution (`| bash`, `| sh`).
+     * Privilege escalation (`sudo`, `su`), runtime package installation, and interactive or reverse shells. These are confirmed product policy deviations regardless of whether the RoE text lists them.
+     * Unverifiable or invented CVE references (accuracy findings) unless the evidence proves the CVE is real.
+     * Dynamic or unresolved target expressions stay confirmed warnings unless the evidence proves the bound target is authorized.
 
 2. FALSE-POSITIVE EVIDENCE:
    For every "false_positive" disposition you MUST provide:
@@ -269,6 +272,18 @@ def _evidence_is_verbatim(evidence: str, raw_output: str) -> bool:
     return bool(quote) and quote in (raw_output or "")
 
 
+def _aggregate_usage(usage_sink: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Aggregate per-call provider usage into one audit-level record."""
+    if not usage_sink:
+        return None
+    return {
+        "calls": len(usage_sink),
+        "prompt_tokens": sum(int(item.get("prompt_tokens", 0) or 0) for item in usage_sink),
+        "completion_tokens": sum(int(item.get("completion_tokens", 0) or 0) for item in usage_sink),
+        "total_tokens": sum(int(item.get("total_tokens", 0) or 0) for item in usage_sink),
+    }
+
+
 def _judge_candidates(context_payload: Dict[str, Any]) -> List[ViolationCandidate]:
     return [
         ViolationCandidate(
@@ -289,6 +304,7 @@ async def _confirm_critical_override(
     context_payload: Dict[str, Any],
     candidate: ViolationCandidate,
     disposition: JudgeDisposition,
+    usage_sink: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Second independent AI pass for a CRITICAL false-positive clearance."""
     payload = {
@@ -309,6 +325,7 @@ async def _confirm_critical_override(
             user_prompt=json.dumps(payload, indent=2),
             temperature=0.0,
             max_tokens=4096,
+            usage_sink=usage_sink,
         )
         if not isinstance(response, dict) or "agrees" not in response:
             return {"agrees": False, "reason": "Second pass returned an invalid response.", "confidence": 0.0}
@@ -359,41 +376,50 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
 
     context_payload = build_judge_context(request, pass1_result)
     user_prompt = f"Evaluate this pentest script against the RoE context now:\n\n{json.dumps(context_payload, indent=2)}"
+    usage_sink: List[Dict[str, Any]] = []
 
     try:
-        response_json = await llm_client.generate_json(
-            system_prompt=AI_JUDGE_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            temperature=0.0,
-            max_tokens=16384,
-        )
+        response_json: Optional[Dict[str, Any]] = None
+        judge_resp: Optional[JudgeResponse] = None
+        last_error = "unknown error"
 
-        if not response_json or not isinstance(response_json, dict):
-            logger.warning("[AI Judge] Received invalid JSON; retaining Pass 1 result.")
-            return pass1_result.model_copy(
-                update={
-                    "trust_tier": "deterministic",
-                    "ai_judge_notes": ["[AI Judge] Invalid JSON; Pass 1 result retained."],
-                }
+        for attempt in range(2):
+            attempt_prompt = user_prompt
+            if attempt == 1:
+                attempt_prompt = (
+                    user_prompt
+                    + "\n\nYour previous response was invalid or missing required keys. "
+                    "Reply again with ONLY the required JSON object. Include a non-empty "
+                    '"dispositions" array that adjudicates every candidate id listed above.'
+                )
+
+            response_json = await llm_client.generate_json(
+                system_prompt=AI_JUDGE_SYSTEM_PROMPT,
+                user_prompt=attempt_prompt,
+                temperature=0.0,
+                max_tokens=16384,
+                usage_sink=usage_sink,
             )
 
-        if "dispositions" not in response_json:
-            logger.warning("[AI Judge] Response missing 'dispositions'; retaining Pass 1.")
-            return pass1_result.model_copy(
-                update={
-                    "trust_tier": "deterministic",
-                    "ai_judge_notes": ["[AI Judge] Missing dispositions; Pass 1 result retained."],
-                }
-            )
+            if not isinstance(response_json, dict):
+                last_error = "Invalid JSON"
+                continue
+            if "dispositions" not in response_json:
+                last_error = "Missing dispositions"
+                continue
+            try:
+                judge_resp = JudgeResponse.model_validate(response_json)
+                break
+            except Exception as e:
+                last_error = f"Schema validation failed: {e}"
 
-        try:
-            judge_resp = JudgeResponse.model_validate(response_json)
-        except Exception as e:
-            logger.warning(f"[AI Judge] Schema validation failed, reverting to Pass 1: {e}")
+        if judge_resp is None:
+            logger.warning(f"[AI Judge] {last_error}; retaining Pass 1 result after repair attempt.")
             return pass1_result.model_copy(
                 update={
                     "trust_tier": "deterministic",
-                    "ai_judge_notes": [f"[AI Judge] Schema validation failed; Pass 1 result retained: {e}"],
+                    "ai_judge_notes": [f"[AI Judge] {last_error} after repair attempt; Pass 1 result retained."],
+                    "ai_judge_usage": _aggregate_usage(usage_sink),
                 }
             )
 
@@ -408,6 +434,7 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
                 update={
                     "trust_tier": "deterministic",
                     "ai_judge_notes": ["[AI Judge] Unknown candidate IDs; Pass 1 result retained."],
+                    "ai_judge_usage": _aggregate_usage(usage_sink),
                 }
             )
 
@@ -419,6 +446,7 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
                 update={
                     "trust_tier": "deterministic",
                     "ai_judge_notes": [f"[AI Judge] Missing dispositions for {sorted(missing_ids)}; Pass 1 result retained."],
+                    "ai_judge_usage": _aggregate_usage(usage_sink),
                 }
             )
 
@@ -446,7 +474,9 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
                 continue
 
             if candidate.severity == Severity.CRITICAL:
-                second = await _confirm_critical_override(request, context_payload, candidate, disposition)
+                second = await _confirm_critical_override(
+                    request, context_payload, candidate, disposition, usage_sink
+                )
                 if second.get("agrees"):
                     false_positive_map[candidate.id] = disposition.reason
                     override_log.append(
@@ -723,6 +753,7 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             ai_judge_notes=notes,
             override_log=override_log,
             needs_review=needs_review,
+            ai_judge_usage=_aggregate_usage(usage_sink),
         )
 
     except Exception as e:
@@ -731,5 +762,6 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             update={
                 "trust_tier": "deterministic",
                 "ai_judge_notes": [f"[AI Judge] Triage failed; Pass 1 result retained: {e}"],
+                "ai_judge_usage": _aggregate_usage(usage_sink),
             }
         )

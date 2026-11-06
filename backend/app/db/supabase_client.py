@@ -174,6 +174,8 @@ def save_audit_log(
         "safe_sanitized_command": audit_data.get("safe_sanitized_command"),
         "modifications_made": audit_data.get("modifications_made", []),
         "explanation": audit_data.get("explanation", ""),
+        "override_log": audit_data.get("override_log", []),
+        "needs_review": audit_data.get("needs_review", False),
         "execution_time_ms": execution_time_ms,
         "created_at": created_at,
         "deleted_at": None,
