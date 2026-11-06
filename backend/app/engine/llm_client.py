@@ -39,7 +39,7 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.0,
-        max_tokens: int = 2048,
+        max_tokens: int = 16384,
     ) -> Optional[Dict[str, Any]]:
         """Dispatch chat completion expecting structured JSON output."""
         if not self.is_configured:
@@ -69,6 +69,10 @@ class LLMClient:
         # Only append response_format if not using Claude / Anthropic
         if "claude" not in self.model.lower():
             payload["response_format"] = {"type": "json_object"}
+
+        # DeepSeek thinking: pin reasoning effort to max (OpenRouter reasoning.effort)
+        if "deepseek" in self.model.lower():
+            payload["reasoning"] = {"effort": "max"}
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:

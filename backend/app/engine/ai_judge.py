@@ -223,7 +223,7 @@ async def evaluate_with_ai_judge(request: AuditRequest, pass1_result: AuditResul
             system_prompt=AI_JUDGE_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens=16384,
         )
 
         if not response_json or not isinstance(response_json, dict):
@@ -430,7 +430,7 @@ async def evaluate_with_ai_judge_advisory(
             system_prompt=AI_JUDGE_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens=16384,
         )
 
         if not response_json or not isinstance(response_json, dict):
