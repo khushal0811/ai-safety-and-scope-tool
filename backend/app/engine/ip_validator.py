@@ -64,6 +64,9 @@ class NormalizedTarget:
     format_type: str
     ip_obj: Optional[ipaddress._BaseAddress] = None
     net_obj: Optional[ipaddress._BaseNetwork] = None
+    # True when the raw token interpolates a shell variable/command substitution
+    # that could not be resolved to a literal (warning tier, not a scope breach).
+    is_dynamic: bool = False
 
 
 def parse_octal_or_hex_part(part: str) -> Optional[int]:
