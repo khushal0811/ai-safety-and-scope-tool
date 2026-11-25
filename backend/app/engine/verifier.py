@@ -567,6 +567,25 @@ def evaluate_audit(request: AuditRequest) -> AuditResult:
             )
         )
 
+    # 3b. Collapse duplicate findings. The same target can be extracted from more
+    #     than one command or prose line in a single model response, which would
+    #     otherwise report the same finding several times. Keep the first
+    #     occurrence of each unique finding.
+    seen_finding_keys: Set[Tuple[str, str, str, str]] = set()
+    unique_violations: List[Violation] = []
+    for violation in all_violations:
+        finding_key = (
+            violation.rule,
+            violation.category.value,
+            violation.severity.value,
+            violation.detail,
+        )
+        if finding_key in seen_finding_keys:
+            continue
+        seen_finding_keys.add(finding_key)
+        unique_violations.append(violation)
+    all_violations = unique_violations
+
     # 4. Compute final verdict
     critical_count = sum(1 for v in all_violations if v.severity == Severity.CRITICAL)
 
